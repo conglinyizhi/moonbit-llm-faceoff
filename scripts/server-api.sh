@@ -51,6 +51,17 @@ build_mbtx scripts/mock_openai.mbtx "$MOCK_BIN" || {
   exit 1
 }
 
+# web/out/ 是被 gitignore 的，新鲜 clone（和 CI）里并不存在，而下面「GET / 要
+# 200」那条断言需要它。自己构建，不要指望调用方先跑过 make web——否则就成了
+# 「在我机器上能过」。
+if [ ! -f web/out/index.html ]; then
+  echo "==> 构建页面（GET / 的断言需要它）"
+  bash web/build.sh >/dev/null 2>&1 || {
+    echo "页面构建失败" >&2
+    exit 1
+  }
+fi
+
 # 每个用例都从干净的状态开始
 rm -rf web/runs
 
@@ -75,7 +86,7 @@ web_pid=$!
 for _ in $(seq 1 100); do [ -s "$tmp/web.port" ] && break; sleep 0.2; done
 port=$(tr -d '\n' <"$tmp/web.port")
 [ -n "$port" ] || {
-  fail "服务端没起来"
+  bad "服务端没起来"
   echo "通过 $pass 项，失败 $fail 项"
   exit 1
 }
@@ -84,7 +95,7 @@ port=$(tr -d '\n' <"$tmp/web.port")
 # README 里那段命令一度是错的（写成从仓库根目录启动），结果 /api 通、页面全 404。
 # 这条断言守住「文档里写的启动方式是健康的」。
 if grep -q 'static directory' "$tmp/server.log"; then
-  fail "按文档方式启动却报了静态目录缺失：$(grep 'static directory' "$tmp/server.log")"
+  bad "按文档方式启动却报了静态目录缺失：$(grep 'static directory' "$tmp/server.log")"
 else
   ok "从 web/ 启动，静态目录正常"
 fi
@@ -100,7 +111,7 @@ id=$(curl -s -X POST "http://127.0.0.1:$port/api/runs" \
   -H 'Content-Type: application/json' -d "$body" |
   sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
 [ -n "$id" ] || {
-  fail "没拿到 run id"
+  bad "没拿到 run id"
   echo "通过 $pass 项，失败 $fail 项"
   exit 1
 }

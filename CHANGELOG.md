@@ -47,6 +47,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **CI could not pass.** Two reasons, both the same shape: the state my machine
+  had and a fresh clone does not. `web/out/` is gitignored, so on a runner the
+  API test ran before the page had ever been built — and its `/` assertion needs
+  the page. `scripts/server-api.sh` now builds the page itself when it is
+  missing, and `make ci` builds the page before the API test. Separately, three
+  assertions in that script called `fail` as a function, but `fail` is the
+  integer counter there (the function is `bad`); they only ran on paths that a
+  machine with `web/out/` present never took, so the mistake survived until CI
+  hit it.
 - **The documented way to start the web server was broken.** Both READMEs ran it
   from the repository root; the server resolves `out/`, `runs/` and the case file
   relative to its working directory, so it answered `/api/meta` and then 404'd on

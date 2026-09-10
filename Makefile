@@ -55,7 +55,7 @@ fmt:  ## format, and refresh the generated .mbti
 	cd web && $(MOON) fmt
 	cd web && $(MOON) info
 
-ci: deps check test smoke api web  ## the deterministic suite CI runs
+ci: deps check test smoke web api  ## the deterministic suite CI runs
 	@echo
 	@echo "ci: ok"
 
