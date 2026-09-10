@@ -1,0 +1,119 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "conglinyizhi/llm_client"
+
+import {
+  "DC-Z-lab/moonllm",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub async fn ask(Settings, String) -> String raise ClientError
+
+pub fn build_request(Settings, String) -> @moonllm.ChatRequest
+
+pub fn choice_text(@moonllm.ChatResponse) -> String
+
+pub let default_base_url : String
+
+pub let default_model : String
+
+pub let default_system : String
+
+pub let default_timeout_ms : Int
+
+pub fn make_client(Settings) -> @moonllm.Client
+
+pub fn parse_sse_line(String) -> SseEvent?
+
+pub async fn read_prompt_from_stdin() -> String
+
+pub fn response_text(Json) -> String raise ClientError
+
+pub async fn stream_chat(Settings, String, async (String) -> Unit) -> String raise ClientError
+
+pub async fn stream_parts(Settings, String, async (StreamPart) -> Unit) -> StreamOutcome raise ClientError
+
+pub async fn stream_to_stdout(Settings, String) -> String raise ClientError
+
+pub let usage : String
+
+// Errors
+pub(all) suberror ClientError {
+  Transport(String)
+  Status(code~ : Int, message~ : String)
+  Decode(String)
+}
+pub fn ClientError::to_string(Self) -> String
+
+pub(all) suberror ConfigError {
+  MissingApiKey
+  MissingValue(flag~ : String)
+  BadNumber(flag~ : String, value~ : String)
+  UnknownFlag(flag~ : String)
+}
+pub fn ConfigError::to_string(Self) -> String
+
+// Types and methods
+pub(all) struct Cli {
+  settings : Settings
+  prompt : String?
+  stream : Bool
+  show_help : Bool
+}
+pub fn Cli::parse(Map[String, String], Array[String]) -> Self raise ConfigError
+
+pub(all) struct Settings {
+  mut api_key : String
+  mut base_url : String
+  mut model : String
+  mut system : String
+  mut temperature : Double?
+  mut max_tokens : Int?
+  mut timeout_ms : Int
+} derive(Eq)
+pub fn Settings::chat_completions_url(Self) -> String
+pub fn Settings::equal(Self, Self) -> Bool
+pub fn Settings::from_env(Map[String, String]) -> Self
+pub fn Settings::not_equal(Self, Self) -> Bool
+
+pub(all) enum SseEvent {
+  Content(String)
+  Reasoning(String)
+  Usage(TokenUsage)
+  Finish(String)
+  Done
+  Ignore
+} derive(Eq, @debug.Debug)
+pub fn SseEvent::equal(Self, Self) -> Bool
+pub fn SseEvent::not_equal(Self, Self) -> Bool
+pub fn SseEvent::to_repr(Self) -> @debug.Repr
+
+pub(all) struct StreamOutcome {
+  content : String
+  reasoning : String
+  usage : TokenUsage?
+  finish_reason : String?
+}
+
+pub(all) enum StreamPart {
+  Reasoning(String)
+  Content(String)
+} derive(Eq, @debug.Debug)
+pub fn StreamPart::equal(Self, Self) -> Bool
+pub fn StreamPart::not_equal(Self, Self) -> Bool
+pub fn StreamPart::to_repr(Self) -> @debug.Repr
+
+pub(all) struct TokenUsage {
+  prompt_tokens : Int
+  completion_tokens : Int
+  reasoning_tokens : Int
+} derive(Eq, @debug.Debug)
+pub fn TokenUsage::equal(Self, Self) -> Bool
+pub fn TokenUsage::new(Int, Int, Int) -> Self
+pub fn TokenUsage::not_equal(Self, Self) -> Bool
+pub fn TokenUsage::reasoning_ratio(Self) -> Double
+pub fn TokenUsage::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits
