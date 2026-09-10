@@ -82,8 +82,14 @@ if "$bin" --base-url "http://127.0.0.1:$port/v1" --api-key wrong "hi" >/dev/null
   fail "expected a non-zero exit for a bad key"
 fi
 grep -q "401" err.log || fail "expected a 401 diagnostic, got: $(cat err.log)"
+# The mock echoes the Authorization header back in its 401 body. The key must not
+# survive into anything we print or persist — see redact_key in runner.mbt.
+if grep -q "wrong" err.log; then
+  fail "the API key leaked into the error output: $(cat err.log)"
+fi
+grep -q '\*\*\*' err.log || fail "expected a redacted marker in: $(cat err.log)"
 rm -f err.log
-echo "ok: bad key reports 401"
+echo "ok: bad key reports 401, with the key redacted out of the body"
 
 # 8. the benchmark harness runs against the same mock endpoint
 bench_bin="_build/native/debug/build/cmd/bench/bench.exe"

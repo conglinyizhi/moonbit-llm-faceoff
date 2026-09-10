@@ -28,21 +28,25 @@ every path, and then searching the whole working tree for that key.
 - Run output under `web/runs/<id>/` holds the request payload, the metrics and
   the model output. It does not hold the key.
 
-### Known limitation: an upstream error can echo the key back
+### Upstream error bodies are redacted
 
-The client surfaces a non-2xx response body verbatim as `http <status>: <body>`,
-and that string is persisted to `web/runs/<id>/runs.jsonl` and `data.json` and is
-then served to the browser.
+The client surfaces a non-2xx response body as `http <status>: <body>`, and that
+string is then persisted: it goes to the bench run log, to
+`web/runs/<id>/runs.jsonl` and `data.json`, and out to the browser. Some gateways
+echo the request headers in their error text, so a body like
+`bad authorization: Bearer <key>` would otherwise put the key in all of those
+places.
 
-If your endpoint echoes the request headers in its error text — some gateways do
-— the key lands in those files and on the page. This is reproducible against the
-bundled mock endpoint, which answers a bad key with
-`bad authorization: Bearer <key>`.
+The configured key is therefore stripped from the body at the point it becomes
+part of an error, so it never reaches a log, a run directory or a page:
 
-Until this is redacted, treat anything under `web/runs/` as potentially holding
-a key: check a run directory, or a screenshot of an error, before sharing it.
-Redacting the configured key from error text before it is persisted is the
-intended fix.
+```text
+http 401: {"error":{"message":"bad authorization: Bearer ***"}}
+```
+
+`scripts/smoke.sh` asserts this end to end. The bundled mock endpoint echoes the
+`Authorization` header back on a 401, exactly as a careless gateway would, so
+the test fails if the redaction stops working.
 
 ## Threat model
 

@@ -22,6 +22,22 @@ pub fn ClientError::to_string(self : ClientError) -> String {
 }
 
 ///|
+/// Strip the configured key out of text that came from upstream.
+///
+/// A non-2xx body is surfaced verbatim as `http <code>: <body>`, and that
+/// string is then persisted — written to the bench run log, rendered on the web
+/// page and served by `/api/runs`. A gateway that echoes the request headers in
+/// its error text would therefore put the key in those places. Redacting where
+/// the body enters our error type keeps every downstream consumer clean.
+fn redact_key(text : String, key : String) -> String {
+  if key == "" {
+    text
+  } else {
+    text.replace_all(old=key, new="***")
+  }
+}
+
+///|
 /// Decode a non-streaming chat response body and return its first choice text.
 pub fn response_text(json : Json) -> String raise ClientError {
   let obj = match json {
@@ -71,7 +87,7 @@ pub async fn ask(
   // 错误体也要按 UTF-8 解码；用 to_unchecked_string() 会出乱码
   let text = data.text() catch { _ => "" }
   if response.code < 200 || response.code >= 300 {
-    raise Status(code=response.code, message=text)
+    raise Status(code=response.code, message=redact_key(text, settings.api_key))
   }
   let json = @json.parse(text) catch { err => raise Decode(err.to_string()) }
   response_text(json)
@@ -149,7 +165,7 @@ pub async fn stream_parts(
     // `binary().to_unchecked_string()` here: that reinterprets the raw bytes as
     // UTF-16 code units and turns any non-ASCII error body into mojibake.
     let rest = client.read_all().text() catch { _ => "" }
-    raise Status(code=response.code, message=rest)
+    raise Status(code=response.code, message=redact_key(rest, settings.api_key))
   }
   let content = StringBuilder()
   let reasoning = StringBuilder()
