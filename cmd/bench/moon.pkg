@@ -1,0 +1,13 @@
+import {
+  "conglinyizhi/llm_client" @client,
+  "conglinyizhi/llm_client/bench" @harness,
+  "moonbitlang/async",
+  "moonbitlang/async/fs",
+  "moonbitlang/async/io",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/env",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "+native"

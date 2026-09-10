@@ -1,0 +1,9 @@
+# Example benchmark suite. One case per line; blank lines and lines starting
+# with "#" are ignored. Only "prompt" is required — id, system, max_tokens and
+# temperature override the benchmark options when present.
+{"id": "math-short", "prompt": "计算 17 × 23。只输出数字，不要任何其他文字。"}
+{"id": "math-steps", "prompt": "一个班有 40 人，其中 60% 是女生，女生中有 25% 参加了合唱团。参加合唱团的女生有多少人？先给计算过程，最后单独一行输出答案。"}
+{"id": "fact-zh", "prompt": "用一句话说明什么是航空母舰。"}
+{"id": "instruct-json", "prompt": "把这条信息整理成 JSON：姓名 林汐，职务 旗舰，所属 机动部队。只输出 JSON，不要解释，不要 Markdown 代码块。"}
+{"id": "code-python", "prompt": "用 Python 写一个函数 is_palindrome(s)，判断字符串是否为回文，忽略大小写和空格。只输出代码。"}
+{"id": "writing-zh", "prompt": "用不超过 30 个字描写一场海上暴雨。"}

@@ -1,0 +1,14 @@
+import {
+  "conglinyizhi/llm_client" @client,
+  "moonbitlang/async",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+import {
+  "moonbitlang/core/test",
+} for "test"
+
+supported_targets = "+native"

@@ -1,0 +1,148 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "conglinyizhi/llm_client/bench"
+
+import {
+  "conglinyizhi/llm_client",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn format_run_line(RunResult) -> String
+
+pub fn format_summaries(Array[ModelSummary]) -> String
+
+pub fn metric_names() -> Array[String]
+
+pub fn page_data_json(String, Array[String], Array[RunResult]) -> Json
+
+pub fn parse_cases(String) -> Array[Case] raise CaseError
+
+pub fn parse_results(String) -> Array[RunResult]
+
+pub async fn run_bench(@llm_client.Settings, Array[String], Array[Case], BenchOptions, async (String, String, Int) -> Unit, async (@llm_client.StreamPart) -> Unit, async (RunResult) -> Unit) -> Array[RunResult]
+
+pub async fn run_case(@llm_client.Settings, String, Case, BenchOptions, Int, async (@llm_client.StreamPart) -> Unit) -> RunResult
+
+pub fn summarize(String, Array[RunResult]) -> ModelSummary
+
+pub fn summarize_all(Array[String], Array[RunResult]) -> Array[ModelSummary]
+
+pub let usage : String
+
+// Errors
+pub(all) suberror BenchConfigError {
+  Client(@llm_client.ConfigError)
+  NoModels
+  NoSuite
+  ConflictingSuite
+  BadNumber(flag~ : String, value~ : String)
+  MissingValue(flag~ : String)
+  UnknownFlag(flag~ : String)
+}
+pub fn BenchConfigError::to_string(Self) -> String
+
+pub(all) suberror CaseError {
+  EmptySuite
+  BadCase(line~ : Int, message~ : String)
+  MissingPrompt(line~ : Int)
+}
+pub fn CaseError::to_string(Self) -> String
+
+// Types and methods
+pub(all) struct BenchCli {
+  settings : @llm_client.Settings
+  models : Array[String]
+  cases_path : String?
+  prompt : String?
+  repeats : Int
+  max_tokens : Int
+  temperature : Double?
+  system : String
+  show_cot : Bool
+  show_output : Bool
+  json_path : String?
+  show_help : Bool
+  from_json : String?
+  web_data : String?
+  retry : Int
+  retry_backoff_ms : Int
+  pace_ms : Int
+}
+pub fn BenchCli::parse(Map[String, String], Array[String]) -> Self raise BenchConfigError
+
+pub(all) struct BenchOptions {
+  repeats : Int
+  max_tokens : Int
+  temperature : Double?
+  system : String
+  retry : Int
+  retry_backoff_ms : Int
+  pace_ms : Int
+}
+
+pub(all) struct Case {
+  id : String
+  prompt : String
+  system : String?
+  max_tokens : Int?
+  temperature : Double?
+} derive(Eq, @debug.Debug)
+pub fn Case::equal(Self, Self) -> Bool
+pub fn Case::new(String, String, system? : String, max_tokens? : Int, temperature? : Double) -> Self
+pub fn Case::not_equal(Self, Self) -> Bool
+pub fn Case::to_repr(Self) -> @debug.Repr
+
+pub(all) struct ModelSummary {
+  model : String
+  runs : Int
+  failures : Int
+  truncated : Int
+  retried : Int
+  ttft_ms : Stats?
+  ttfc_ms : Stats?
+  total_ms : Stats?
+  prompt_tokens : Stats?
+  completion_tokens : Stats?
+  reasoning_tokens : Stats?
+  reasoning_ratio : Stats?
+  decode_tok_per_s : Stats?
+  e2e_tok_per_s : Stats?
+}
+
+pub(all) struct RunResult {
+  model : String
+  case_id : String
+  repeat : Int
+  attempts : Int
+  ok : Bool
+  error : String?
+  ttft_ms : Double?
+  ttfc_ms : Double?
+  total_ms : Double
+  prompt_tokens : Int
+  completion_tokens : Int
+  reasoning_tokens : Int
+  content_chars : Int
+  reasoning_chars : Int
+  finish_reason : String?
+  content : String
+  reasoning : String
+}
+pub fn RunResult::decode_tok_per_s(Self) -> Double?
+pub fn RunResult::e2e_tok_per_s(Self) -> Double?
+pub fn RunResult::from_json(Json) -> Self
+pub fn RunResult::reasoning_ratio(Self) -> Double?
+pub fn RunResult::to_json(Self) -> Json
+
+pub(all) struct Stats {
+  n : Int
+  mean : Double
+  median : Double
+  min : Double
+  max : Double
+}
+pub fn Stats::of(Array[Double]) -> Self?
+
+// Type aliases
+
+// Traits
