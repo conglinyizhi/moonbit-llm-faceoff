@@ -65,6 +65,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Makefile`: `make ci` is the definition of passing — deps, type check, unit
+  tests, smoke, page build — and it is the same command locally as in CI, so
+  there is one definition rather than two. `make` lists the targets, and the
+  Makefile sets `MOON_CC` so native builds work without exporting it by hand.
+- `.github/workflows/ci.yml`: runs `make ci` on pushes to `main` and on pull
+  requests. The browser end-to-end test is deliberately not included — it drives
+  a real Chromium and waits in real time, and a timing hiccup failing unrelated
+  pull requests costs more than the coverage is worth. `make e2e` runs it
+  locally.
 - `scripts/web-e2e.sh` now covers two regressions it did not before: eight
   parallel `POST /api/runs` must produce eight distinct ids, and the start
   button must return to a usable state after a run completes.

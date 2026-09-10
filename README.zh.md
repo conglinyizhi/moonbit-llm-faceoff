@@ -396,6 +396,17 @@ println(@bench.format_summaries(summaries))
 
 ## 6. 测试
 
+通过的标准就是 `make ci`：GitHub workflow 跑的就是它，你在本地跑的也是同一个命令。
+各 target 只是脚本的薄封装，两边不会跑偏。
+
+```bash
+make ci        # deps + check + 单测 + smoke + 构建页面
+make e2e       # 再加上浏览器测试——需要 chromium，比较慢
+make           # 列出全部 target
+```
+
+底下实际执行的是：
+
 ```bash
 moon test --target native      # 54 个单测，不联网
 bash scripts/smoke.sh          # 命令行端到端，对着本地假端点
@@ -415,6 +426,8 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 - **并发建运行**：八个并发 `POST /api/runs` 必须拿到八个不同 id。单请求测试在 id 分配还是「读改写计数器」的时候照样能通过——只有两个请求同时到达才会崩，而手动测试恰恰永远不会那么干。
 
 `scripts/web-e2e.sh` 通过 DevTools 协议驱动 Chromium，按真实时间等待。它**刻意不用** `--virtual-time-budget`：虚拟时间会和页面自己的 `fetch` 抢时钟，转储出半加载的页面。用 `CHROME=/path/to/chrome` 可以换别的浏览器。
+
+它也是 CI **唯一不跑**的那一套。驱动真浏览器、按真实时间等待，注定了它是这里最不稳的东西；让一次时序抖动去挂掉无关的 PR，比它带来的覆盖更亏。改页面之前用 `make e2e` 在本地跑一遍。
 
 ---
 

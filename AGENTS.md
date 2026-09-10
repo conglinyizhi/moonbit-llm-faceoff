@@ -7,14 +7,16 @@ describes what it does; this file is what an agent needs before touching it.
 
 ## Commands
 
+`make ci` is the definition of passing — it is what CI runs. `make` alone lists
+the targets, and the Makefile sets `MOON_CC` for you.
+
 ```bash
-export MOON_CC=gcc            # Linux: without it native builds look for /usr/bin/lib.exe
-moon check --target native
+make ci                       # deps, check, tests, smoke, page build
+make e2e                      # add the browser test (real Chromium; slow)
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
 bash scripts/demo.sh          # zero-API-key demo
-bash scripts/web-e2e.sh       # real Chromium; slow, and the flakiest part of the suite
 ```
 
 Every one of those scripts starts its own mock endpoint. You do not need an API

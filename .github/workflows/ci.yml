@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The toolchain under ~/.moon is the slow part to fetch and it changes
+      # only when a dependency is bumped. The modules' own dependencies land in
+      # .mooncakes/ inside the checkout and are fetched fresh each run.
+      - name: Cache the MoonBit toolchain
+        uses: actions/cache@v5
+        with:
+          path: ~/.moon
+          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod', 'web/moon.mod') }}
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Versions
+        run: |
+          moon version --all
+          gcc --version | head -1
+          make --version | head -1
+
+      # `make ci` is deps + check + test + smoke + build the page. It is the
+      # same command anyone can run locally, so there is one definition of
+      # "passing" rather than two.
+      #
+      # scripts/web-e2e.sh is deliberately NOT part of it: it drives a real
+      # Chromium and waits in real time, which makes it the flakiest thing in
+      # the repo. Run it locally with `make e2e`. To run it here too, install a
+      # browser and add a separate job — do not fold it into this one, or a
+      # timing hiccup will start failing unrelated pull requests.
+      - name: make ci
+        run: make ci

@@ -458,6 +458,18 @@ global handle and concurrent writes to it abort the process.
 
 ## 6. Testing
 
+`make ci` is the definition of passing: it is what the GitHub workflow runs,
+and it is the same single command you can run locally. The targets are thin
+wrappers over the scripts, so the two cannot drift.
+
+```bash
+make ci        # deps, check, unit tests, smoke, build the page
+make e2e       # the browser test as well — needs chromium, and it is slow
+make           # list every target
+```
+
+Underneath:
+
 ```bash
 moon test --target native      # 54 unit tests, no network
 bash scripts/smoke.sh          # CLI end-to-end against a local mock endpoint
@@ -488,6 +500,11 @@ implementation:
 real time. It deliberately does **not** use `--virtual-time-budget`: virtual
 time races the page's own `fetch`, and dumps a half-loaded page. Set
 `CHROME=/path/to/chrome` to use another browser binary.
+
+It is also the one suite CI does **not** run. Driving a real browser and waiting
+in real time makes it the flakiest thing here, and a timing hiccup failing
+unrelated pull requests is worse than the coverage is worth. Run it with
+`make e2e` before touching the page.
 
 ---
 
