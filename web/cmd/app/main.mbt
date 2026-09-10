@@ -385,20 +385,24 @@ fn update(
       )
     RetryChanged(text) =>
       ({ ..model, retry: clamp_int(text, 0, 10, model.retry), }, @cmd.none)
-    StartRun => {
-      let payload = RunPayload::of(model)
-      (
-        {
-          ..model,
-          status: "starting",
-          error: None,
-          data: None,
-          done: 0,
-          total: 0,
-        },
-        start_run(payload, emit),
-      )
-    }
+    StartRun =>
+      // 运行中重复点击直接忽略：按钮不再用 disabled 属性挡（见 action_row）
+      if model.status == "running" || model.status == "starting" {
+        (model, @cmd.none)
+      } else {
+        let payload = RunPayload::of(model)
+        (
+          {
+            ..model,
+            status: "starting",
+            error: None,
+            data: None,
+            done: 0,
+            total: 0,
+          },
+          start_run(payload, emit),
+        )
+      }
     RunStarted(result) =>
       match result {
         Ok(response) => {
@@ -768,13 +772,15 @@ fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     (if model.use_prompt { 1 } else { model.selected_cases.length() }) *
     model.repeats
   el("div", "actions", [
-    if running {
-      @html.button(class="primary", disabled=true, [txt("运行中…")])
-    } else {
-      @html.button(class="primary", on_click=emit(Msg::StartRun), [
-        txt("开始评测"),
-      ])
-    },
+    // 刻意不用 `disabled` 属性：从「忙」切回「闲」时 Rabbita 的 vdom diff
+    // 没把 disabled 摘掉（实测跑完一次后 DOM 里仍是
+    // `<button class="primary" disabled="">开始评测</button>`），
+    // 结果不刷新页面就再也点不动。改由 class 表达忙闲，重复点击在 update 里挡。
+    @html.button(
+      class=if running { "primary busy" } else { "primary" },
+      on_click=emit(Msg::StartRun),
+      [txt(if running { "运行中…" } else { "开始评测" })],
+    ),
     el("span", "hint", [txt("约 \{total} 次请求")]),
   ])
 }

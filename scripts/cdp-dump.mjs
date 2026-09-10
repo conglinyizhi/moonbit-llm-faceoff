@@ -6,11 +6,14 @@
 // 真实发生的 fetch 抢时钟，经常在 /api/meta 还没回来时就把 DOM 转储了，
 // 结果是「页面永远停在正在载入」。这里改成真实等待。
 //
-// 用法：node scripts/cdp-dump.mjs <debugPort> <url> <waitMs> [outFile]
+// 用法：node scripts/cdp-dump.mjs <debugPort> <url> <waitMs> [outFile] [shotPng]
+//
+// shotPng 给定时额外存一张整页截图（captureBeyondViewport），
+// 用来做视觉检查——DOM 对了不代表页面长得对。
 
 import { writeFileSync } from "node:fs"
 
-const [port, url, waitMsRaw, outFile] = process.argv.slice(2)
+const [port, url, waitMsRaw, outFile, shotFile] = process.argv.slice(2)
 const waitMs = Number(waitMsRaw || 8000)
 
 const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
@@ -54,6 +57,13 @@ const call = (method, params = {}) =>
 await new Promise((resolve) => (ws.onopen = resolve))
 await call("Runtime.enable")
 await call("Page.enable")
+// 固定视口宽度，否则 headless 默认 800×600，截图会很窄
+await call("Emulation.setDeviceMetricsOverride", {
+  width: 1200,
+  height: 900,
+  deviceScaleFactor: 1,
+  mobile: false,
+})
 await call("Page.navigate", { url })
 await new Promise((resolve) => setTimeout(resolve, waitMs))
 
@@ -67,6 +77,17 @@ if (outFile) {
   writeFileSync(outFile, html)
 } else {
   process.stdout.write(html)
+}
+if (shotFile) {
+  const shot = await call("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: true,
+  })
+  if (shot.result?.data) {
+    writeFileSync(shotFile, Buffer.from(shot.result.data, "base64"))
+  } else {
+    process.stderr.write("screenshot failed\n")
+  }
 }
 if (notes.length > 0) {
   process.stderr.write(notes.join("\n") + "\n")

@@ -194,7 +194,8 @@ table {
     color: $muted;
     font-size: 0.8rem;
     font-weight: 600;
-    text-transform: uppercase;
+    // 这里原本有 text-transform: uppercase。表头里混着模型名（数据），
+    // 大写会把 mock-a 写成 MOCK-A——展示层不该改写数据，所以去掉。
     letter-spacing: 0.04em;
   }
 
@@ -433,6 +434,14 @@ button.primary {
   }
 
   &:disabled {
+    background: $panel-2;
+    border-color: $border;
+    color: $muted;
+    cursor: not-allowed;
+  }
+
+  // 运行中：不用 disabled 属性（理由见 cmd/app 的 action_row），用这个类表达
+  &.busy {
     background: $panel-2;
     border-color: $border;
     color: $muted;

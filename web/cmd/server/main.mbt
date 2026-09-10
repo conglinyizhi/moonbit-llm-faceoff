@@ -49,8 +49,20 @@ async fn main {
   note(
     "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_path}",
   )
-  let server = @http.Server(@socket.Addr::parse("127.0.0.1:\{port}"))
-  note("listening on http://127.0.0.1:\{port}/")
+  let server = @http.Server(
+    @socket.Addr::parse("127.0.0.1:\{port}"),
+    reuse_addr=true,
+  )
+  // 端口写在 stdout 第一行，和 mock 端点的握手方式一致。
+  // 用 LLM_WEB_PORT=0 时由内核分配，调用方读这一行就行——
+  // 硬编码端口在共用机器上会撞车。
+  //
+  // 走 @stdio.stdout 而不是 println：stdout 被重定向到文件时 println 是
+  // 块缓冲的，这一行会卡在缓冲区里出不来，调用方就永远等不到。
+  @stdio.stdout.write(server.addr.port().to_string() + "\n") catch {
+    _ => ()
+  }
+  note("listening on http://127.0.0.1:\{server.addr.port()}/")
   server.run_forever() <| async fn(request, body, conn) {
     handle(config, request, body, conn)
   }
@@ -284,11 +296,10 @@ async fn start_run(
       return
     }
   }
-  let id = next_run_id(config.work_dir)
-  let dir = config.work_dir + "/" + id
-  @fs.mkdir(dir, recursive=true) catch {
-    err => {
-      send_text(conn, 500, "cannot create run dir: " + err.to_string())
+  let (id, dir) = match allocate_run_dir(config.work_dir) {
+    Ok(pair) => pair
+    Err(message) => {
+      send_text(conn, 500, message)
       return
     }
   }
@@ -523,17 +534,40 @@ async fn filter_cases(path : String, ids : Array[String]) -> String {
 }
 
 ///|
-/// 单调递增的运行 id，落在工作目录下的 .counter。
-async fn next_run_id(work_dir : String) -> String {
-  let path = work_dir + "/.counter"
-  let current = @string.parse_int(
-    read_text(path).trim(chars=" \t\r\n").to_owned(),
+/// 原子地分配一个运行目录，返回 `(id, 目录路径)`。
+///
+/// **分配动作就是 `mkdir` 本身**：建已存在的目录会失败（`File exists`），
+/// 所以两个并发请求不可能拿到同一个 id。.counter 只是个起点提示，
+/// 免得每次都从 1 开始扫。
+///
+/// 之前是「读 .counter → 加一 → 写回 → mkdir recursive」，并发 POST 会同时
+/// 读到同一个值、拿到同一个 id，然后双方往同一目录里写，互相覆盖。
+async fn allocate_run_dir(
+  work_dir : String,
+) -> Result[(String, String), String] {
+  let counter_path = work_dir + "/.counter"
+  let mut n = @string.parse_int(
+    read_text(counter_path).trim(chars=" \t\r\n").to_owned(),
   ) catch {
     _ => 0
   }
-  let next = current + 1
-  write_text(path, next.to_string())
-  "run-\{next}"
+  for attempt = 0; attempt < 1000; attempt = attempt + 1 {
+    n = n + 1
+    let id = "run-\{n}"
+    let dir = work_dir + "/" + id
+    // 非 recursive：目录已存在时抛错，这就是我们要的原子性
+    let created = try {
+      @fs.mkdir(dir)
+      true
+    } catch {
+      _ => false
+    }
+    if created {
+      write_text(counter_path, n.to_string())
+      return Ok((id, dir))
+    }
+  }
+  Err("could not allocate a run directory under " + work_dir)
 }
 
 ///|
@@ -709,9 +743,20 @@ fn number_of(
 }
 
 ///|
+/// stderr 写入必须串行化。
+///
+/// `@stdio.stderr` 是全局唯一的 `IoHandle`，而 `Server::run_forever` 给每个
+/// 连接 `spawn_bg`：两个请求同时写一行日志，第二个会命中内部 guard 直接
+/// abort（SIGABRT / 核心转储）。并发 POST 一压就复现，栈顶是
+/// `Writer for stdio.Output::write_once` → 本函数。
+let log_lock : @semaphore.Semaphore = @semaphore.Semaphore(1)
+
+///|
 /// 诊断与启动信息走 stderr：stdout 被重定向到文件时是块缓冲的，
 /// 进程被 kill 会整块丢掉，排查时看不到任何东西。
 async fn note(message : String) -> Unit {
+  log_lock.acquire()
+  defer log_lock.release()
   @stdio.stderr.write(message + "\n") catch {
     _ => ()
   }

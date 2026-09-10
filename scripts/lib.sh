@@ -14,8 +14,12 @@
 build_mbtx() {
   local src="$1" out="$2"
   moon build --target native "$src" >/dev/null || return 1
-  cp scripts/_build/native/debug/build/single/single.exe "$out" || return 1
-  chmod +x "$out"
+  # 先复制到临时名再 mv：直接 cp 覆盖一个正在运行的可执行文件会
+  # "Text file busy"（上一次测试的进程还没退干净时就会撞上）。
+  # rename 是原子的，运行中的进程继续用旧 inode，互不影响。
+  cp scripts/_build/native/debug/build/single/single.exe "$out.tmp" || return 1
+  chmod +x "$out.tmp"
+  mv -f "$out.tmp" "$out"
 }
 
 # 假端点与检查器的固定落点（都在已被 gitignore 的 scripts/_build/ 下）
