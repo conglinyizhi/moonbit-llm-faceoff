@@ -1,0 +1,110 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "conglinyizhi/llm_client_web/shared"
+
+import {
+  "moonbit-community/rabbita/html",
+}
+
+// Values
+pub fn answer_block(Answer) -> @html.Html
+
+pub fn answers(PageData) -> @html.Html
+
+pub fn array_field(Map[String, Json], String) -> Array[Json]
+
+pub fn as_object(Json) -> Map[String, Json]
+
+pub fn case_block(CaseBlock) -> @html.Html
+
+pub fn comparison(PageData) -> @html.Html
+
+pub fn el(String, String, Array[@html.Html]) -> @html.Html
+
+pub fn empty_page_data() -> PageData
+
+pub fn fmt_number(Double) -> String
+
+pub fn format_value(Double?, String) -> String
+
+pub fn int_field(Map[String, Json], String, Int) -> Int
+
+pub fn metric_rows() -> Array[(String, String, String)]
+
+pub fn model_cards(PageData) -> @html.Html
+
+pub fn number_field(Map[String, Json], String, Double) -> Double
+
+pub fn parse_page_data(String) -> Result[PageData, String]
+
+pub fn parse_page_data_json(Json) -> Result[PageData, String]
+
+pub fn plain(String, Array[@html.Html]) -> @html.Html
+
+pub fn results_section(PageData) -> @html.Html
+
+pub fn stat(String, MetricStats?, String) -> @html.Html
+
+pub fn stat_list(ModelSummary) -> @html.Html
+
+pub fn string_field(Map[String, Json], String, String) -> String
+
+pub fn summary_card(ModelSummary) -> @html.Html
+
+pub fn txt(String) -> @html.Html
+
+// Errors
+
+// Types and methods
+pub(all) struct Answer {
+  model : String
+  ok : Bool
+  total_ms : Double
+  completion_tokens : Int
+  reasoning_tokens : Int
+  content : String
+  error : String?
+} derive(Eq)
+pub fn Answer::equal(Self, Self) -> Bool
+pub fn Answer::not_equal(Self, Self) -> Bool
+
+pub(all) struct CaseBlock {
+  id : String
+  answers : Array[Answer]
+} derive(Eq)
+pub fn CaseBlock::equal(Self, Self) -> Bool
+pub fn CaseBlock::not_equal(Self, Self) -> Bool
+
+pub(all) struct MetricStats {
+  n : Int
+  median : Double
+  min : Double
+  max : Double
+} derive(Eq)
+pub fn MetricStats::equal(Self, Self) -> Bool
+pub fn MetricStats::not_equal(Self, Self) -> Bool
+
+pub(all) struct ModelSummary {
+  model : String
+  runs : Int
+  failures : Int
+  truncated : Int
+  retried : Int
+  metrics : Map[String, MetricStats]
+} derive(Eq)
+pub fn ModelSummary::equal(Self, Self) -> Bool
+pub fn ModelSummary::metric(Self, String) -> Double?
+pub fn ModelSummary::metric_stats(Self, String) -> MetricStats?
+pub fn ModelSummary::not_equal(Self, Self) -> Bool
+
+pub(all) struct PageData {
+  source : String
+  models : Array[String]
+  summaries : Array[ModelSummary]
+  cases : Array[CaseBlock]
+} derive(Eq)
+pub fn PageData::equal(Self, Self) -> Bool
+pub fn PageData::not_equal(Self, Self) -> Bool
+
+// Type aliases
+
+// Traits

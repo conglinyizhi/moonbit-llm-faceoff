@@ -1,0 +1,17 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "conglinyizhi/llm_client_web/cmd/server"
+
+// Values
+
+// Errors
+
+// Types and methods
+type CaseEntry
+
+type RunRequest
+
+type ServerConfig
+
+// Type aliases
+
+// Traits

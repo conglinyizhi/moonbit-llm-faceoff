@@ -1,0 +1,473 @@
+// llm_client 前端页样式。由 precss 编译成 out/site.css。
+// 使用 SCSS 变量 / 嵌套 / & / @mixin / @media —— 顺便当 precss 的一次真实用例。
+
+$bg: #0f1216;
+$panel: #161b22;
+$panel-2: #1c232c;
+$border: #2a323d;
+$title: #e6edf3;
+$text: #b6c2cf;
+$muted: #7d8896;
+$accent: #58a6ff;
+$accent-2: #3fb950;
+$warn: #d29922;
+$danger: #f85149;
+
+@mixin card($pad: 1.1rem) {
+  background: $panel;
+  border: 1px solid $border;
+  border-radius: 0.5rem;
+  padding: $pad;
+}
+
+@mixin value-text {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body.page {
+  margin: 0;
+  background: $bg;
+  color: $text;
+  font-family: system-ui, -apple-system, "Noto Sans SC", "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.wrap {
+  width: min(100% - 2rem, 1100px);
+  margin: 0 auto;
+}
+
+.site-header {
+  border-bottom: 1px solid $border;
+  background: linear-gradient(180deg, rgba(88, 166, 255, 0.06), transparent);
+
+  .site-header-inner {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.1rem 0;
+  }
+
+  .site-logo {
+    color: $title;
+    font-weight: 700;
+    font-size: 1.15rem;
+    letter-spacing: 0.02em;
+  }
+
+  .site-meta {
+    color: $muted;
+    font-size: 0.85rem;
+  }
+}
+
+.hero {
+  padding: 2.4rem 0 1.2rem;
+
+  h1 {
+    margin: 0 0 0.5rem;
+    color: $title;
+    font-size: 1.9rem;
+    letter-spacing: -0.02em;
+  }
+
+  p {
+    margin: 0;
+    max-width: 46rem;
+    color: $text;
+  }
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  gap: 1rem;
+  margin: 1.2rem 0 2rem;
+}
+
+.card {
+  @include card;
+
+  .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.9rem;
+
+    h2 {
+      margin: 0;
+      color: $title;
+      font-size: 1.1rem;
+    }
+  }
+
+  .badge {
+    border: 1px solid $border;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    color: $muted;
+    font-size: 0.75rem;
+  }
+
+  .badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .badge-ok {
+    color: $accent-2;
+    border-color: rgba(63, 185, 80, 0.4);
+  }
+
+  .badge-warn {
+    color: $warn;
+    border-color: rgba(210, 153, 34, 0.4);
+  }
+}
+
+.stat-list {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  margin: 0;
+
+  dt {
+    color: $muted;
+    font-size: 0.85rem;
+  }
+
+  dd {
+    @include value-text;
+    margin: 0;
+    color: $title;
+    text-align: right;
+  }
+
+  .stat-range {
+    color: $muted;
+    font-size: 0.82rem;
+  }
+}
+
+.section-title {
+  margin: 2.4rem 0 0.8rem;
+  color: $title;
+  font-size: 1.15rem;
+
+  span {
+    color: $muted;
+    font-size: 0.85rem;
+    font-weight: 400;
+    margin-left: 0.6rem;
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  @include card(0);
+
+  th,
+  td {
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid $border;
+    text-align: right;
+  }
+
+  th:first-child,
+  td:first-child {
+    text-align: left;
+    color: $text;
+  }
+
+  thead th {
+    color: $muted;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  tbody td {
+    @include value-text;
+    color: $title;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  tbody tr:hover td {
+    background: $panel-2;
+  }
+
+  .num-bad {
+    color: $warn;
+  }
+
+  .num-good {
+    color: $accent-2;
+  }
+}
+
+.cases {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.case {
+  @include card;
+
+  .case-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+
+    h3 {
+      margin: 0;
+      color: $title;
+      font-size: 1rem;
+    }
+  }
+
+  .case-prompt {
+    margin: 0 0 0.8rem;
+    color: $muted;
+    font-size: 0.88rem;
+  }
+}
+
+.answer {
+  border-left: 2px solid $border;
+  padding-left: 0.8rem;
+  margin-bottom: 0.7rem;
+
+  .answer-head {
+    color: $muted;
+    font-size: 0.78rem;
+    margin-bottom: 0.25rem;
+  }
+
+  pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: $text;
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+    font-size: 0.85rem;
+  }
+}
+
+.failed {
+  color: $danger;
+}
+
+.site-footer {
+  border-top: 1px solid $border;
+  margin-top: 2rem;
+  padding: 1.2rem 0 2.4rem;
+  color: $muted;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  .hero h1 {
+    font-size: 1.5rem;
+  }
+
+  .stat-list {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-list dd {
+    text-align: left;
+  }
+
+  table th,
+  table td {
+    padding: 0.5rem 0.55rem;
+    font-size: 0.85rem;
+  }
+}
+
+// ---------------------------------------------------------------- 交互页
+
+.app {
+  min-height: 100vh;
+}
+
+.picker {
+  border: 1px solid $border;
+  border-radius: 0.5rem;
+  padding: 0.9rem 1rem 1rem;
+  margin: 0 0 1rem;
+
+  legend {
+    padding: 0 0.4rem;
+    color: $muted;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+}
+
+.picker-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.2rem;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: $text;
+  cursor: pointer;
+
+  input {
+    accent-color: $accent;
+    cursor: pointer;
+  }
+}
+
+.link-btn {
+  background: none;
+  border: 0;
+  color: $accent;
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0 0.3rem;
+}
+
+.prompt-input {
+  width: 100%;
+  margin-top: 0.7rem;
+  background: $bg;
+  border: 1px solid $border;
+  border-radius: 0.35rem;
+  color: $title;
+  font-family: inherit;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+
+  &::placeholder {
+    color: $muted;
+  }
+
+  &:focus {
+    border-color: $accent;
+    outline: none;
+  }
+}
+
+.params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+
+  label {
+    color: $muted;
+    font-size: 0.8rem;
+  }
+
+  input {
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 0.35rem;
+    color: $title;
+    font-family: inherit;
+    font-size: 0.9rem;
+    padding: 0.45rem 0.6rem;
+
+    &:focus {
+      border-color: $accent;
+      outline: none;
+    }
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 1.6rem;
+
+  .hint {
+    color: $muted;
+    font-size: 0.85rem;
+  }
+}
+
+button.primary {
+  background: $accent;
+  border: 1px solid $accent;
+  border-radius: 0.35rem;
+  color: #04121f;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.55rem 1.4rem;
+
+  &:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  &:disabled {
+    background: $panel-2;
+    border-color: $border;
+    color: $muted;
+    cursor: not-allowed;
+  }
+}
+
+.progress-card {
+  @include card;
+  margin-bottom: 1.6rem;
+
+  .progress-head {
+    color: $title;
+    font-size: 0.9rem;
+    margin-bottom: 0.6rem;
+  }
+
+  pre {
+    margin: 0.8rem 0 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: $danger;
+    font-size: 0.82rem;
+  }
+}
+
+.progress-bar {
+  background: $bg;
+  border-radius: 999px;
+  height: 0.4rem;
+  overflow: hidden;
+}
+
+.progress-fill {
+  background: $accent;
+  height: 100%;
+  transition: width 0.3s ease;
+}
