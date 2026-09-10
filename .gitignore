@@ -1,0 +1,16 @@
+.DS_Store
+_build/
+target/
+target
+.mooncakes/
+.moonagent/
+
+# 前端页构建产物
+web/out/
+web/data.json
+web/runs/
+scripts/_build/
+
+# mktemp -d -p . 留下的临时目录（测试脚本调试时会生成）
+/tmp.*
+/web/tmp.*
