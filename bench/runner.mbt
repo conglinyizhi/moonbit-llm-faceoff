@@ -229,22 +229,22 @@ priv struct Ticker {
 ///|
 /// Whether a failed attempt is worth repeating. A rate limit or a server error
 /// is; a bad request or an undecodable body is not.
-fn is_retryable(err : @client.ClientError) -> Bool {
+fn is_retryable(err : @faceoff.ClientError) -> Bool {
   match err {
-    @client.ClientError::Status(code~, ..) => code == 429 || code >= 500
-    @client.ClientError::Transport(_) => true
-    @client.ClientError::Decode(_) => false
+    @faceoff.ClientError::Status(code~, ..) => code == 429 || code >= 500
+    @faceoff.ClientError::Transport(_) => true
+    @faceoff.ClientError::Decode(_) => false
   }
 }
 
 ///|
 /// Settings for one attempt, with the case overriding the benchmark defaults.
 fn settings_for(
-  base : @client.Settings,
+  base : @faceoff.Settings,
   model : String,
   case : Case,
   options : BenchOptions,
-) -> @client.Settings {
+) -> @faceoff.Settings {
   {
     api_key: base.api_key,
     base_url: base.base_url,
@@ -276,12 +276,12 @@ fn settings_for(
 /// latency of the attempt that actually produced tokens rather than the time
 /// spent sleeping.
 pub async fn run_case(
-  base : @client.Settings,
+  base : @faceoff.Settings,
   model : String,
   case : Case,
   options : BenchOptions,
   repeat : Int,
-  on_part : async (@client.StreamPart) -> Unit,
+  on_part : async (@faceoff.StreamPart) -> Unit,
 ) -> RunResult {
   let settings = settings_for(base, model, case, options)
   let mut attempts = 0
@@ -295,7 +295,7 @@ pub async fn run_case(
       reasoning_chars: 0,
     }
     let start = @env.now()
-    let outcome = @client.stream_parts(settings, case.prompt, async fn(part) {
+    let outcome = @faceoff.stream_parts(settings, case.prompt, async fn(part) {
       let elapsed = elapsed_ms(start)
       match part {
         Reasoning(text) => {
@@ -342,7 +342,7 @@ pub async fn run_case(
     }
     let usage = match outcome.usage {
       Some(usage) => usage
-      None => @client.TokenUsage::new(0, 0, 0)
+      None => @faceoff.TokenUsage::new(0, 0, 0)
     }
     return {
       model,
@@ -420,12 +420,12 @@ fn failure_result(
 /// deliberate: comparing two models only means something when they are not
 /// competing for the same connection.
 pub async fn run_bench(
-  base : @client.Settings,
+  base : @faceoff.Settings,
   models : Array[String],
   cases : Array[Case],
   options : BenchOptions,
   on_start : async (String, String, Int) -> Unit,
-  on_part : async (@client.StreamPart) -> Unit,
+  on_part : async (@faceoff.StreamPart) -> Unit,
   on_result : async (RunResult) -> Unit,
 ) -> Array[RunResult] {
   let results : Array[RunResult] = []

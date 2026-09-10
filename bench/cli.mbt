@@ -2,7 +2,7 @@
 /// Errors raised while parsing benchmark arguments.
 pub(all) suberror BenchConfigError {
   /// A client-level setting was bad; carries the original error.
-  Client(@client.ConfigError)
+  Client(@faceoff.ConfigError)
   /// No models were named.
   NoModels
   /// Neither `--cases` nor `--prompt` was given.
@@ -66,14 +66,14 @@ pub let usage : String =
   #|      --json <file>     write every raw attempt as JSON Lines
   #|      --web-data <f>    write the page data document (JSON) for the web module
   #|
-  #|endpoint (also read from the environment, see llm_client):
+  #|endpoint (also read from the environment, see faceoff):
   #|      --base-url <url>  --api-key <key>  --timeout-ms <n>  --no-key
   #|  -h, --help            show this help
 
 ///|
 /// A parsed benchmark command line.
 pub(all) struct BenchCli {
-  settings : @client.Settings
+  settings : @faceoff.Settings
   models : Array[String]
   cases_path : String?
   prompt : String?
@@ -98,7 +98,7 @@ pub fn BenchCli::parse(
   env : Map[String, String],
   argv : Array[String],
 ) -> BenchCli raise BenchConfigError {
-  let settings = @client.Settings::from_env(env)
+  let settings = @faceoff.Settings::from_env(env)
   let models : Array[String] = []
   let mut cases_path : String? = None
   let mut prompt : String? = None
@@ -232,11 +232,11 @@ pub fn BenchCli::parse(
       raise BadNumber(flag="--retry", value=retry.to_string())
     }
     if settings.api_key == "" && !no_key {
-      raise Client(@client.ConfigError::MissingApiKey)
+      raise Client(@faceoff.ConfigError::MissingApiKey)
     }
   }
   if settings.base_url == "" {
-    settings.base_url = @client.default_base_url
+    settings.base_url = @faceoff.default_base_url
   }
   {
     settings,

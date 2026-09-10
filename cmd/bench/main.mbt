@@ -86,11 +86,11 @@ async fn main {
         async fn(part) {
           if cli.show_cot {
             match part {
-              @client.Reasoning(text) =>
+              @faceoff.Reasoning(text) =>
                 @stdio.stderr.write(text) catch {
                   _ => ()
                 }
-              @client.Content(_) => ()
+              @faceoff.Content(_) => ()
             }
           }
         },

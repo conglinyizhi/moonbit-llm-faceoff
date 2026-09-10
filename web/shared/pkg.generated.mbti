@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "conglinyizhi/llm_client_web/shared"
+package "conglinyizhi/moonbit-llm-faceoff-web/shared"
 
 import {
   "moonbit-community/rabbita/html",

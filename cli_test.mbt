@@ -1,14 +1,10 @@
 ///|
-fn parse_with_key(
-  argv : Array[String],
-) -> @llm_client.Cli raise @llm_client.ConfigError {
-  @llm_client.Cli::parse({ "MOONLLM_API_KEY": "k" }, argv)
+fn parse_with_key(argv : Array[String]) -> Cli raise ConfigError {
+  Cli::parse({ "MOONLLM_API_KEY": "k" }, argv)
 }
 
 ///|
-fn parse_result(
-  argv : Array[String],
-) -> Result[@llm_client.Cli, @llm_client.ConfigError] {
+fn parse_result(argv : Array[String]) -> Result[Cli, ConfigError] {
   Ok(parse_with_key(argv)) catch {
     err => Err(err)
   }
@@ -58,19 +54,15 @@ test "no prompt means stdin" {
 ///|
 test "missing api key is an error unless --no-key" {
   let env : Map[String, String] = Map([])
-  assert_true(
-    (Ok(@llm_client.Cli::parse(env, ["hi"])) catch { err => Err(err) })
-    is Err(_),
-  )
-  let cli = @llm_client.Cli::parse(env, ["--no-key", "hi"])
+  assert_true((Ok(Cli::parse(env, ["hi"])) catch { err => Err(err) }) is Err(_))
+  let cli = Cli::parse(env, ["--no-key", "hi"])
   assert_eq(cli.settings.api_key, "")
 }
 
 ///|
 test "unknown flag is rejected" {
   match parse_result(["--nope"]) {
-    Err(@llm_client.ConfigError::UnknownFlag(flag~)) =>
-      assert_eq(flag, "--nope")
+    Err(ConfigError::UnknownFlag(flag~)) => assert_eq(flag, "--nope")
     _ => fail("expected UnknownFlag")
   }
 }
@@ -78,8 +70,7 @@ test "unknown flag is rejected" {
 ///|
 test "flag without value is rejected" {
   match parse_result(["--model"]) {
-    Err(@llm_client.ConfigError::MissingValue(flag~)) =>
-      assert_eq(flag, "--model")
+    Err(ConfigError::MissingValue(flag~)) => assert_eq(flag, "--model")
     _ => fail("expected MissingValue")
   }
 }
@@ -87,7 +78,7 @@ test "flag without value is rejected" {
 ///|
 test "non-numeric value is rejected" {
   match parse_result(["--temperature", "warm"]) {
-    Err(@llm_client.ConfigError::BadNumber(flag~, value~)) => {
+    Err(ConfigError::BadNumber(flag~, value~)) => {
       assert_eq(flag, "--temperature")
       assert_eq(value, "warm")
     }

@@ -38,7 +38,7 @@ fi
 
 echo "mock server on 127.0.0.1:$port"
 moon build --target native >/dev/null
-bin="_build/native/debug/build/cmd/main/main.exe"
+bin="_build/native/debug/build/cmd/faceoff/faceoff.exe"
 [ -x "$bin" ] || { echo "missing $bin" >&2; exit 1; }
 
 fail() {

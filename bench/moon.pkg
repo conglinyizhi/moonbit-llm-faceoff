@@ -1,5 +1,5 @@
 import {
-  "conglinyizhi/llm_client" @client,
+  "conglinyizhi/moonbit-llm-faceoff" @faceoff,
   "moonbitlang/async",
   "moonbitlang/core/debug",
   "moonbitlang/core/env",

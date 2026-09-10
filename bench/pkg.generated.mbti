@@ -1,8 +1,8 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "conglinyizhi/llm_client/bench"
+package "conglinyizhi/moonbit-llm-faceoff/bench"
 
 import {
-  "conglinyizhi/llm_client",
+  "conglinyizhi/moonbit-llm-faceoff",
   "moonbitlang/core/debug",
 }
 
@@ -19,9 +19,9 @@ pub fn parse_cases(String) -> Array[Case] raise CaseError
 
 pub fn parse_results(String) -> Array[RunResult]
 
-pub async fn run_bench(@llm_client.Settings, Array[String], Array[Case], BenchOptions, async (String, String, Int) -> Unit, async (@llm_client.StreamPart) -> Unit, async (RunResult) -> Unit) -> Array[RunResult]
+pub async fn run_bench(@moonbit-llm-faceoff.Settings, Array[String], Array[Case], BenchOptions, async (String, String, Int) -> Unit, async (@moonbit-llm-faceoff.StreamPart) -> Unit, async (RunResult) -> Unit) -> Array[RunResult]
 
-pub async fn run_case(@llm_client.Settings, String, Case, BenchOptions, Int, async (@llm_client.StreamPart) -> Unit) -> RunResult
+pub async fn run_case(@moonbit-llm-faceoff.Settings, String, Case, BenchOptions, Int, async (@moonbit-llm-faceoff.StreamPart) -> Unit) -> RunResult
 
 pub fn summarize(String, Array[RunResult]) -> ModelSummary
 
@@ -31,7 +31,7 @@ pub let usage : String
 
 // Errors
 pub(all) suberror BenchConfigError {
-  Client(@llm_client.ConfigError)
+  Client(@moonbit-llm-faceoff.ConfigError)
   NoModels
   NoSuite
   ConflictingSuite
@@ -50,7 +50,7 @@ pub fn CaseError::to_string(Self) -> String
 
 // Types and methods
 pub(all) struct BenchCli {
-  settings : @llm_client.Settings
+  settings : @moonbit-llm-faceoff.Settings
   models : Array[String]
   cases_path : String?
   prompt : String?

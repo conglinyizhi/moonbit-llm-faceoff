@@ -1,4 +1,4 @@
-# llm_client
+# faceoff
 
 [English](README.md) · **中文**
 
@@ -8,7 +8,7 @@
 
 | 可执行文件 | 作用 | 源码 |
 | --- | --- | --- |
-| `llm_client` | 问一句，一次性或流式返回 | `cmd/main` |
+| `faceoff` | 问一句，一次性或流式返回 | `cmd/faceoff` |
 | `bench` | 同一套用例跑多个模型，出对比报告 | `cmd/bench` |
 | `web server` | 网页版：勾模型/调参数/跑评测/看结果 | `web/cmd/server` |
 
@@ -52,7 +52,7 @@ moon version
 ### 2. 先跑起来——不需要 API key
 
 ```bash
-git clone <本仓库> && cd llm_client
+git clone <本仓库> && cd moonbit-llm-faceoff
 bash scripts/demo.sh
 ```
 
@@ -81,7 +81,7 @@ export MOONLLM_BASE_URL="https://api.deepseek.com/v1"   # 任何 OpenAI 兼容�
 export MOONLLM_MODEL="deepseek-chat"
 export MOONLLM_API_KEY="sk-..."
 
-client=./_build/native/debug/build/cmd/main/main.exe
+client=./_build/native/debug/build/cmd/faceoff/faceoff.exe
 $client "用一句话说明什么是航空母舰"
 $client --stream "写一首关于侧风的短诗"
 ```
@@ -133,13 +133,13 @@ $client --stream "写一首关于侧风的短诗"
 
 ```bash
 # 一次性
-llm_client "用一句话说明什么是航空母舰"
+faceoff "用一句话说明什么是航空母舰"
 
 # 流式，碎片到达即打印
-llm_client --stream "写一首关于侧风的短诗"
+faceoff --stream "写一首关于侧风的短诗"
 
 # 从 stdin 读 prompt
-echo "总结一下这段日志" | llm_client --stream
+echo "总结一下这段日志" | faceoff --stream
 ```
 
 ### 参数
@@ -171,7 +171,7 @@ echo "总结一下这段日志" | llm_client --stream
 命令行参数优先于环境变量。错误写 stderr 并以非零码退出，可以放心放进管道：
 
 ```
-$ llm_client --api-key wrong "hi"
+$ faceoff --api-key wrong "hi"
 error: http 401: {"error":{"message":"invalid api key"}}
 ```
 
@@ -336,13 +336,21 @@ bash web/build.sh path/to/other-runs.jsonl   # → web/out/report.html
 
 `bench` 包可以单独用，客户端也是。
 
+在自己的 `moon.pkg` 里要写显式别名——模块路径末段是 `faceoff`，但带连字符的末段不能当默认别名用：
+
+```text
+import {
+  "conglinyizhi/moonbit-llm-faceoff" @faceoff,
+}
+```
+
 ```moonbit
 // 一次性
-let settings = @llm_client.Settings::from_env(env)
-let reply = @llm_client.ask(settings, "用一句话说明什么是航空母舰")
+let settings = @faceoff.Settings::from_env(env)
+let reply = @faceoff.ask(settings, "用一句话说明什么是航空母舰")
 
 // 流式，思考碎片和正文碎片分开
-let outcome = @llm_client.stream_parts(settings, prompt, async fn(part) {
+let outcome = @faceoff.stream_parts(settings, prompt, async fn(part) {
   match part {
     Content(text) => handle_answer(text)
     Reasoning(thought) => handle_thought(thought)
@@ -422,7 +430,7 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 
 ```text
 moon.pkg            库包的 import 声明（仅 native）
-llm_client.mbt      包文档
+faceoff.mbt         包文档
 settings.mbt        Settings + ConfigError，环境变量解析
 cli.mbt             Cli::parse，用法文本
 api.mbt             请求构造、响应/SSE 解析
@@ -437,7 +445,7 @@ bench/              测试工具
   pagedata.mbt      网页模块消费的数据文档
   cli.mbt           bench 参数解析
 
-cmd/main/           llm_client 可执行文件
+cmd/faceoff/          faceoff 可执行文件
 cmd/bench/          bench 可执行文件
 
 web/                前端（独立模块：Rabbita + precss）
@@ -472,4 +480,4 @@ docs/               选型调查、基准复盘
 
 ## 许可证
 
-Apache-2.0，见 [`LICENSE`](LICENSE)。
+MIT，见 [`LICENSE`](LICENSE)。

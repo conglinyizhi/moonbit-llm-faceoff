@@ -9,21 +9,21 @@
 //   "moonbitlang/x@0.4.6",
 // }
 
-name = "conglinyizhi/llm_client"
+name = "conglinyizhi/moonbit-llm-faceoff"
 
 version = "0.1.0"
 
 readme = "README.md"
 
-repository = ""
+repository = "https://github.com/conglinyizhi/moonbit-llm-faceoff"
 
-license = "Apache-2.0"
+license = "MIT"
 
-keywords = [ ]
+keywords = [ "moonbit", "llm", "openai", "benchmark", "comparison" ]
 
 preferred_target = "native"
 
-description = ""
+description = "OpenAI-compatible LLM client plus a harness that compares multiple models on the same case set, written in MoonBit."
 
 import {
   "moonbitlang/async@0.20.1",

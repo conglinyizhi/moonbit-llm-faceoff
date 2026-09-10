@@ -580,7 +580,7 @@ fn header(model : AppModel) -> @html.Html {
   }
   el("header", "site-header", [
     el("div", "wrap site-header-inner", [
-      el("div", "site-logo", [txt("llm_client")]),
+      el("div", "site-logo", [txt("faceoff")]),
       el("div", "site-meta", [txt(meta_line)]),
     ]),
   ])

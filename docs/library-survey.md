@@ -11,7 +11,7 @@ under-supplied. The real work is picking one and knowing where it stops.
 > still the useful part. But the package it settled on was dropped once two
 > things became clear: its streaming entry point could not be used anyway (see
 > the gaps section), and a single-file client turned out to be small enough that
-> the library was not earning its place. `llm_client` now depends on nothing but
+> the library was not earning its place. `faceoff` now depends on nothing but
 > `moonbitlang/async`. Read the rest as a record of the investigation, not as the
 > current dependency list.
 

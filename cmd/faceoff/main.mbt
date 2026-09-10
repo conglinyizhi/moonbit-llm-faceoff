@@ -18,10 +18,10 @@ async fn main {
   for i = 1; i < all_args.length(); i = i + 1 {
     argv.push(all_args[i])
   }
-  let cli = @llm_client.Cli::parse(env, argv) catch {
+  let cli = @client.Cli::parse(env, argv) catch {
     err => {
       report_error(err.to_string())
-      @stdio.stderr.write("try `llm_client --help`\n") catch {
+      @stdio.stderr.write("try `faceoff --help`\n") catch {
         _ => ()
       }
       c_exit(failure_exit_code)
@@ -29,12 +29,12 @@ async fn main {
     }
   }
   if cli.show_help {
-    println(@llm_client.usage)
+    println(@client.usage)
     return
   }
   let prompt = match cli.prompt {
     Some(prompt) => prompt
-    None => @llm_client.read_prompt_from_stdin()
+    None => @client.read_prompt_from_stdin()
   }
   if prompt == "" {
     report_error("empty prompt: pass it as an argument or on stdin")
@@ -42,7 +42,7 @@ async fn main {
     return
   }
   if cli.stream {
-    let reply = @llm_client.stream_to_stdout(cli.settings, prompt) catch {
+    let reply = @client.stream_to_stdout(cli.settings, prompt) catch {
       err => {
         report_error(err.to_string())
         c_exit(failure_exit_code)
@@ -55,7 +55,7 @@ async fn main {
     }
     return
   }
-  let reply = @llm_client.ask(cli.settings, prompt) catch {
+  let reply = @client.ask(cli.settings, prompt) catch {
     err => {
       report_error(err.to_string())
       c_exit(failure_exit_code)

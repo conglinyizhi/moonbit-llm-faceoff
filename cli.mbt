@@ -12,11 +12,11 @@ pub(all) struct Cli {
 
 ///|
 pub let usage : String =
-  #|llm_client — ask an OpenAI-compatible chat completion endpoint
+  #|faceoff — ask an OpenAI-compatible chat completion endpoint
   #|
   #|usage:
-  #|  llm_client [options] [prompt ...]
-  #|  echo "a question" | llm_client [options]
+  #|  faceoff [options] [prompt ...]
+  #|  echo "a question" | faceoff [options]
   #|
   #|options:
   #|  -s, --stream          stream the reply as it is generated

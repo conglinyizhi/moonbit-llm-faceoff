@@ -75,14 +75,14 @@ fn shell(data : @shared.PageData) -> @html.Html {
       @html.meta(charset="utf-8"),
       @html.meta(name="viewport", content="width=device-width, initial-scale=1"),
       @html.node("title", @html.Attrs::build(), [
-        txt("LLM 模型对比 · llm_client"),
+        txt("LLM 模型对比 · faceoff"),
       ]),
       @html.link(href="site.css", rel="stylesheet"),
     ]),
     @html.body(class="page", [
       @shared.el("header", "site-header", [
         @shared.el("div", "wrap site-header-inner", [
-          @shared.el("div", "site-logo", [txt("llm_client")]),
+          @shared.el("div", "site-logo", [txt("faceoff")]),
           @shared.el("div", "site-meta", [
             txt(
               "\{data.models.length()} 个模型 · \{data.cases.length()} 道用例",

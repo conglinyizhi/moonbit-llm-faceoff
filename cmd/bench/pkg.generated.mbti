@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "conglinyizhi/llm_client/cmd/bench"
+package "conglinyizhi/moonbit-llm-faceoff/cmd/bench"
 
 // Values
 

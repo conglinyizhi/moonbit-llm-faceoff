@@ -70,7 +70,7 @@ port=$(cat "$port_file")
 base_url="http://127.0.0.1:$port/v1"
 echo "    $base_url"
 
-client="./_build/native/debug/build/cmd/main/main.exe"
+client="./_build/native/debug/build/cmd/faceoff/faceoff.exe"
 bench="./_build/native/debug/build/cmd/bench/bench.exe"
 
 echo

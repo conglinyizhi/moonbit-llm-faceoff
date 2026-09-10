@@ -1,4 +1,4 @@
-# llm_client
+# faceoff
 
 **English** · [中文](README.zh.md)
 
@@ -9,7 +9,7 @@ Three things you can run:
 
 | binary | what it does | source |
 | --- | --- | --- |
-| `llm_client` | ask one prompt, once or streamed | `cmd/main` |
+| `faceoff` | ask one prompt, once or streamed | `cmd/faceoff` |
 | `bench` | run a suite against several models and compare them | `cmd/bench` |
 | `web server` | interactive page: pick models/params, run, watch results | `web/cmd/server` |
 
@@ -56,7 +56,7 @@ rather than this table — this is a copy, that is the source.
 ### 2. Build it and try it — without any API key
 
 ```bash
-git clone <this repo> && cd llm_client
+git clone <this repo> && cd moonbit-llm-faceoff
 bash scripts/demo.sh
 ```
 
@@ -87,7 +87,7 @@ export MOONLLM_BASE_URL="https://api.deepseek.com/v1"   # or any compatible base
 export MOONLLM_MODEL="deepseek-chat"
 export MOONLLM_API_KEY="sk-..."
 
-client=./_build/native/debug/build/cmd/main/main.exe
+client=./_build/native/debug/build/cmd/faceoff/faceoff.exe
 $client "用一句话说明什么是航空母舰"
 $client --stream "写一首关于侧风的短诗"
 ```
@@ -142,13 +142,13 @@ under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
 
 ```bash
 # one-shot
-llm_client "用一句话说明什么是航空母舰"
+faceoff "用一句话说明什么是航空母舰"
 
 # streamed, printed as fragments arrive
-llm_client --stream "写一首关于侧风的短诗"
+faceoff --stream "写一首关于侧风的短诗"
 
 # prompt from stdin
-echo "总结一下这段日志" | llm_client --stream
+echo "总结一下这段日志" | faceoff --stream
 ```
 
 ### Flags
@@ -181,7 +181,7 @@ Flags override the environment. Errors go to stderr and exit non-zero, so the
 CLI is safe to use in a pipeline:
 
 ```
-$ llm_client --api-key wrong "hi"
+$ faceoff --api-key wrong "hi"
 error: http 401: {"error":{"message":"invalid api key"}}
 ```
 
@@ -370,13 +370,22 @@ at build time. It uses variables, nesting, `&`, `@mixin`/`@include` and
 
 The `bench` package is usable on its own; so is the client.
 
+Declare it with an explicit alias in your own `moon.pkg` — the module path ends
+in `faceoff`, and a hyphenated segment can't serve as a default alias:
+
+```text
+import {
+  "conglinyizhi/moonbit-llm-faceoff" @faceoff,
+}
+```
+
 ```moonbit
 // one-shot
-let settings = @llm_client.Settings::from_env(env)
-let reply = @llm_client.ask(settings, "用一句话说明什么是航空母舰")
+let settings = @faceoff.Settings::from_env(env)
+let reply = @faceoff.ask(settings, "用一句话说明什么是航空母舰")
 
 // streaming, with reasoning fragments separated from the answer
-let outcome = @llm_client.stream_parts(settings, prompt, async fn(part) {
+let outcome = @faceoff.stream_parts(settings, prompt, async fn(part) {
   match part {
     Content(text) => handle_answer(text)
     Reasoning(thought) => handle_thought(thought)
@@ -495,7 +504,7 @@ time races the page's own `fetch`, and dumps a half-loaded page. Set
 
 ```text
 moon.pkg            library package imports (native only)
-llm_client.mbt      package documentation
+faceoff.mbt         package documentation
 settings.mbt        Settings + ConfigError, environment resolution
 cli.mbt             Cli::parse, usage text
 api.mbt             request building, response/SSE decoding
@@ -510,7 +519,7 @@ bench/              the measurement harness
   pagedata.mbt      the document the web module consumes
   cli.mbt           bench flag parsing
 
-cmd/main/           the llm_client executable
+cmd/faceoff/          the faceoff executable
 cmd/bench/          the bench executable
 
 web/                the frontends (own module: Rabbita + precss)
@@ -549,4 +558,4 @@ docs/               library survey, benchmark notes
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).

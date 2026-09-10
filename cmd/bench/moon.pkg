@@ -1,6 +1,6 @@
 import {
-  "conglinyizhi/llm_client" @client,
-  "conglinyizhi/llm_client/bench" @harness,
+  "conglinyizhi/moonbit-llm-faceoff" @faceoff,
+  "conglinyizhi/moonbit-llm-faceoff/bench" @harness,
   "moonbitlang/async",
   "moonbitlang/async/fs",
   "moonbitlang/async/io",
