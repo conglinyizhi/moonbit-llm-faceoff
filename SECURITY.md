@@ -37,16 +37,22 @@ echo the request headers in their error text, so a body like
 `bad authorization: Bearer <key>` would otherwise put the key in all of those
 places.
 
-The configured key is therefore stripped from the body at the point it becomes
-part of an error, so it never reaches a log, a run directory or a page:
+The configured key is therefore masked at the point where the body becomes part
+of an error, so it never reaches a log, a run directory or a page intact:
 
 ```text
-http 401: {"error":{"message":"bad authorization: Bearer ***"}}
+http 401: {"error":{"message":"bad authorization: Bearer sk***3a"}}
 ```
+
+The first two and last two characters stay, matching what provider dashboards do
+(`sk-...ef`). That is enough for whoever reads the error to tell *which* key was
+used — the reason for logging it at all — and not enough to use it. Keys shorter
+than 12 characters are masked whole: showing four characters of an
+eight-character secret gives away half of it.
 
 `scripts/smoke.sh` asserts this end to end. The bundled mock endpoint echoes the
 `Authorization` header back on a 401, exactly as a careless gateway would, so
-the test fails if the redaction stops working.
+the test fails if the masking stops working.
 
 ## Threat model
 

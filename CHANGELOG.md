@@ -34,8 +34,10 @@ All notable changes to this project are documented here. The format follows
   `web/runs/<id>/runs.jsonl` and `data.json`, and out to the browser. An endpoint
   that echoes the request headers in its error text (the bundled mock does, and
   some gateways do) therefore wrote the API key into all of those places. The
-  configured key is now stripped from the body before it becomes part of an
-  error, and `scripts/smoke.sh` asserts it end to end.
+  configured key is now masked before it becomes part of an error — the first two
+  and last two characters are kept, so the error still says *which* key was used
+  without exposing it (`Bearer sk***3a`); keys shorter than 12 characters are
+  masked whole. `scripts/smoke.sh` asserts it end to end.
 - **Web server, run ids:** two concurrent `POST /api/runs` could be handed the
   same id, after which both wrote into the same directory. Ids are now allocated
   by an atomic `mkdir` — creating an existing directory fails, which is the

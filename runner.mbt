@@ -22,6 +22,24 @@ pub fn ClientError::to_string(self : ClientError) -> String {
 }
 
 ///|
+/// Mask a key so it is still recognisable in a log without being usable.
+///
+/// The first two and the last two characters stay. That is enough for whoever
+/// reads the error to tell *which* key was used, which is the reason for logging
+/// it at all, and it matches what provider dashboards do (`sk-...ef`).
+///
+/// Anything shorter than 12 characters is masked whole: showing four characters
+/// of an eight-character secret gives away half of it.
+fn mask_key(key : String) -> String {
+  let len = key.length()
+  if len < 12 {
+    "***"
+  } else {
+    key[:2].to_owned() + "***" + key[len - 2:].to_owned()
+  }
+}
+
+///|
 /// Strip the configured key out of text that came from upstream.
 ///
 /// A non-2xx body is surfaced verbatim as `http <code>: <body>`, and that
@@ -33,7 +51,7 @@ fn redact_key(text : String, key : String) -> String {
   if key == "" {
     text
   } else {
-    text.replace_all(old=key, new="***")
+    text.replace_all(old=key, new=mask_key(key))
   }
 }
 
