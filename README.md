@@ -135,6 +135,7 @@ under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
 - [7. Known limits](#7-known-limits)
 - [8. Layout](#8-layout)
 - [9. Further reading](#9-further-reading)
+- [10. Contributing](#10-contributing)
 
 ---
 
@@ -555,6 +556,15 @@ docs/               library survey, benchmark notes
 - MoonBit: <https://www.moonbitlang.com/> ·
   docs <https://docs.moonbitlang.com/> ·
   packages <https://mooncakes.io/>
+
+## 10. Contributing
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — build requirements, the house rules
+  (no Python, why there are two modules), and what to run before a pull request.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability, and what happens
+  to your API key.
+- [`CHANGELOG.md`](CHANGELOG.md) — what changed between versions, including the
+  rename from `llm_client`.
 
 ## License
 

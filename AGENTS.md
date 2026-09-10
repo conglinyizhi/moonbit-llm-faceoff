@@ -1,53 +1,60 @@
-# Project Agents.md Guide
+# Project guide for agents
 
-This is a [MoonBit](https://docs.moonbitlang.com) project.
+A MoonBit project. Two modules: the root holds the library and the two CLIs,
+`web/` holds the interactive page and the static report generator. `README.md`
+describes what it does; this file is what an agent needs before touching it.
+`CONTRIBUTING.md` has the same rules aimed at humans.
 
-You can browse and install extra skills here:
-<https://github.com/moonbitlang/skills>
+## Commands
 
-## Project Structure
+```bash
+export MOON_CC=gcc            # Linux: without it native builds look for /usr/bin/lib.exe
+moon check --target native
+moon test --target native     # 48 tests
+moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
+bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
+bash scripts/demo.sh          # zero-API-key demo
+bash scripts/web-e2e.sh       # real Chromium; slow, and the flakiest part of the suite
+```
 
-- MoonBit packages are organized per directory; each directory contains a
-  `moon.pkg` file listing its dependencies. Each package has its files and
-  blackbox test files (ending in `_test.mbt`) and whitebox test files (ending in
-  `_wbtest.mbt`).
+Every one of those scripts starts its own mock endpoint. You do not need an API
+key, and you should not reach for a real endpoint to verify a change.
 
-- In the toplevel directory, there is a `moon.mod` file listing module
-  metadata.
+## Load-bearing constraints
 
-## Coding convention
+Breaking any of these produces a confusing failure, not a clean error.
 
-- MoonBit code is organized in block style, each block is separated by `///|`,
-  the order of each block is irrelevant. In some refactorings, you can process
-  block by block independently.
+- **`web/` must not depend on the root module.** The library pins
+  `moonbitlang/async` 0.20.1 and Rabbita requires 0.21.x; one workspace can hold
+  only one version, so merging them forces an `async` upgrade. `web/` reads
+  `bench`'s exported `data.json` instead, which also keeps the statistics in one
+  implementation.
+- **No Python.** Test utilities are `.mbtx` scripts run with
+  `moon run <file>.mbtx --target native` — the default target is wasm and cannot
+  open a socket.
+- **`@stdio.stderr` is a single global handle.** Writing to it from concurrent
+  tasks aborts the process (SIGABRT plus a core dump, not a caught error).
+  Serialize it, as `web/cmd/server/main.mbt` does with a semaphore.
+- **Run ids come from an atomic `mkdir`,** not from a counter file. Creating an
+  existing directory fails, and that failure is the test-and-set.
+- **Ports are assigned by the kernel.** The server takes `LLM_WEB_PORT=0` and
+  prints its bound port as the first line of stdout; the browser uses
+  `--remote-debugging-port=0` and reports through `DevToolsActivePort`. Do not
+  add a hardcoded port — this runs on shared machines.
+- **The start button does not use the `disabled` attribute.** A VDOM diff that
+  goes busy → idle does not remove it, which left the button permanently dead.
+  Busy state is a class; repeat clicks are ignored in `update`.
+- **Never commit a key,** and read `SECURITY.md` before writing anything that
+  persists response bodies — an upstream error can echo the key back.
 
-- Try to keep deprecated blocks in file called `deprecated.mbt` in each
-  directory.
+## MoonBit notes
 
-## Tooling
-
-- `moon fmt` is used to format your code properly.
-
-- `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
-  `find-references`. See $moonbit-agent-guide for details.
-
-- `moon info` is used to update the generated interface of the package, each
-  package has a generated interface file `.mbti`, it is a brief formal
-  description of the package. If nothing in `.mbti` changes, this means your
-  change does not bring the visible changes to the external package users, it is
-  typically a safe refactoring.
-
-- In the last step, run `moon info && moon fmt` to update the interface and
-  format the code. Check the diffs of `.mbti` file to see if the changes are
-  expected.
-
-- Run `moon test` to check tests pass. MoonBit supports snapshot testing; when
-  changes affect outputs, run `moon test --update` to refresh snapshots.
-
-- Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for results that
-  are stable or very unlikely to change. For snapshot tests that record
-  structured debugging output, derive `Debug` and use `debug_inspect`, rather
-  than deriving `Show` for debugging. For solid, well-defined results (e.g.
-  scientific computations), prefer assertion tests. You can use
-  `moon coverage analyze > uncovered.log` to see which parts of your code are
-  not covered by tests.
+- Code is organized in blocks separated by `///|`, each independently
+  processable. Keep deprecated blocks in a `deprecated.mbt` in the package.
+- Each directory is a package with its own `moon.pkg` listing imports and
+  targets. Blackbox tests end in `_test.mbt`, whitebox tests in `_wbtest.mbt`.
+- `moon ide` provides `peek-def`, `outline`, `find-references`.
+- `moon coverage analyze > uncovered.log` for coverage.
+- Prefer `assert_eq` for stable results. For snapshot tests of structured debug
+  output, derive `Debug` and use `debug_inspect` rather than `Show`.
+- Extra MoonBit skills: <https://github.com/moonbitlang/skills>

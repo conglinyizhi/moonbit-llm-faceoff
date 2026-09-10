@@ -126,6 +126,7 @@ $client --stream "写一首关于侧风的短诗"
 - [7. 已知边界](#7-已知边界)
 - [8. 目录结构](#8-目录结构)
 - [9. 延伸阅读](#9-延伸阅读)
+- [10. 参与贡献](#10-参与贡献)
 
 ---
 
@@ -477,6 +478,12 @@ docs/               选型调查、基准复盘
 - MoonBit：<https://www.moonbitlang.cn/> ·
   文档 <https://docs.moonbitlang.com/> ·
   包生态 <https://mooncakes.io/>
+
+## 10. 参与贡献
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 构建要求、几条硬规矩（不用 Python、为什么分成两个模块），以及提 PR 前该跑什么。
+- [`SECURITY.md`](SECURITY.md) —— 怎么报漏洞，以及你的 API key 会经过哪里、不会去哪里。
+- [`CHANGELOG.md`](CHANGELOG.md) —— 各版本改了什么，包括从 `llm_client` 改名这一条。
 
 ## 许可证
 
