@@ -47,6 +47,11 @@ Breaking any of these produces a confusing failure, not a clean error.
 - **The start button does not use the `disabled` attribute.** A VDOM diff that
   goes busy → idle does not remove it, which left the button permanently dead.
   Busy state is a class; repeat clicks are ignored in `update`.
+- **The server must run with `web/` as its working directory.** `out/`, `runs/`
+  and `../bench/cases.example.jsonl` are resolved relative to it; started from
+  the repository root it answers `/api/meta` and then 404s every page request.
+  It now prints a warning when the static directory is missing — keep that
+  warning, it is the only thing that makes the failure legible.
 - **A key typed into the page must never reach disk.** `web/runs/<id>/request.json`
   is written from a scrubbed copy of the request body, with `apiKey` removed
   before serialization. Keep it that way, and add an assertion when you touch it.

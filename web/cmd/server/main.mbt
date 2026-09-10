@@ -54,6 +54,15 @@ async fn main {
   note(
     "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_path}",
   )
+  // 静态目录是按当前工作目录解析的（默认 out，就在 web/ 里）。从别处启动
+  // 时服务端本身跑得起来、/api 也通，只有页面一律 404，很难看出是为什么。
+  // 与其让人去猜，不如直接说出来。
+  if !(@fs.exists(config.static_dir) catch { _ => false }) {
+    note("warning: static directory '\{config.static_dir}' does not exist.")
+    note(
+      "  /api will work but every page request will 404. Start the server from web/, or set LLM_WEB_STATIC.",
+    )
+  }
   let server = @http.Server(
     @socket.Addr::parse("127.0.0.1:\{port}"),
     reuse_addr=true,

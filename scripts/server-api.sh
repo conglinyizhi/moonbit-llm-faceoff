@@ -80,6 +80,18 @@ port=$(tr -d '\n' <"$tmp/web.port")
   exit 1
 }
 
+# 服务端的 out/ runs/ 都是按当前工作目录解析的，换句话说它必须从 web/ 启动。
+# README 里那段命令一度是错的（写成从仓库根目录启动），结果 /api 通、页面全 404。
+# 这条断言守住「文档里写的启动方式是健康的」。
+if grep -q 'static directory' "$tmp/server.log"; then
+  fail "按文档方式启动却报了静态目录缺失：$(grep 'static directory' "$tmp/server.log")"
+else
+  ok "从 web/ 启动，静态目录正常"
+fi
+[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/")" = "200" ] &&
+  ok "GET / → 200（页面真的能被服务出来）" ||
+  bad "GET / 不是 200：从 web/ 启动没意义"
+
 echo "==> 请求体覆盖服务端配置，且模型不在菜单里"
 body='{"models":["mock-a","not-in-the-menu"],"cases":["math-short"],"repeats":1,
 "maxTokens":32,"paceMs":0,"retry":0,

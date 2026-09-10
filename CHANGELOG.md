@@ -36,6 +36,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The documented way to start the web server was broken.** Both READMEs ran it
+  from the repository root; the server resolves `out/`, `runs/` and the case file
+  relative to its working directory, so it answered `/api/meta` and then 404'd on
+  every page request. The command is corrected, the working directory is called
+  out, and the server now warns at startup when its static directory is missing
+  instead of leaving you with a bare 404. `scripts/server-api.sh` asserts that
+  the documented invocation actually serves the page.
+- The quick start gained a **"run the web page"** step. Previously the page only
+  appeared as a link at the bottom of the CLI walkthrough, so there was no short
+  path from a fresh clone to a running comparison in the browser.
 - **Client, key redaction:** a non-2xx response body is surfaced verbatim as
   `http <status>: <body>` and then persisted — to the bench run log, to
   `web/runs/<id>/runs.jsonl` and `data.json`, and out to the browser. An endpoint

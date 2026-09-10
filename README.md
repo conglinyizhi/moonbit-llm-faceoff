@@ -78,7 +78,31 @@ model mock-a
 ...
 ```
 
-### 3. Point it at a real endpoint
+### 3. Run the web page — also without a key
+
+```bash
+bash web/build.sh
+cd web
+./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
+```
+
+Open <http://127.0.0.1:8137/> and the page is ready to use: models, cases and
+parameters all come from the server. Put the configuration in the URL to skip the
+clicking — `autorun=1` starts the run as soon as the page loads:
+
+```
+http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=3
+```
+
+**Start the server from inside `web/`.** It resolves `out/`, `runs/` and
+`../bench/cases.example.jsonl` relative to its working directory; started from
+the repository root it will answer `/api/meta` and then 404 on the page itself.
+
+Against a real gateway, either export `MOONLLM_BASE_URL` / `MOONLLM_API_KEY`
+before starting it, or start it without a key and **type the key into the page** —
+it is used for that one run, and it is not written to disk.
+
+### 4. Point it at a real endpoint
 
 Any OpenAI-compatible service works. Copy your provider's base URL and key:
 
@@ -287,12 +311,15 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 ## 3. The web page
 
 ```bash
-bash web/build.sh
+bash web/build.sh          # from the repository root
 
+cd web                     # the server resolves out/, runs/ and the case file
+                           # relative to its working directory — run it here,
+                           # not from the repository root
 MOONLLM_API_KEY=... \
 MOONLLM_BASE_URL=https://api.modelbest.cn/v1 \
 LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
-  ./web/_build/native/debug/build/cmd/server/server.exe
+  ./_build/native/debug/build/cmd/server/server.exe
 # → http://127.0.0.1:8137/
 ```
 

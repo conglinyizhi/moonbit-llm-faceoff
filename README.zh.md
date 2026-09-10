@@ -72,7 +72,25 @@ model mock-a
 ...
 ```
 
-### 3. 换成真实网关
+### 3. 打开网页版——同样不需要 key
+
+```bash
+bash web/build.sh
+cd web
+./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
+```
+
+打开 <http://127.0.0.1:8137/> 就能用：模型、用例、参数都从服务端来。不想点，就把配置写进 URL——`autorun=1` 表示打开即跑：
+
+```
+http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=3
+```
+
+**服务端要从 `web/` 目录里启动。** 它的 `out/`、`runs/` 和 `../bench/cases.example.jsonl` 都按当前工作目录解析；从仓库根目录启动的话，`/api/meta` 会通，但页面本身一律 404。
+
+要连真实网关，要么启动前导出 `MOONLLM_BASE_URL` / `MOONLLM_API_KEY`，要么干脆不配 key、**在页面上填**——它只对这一次运行生效，也不会写到磁盘。
+
+### 4. 换成真实网关
 
 任何 OpenAI 兼容的服务都行。把你的地址和密钥填进去：
 
@@ -263,12 +281,14 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 ## 3. 网页版
 
 ```bash
-bash web/build.sh
+bash web/build.sh    # 在仓库根目录执行
 
+cd web               # 服务端的 out/、runs/ 和用例文件都按当前工作目录解析，
+                     # 所以要从这里启动，而不是在仓库根目录
 MOONLLM_API_KEY=... \
 MOONLLM_BASE_URL=https://api.modelbest.cn/v1 \
 LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
-  ./web/_build/native/debug/build/cmd/server/server.exe
+  ./_build/native/debug/build/cmd/server/server.exe
 # → http://127.0.0.1:8137/
 ```
 
