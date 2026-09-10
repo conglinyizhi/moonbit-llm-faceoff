@@ -1,9 +1,10 @@
 ///|
 /// 交互式评测服务：静态文件 + JSON API，评测以子进程方式调用 bench。
 ///
-/// 为什么用子进程而不是直接调用 bench 包：bench 依赖库（moonllm 锁定
-/// moonbitlang/async 0.20.1），本模块用 async 0.21.x + rabbita。放进同一个
+/// 为什么用子进程而不是直接调用 bench 包：bench 依赖库，库钉在
+/// moonbitlang/async 0.20.1，本模块用 async 0.21.x + rabbita。放进同一个
 /// workspace 会强制统一版本并打坏库，所以这里只通过 CLI 边界通信。
+/// （库已不依赖任何第三方 LLM 包，这个分歧只剩 async 版本。）
 ///
 /// 运行状态全部落在文件里（runs/<id>/），不做进程内共享状态：
 ///   请求参数写在 request.json，进度靠数 runs.jsonl 的行数，

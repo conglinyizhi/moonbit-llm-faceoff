@@ -406,20 +406,29 @@ callers do not need to import the transport packages.
 
 Three decisions that are not obvious from the code.
 
-**Streaming is implemented directly, not through the LLM library.**
-`DC-Z-lab/moonllm`'s `chat_stream` takes a *synchronous* callback, and a
-synchronous callback cannot call `@stdio.stdout.write` — so it cannot write
-fragments out as they arrive. The streaming path therefore talks to
-`moonbitlang/async/http` directly and parses SSE itself. `parse_sse_line` is a
-pure function so the framing logic stays unit-testable. The one-shot path still
-uses moonllm's typed client.
+**Both paths talk to the endpoint directly.**
+There is no client library in between: the request body is built as `Json`
+(`request_body`) and the reply is read back out of `Json` (`response_text`), so
+the wire format — not some library's types — is what this module exposes.
+Streaming frames SSE itself, and `parse_sse_line` is a pure function so the
+framing logic stays unit-testable. The package's only dependency is
+`moonbitlang/async`.
+
+Delegating the stream to a library was tried and dropped: that entry point took
+a *synchronous* callback, and a synchronous callback cannot call
+`@stdio.stdout.write`, so fragments could not be written out as they arrived.
+The dependency was then removed outright rather than kept for the one-shot path.
 
 **`web/` is a separate module that does not depend on the library.**
-`rabbita` needs `moonbitlang/async` 0.21.x while the library is pinned to 0.20.1
-(by `moonllm`). Putting both in one workspace forces a single async version, and
-that breaks the library. So the numbers are computed once, in `bench`, and
-handed over as JSON — across a process boundary for live runs, and as a file for
-the static report.
+`rabbita` needs `moonbitlang/async` 0.21.x while the library pins 0.20.1. Putting
+both in one workspace forces a single async version, and that breaks the
+library. So the numbers are computed once, in `bench`, and handed over as JSON —
+across a process boundary for live runs, and as a file for the static report.
+
+That pin no longer has an external cause. With no client library left, the
+library could move to 0.21.x, the two modules could share a workspace, and the
+subprocess boundary and the JSON hand-off would become unnecessary. That is a
+separate change and has not been made.
 
 **Run state lives in files, not in server memory.**
 The server has no shared mutable state and no locks. The bench process is
@@ -471,8 +480,8 @@ time races the page's own `fetch`, and dumps a half-loaded page. Set
   simultaneous `POST /api/runs` can collide on an id. Runs are cheap to
   re-trigger, and each lives in its own directory, so nothing gets mixed up —
   but the id allocation is not atomic.
-- **Only OpenAI-compatible wire formats are exercised here.** moonllm can also
-  speak Anthropic; nothing in this repo tests that path.
+- **Only the OpenAI-compatible wire format is implemented.** No Anthropic or
+  Gemini translation; the endpoint must accept `/chat/completions`.
 - **Targets.** The library and its two CLIs declare `native` only; in `web/`,
   `cmd/app` is `js`, `cmd/server` and `cmd/ssg` are `native`, and `shared`
   builds for `js+native+wasm`.
@@ -529,8 +538,8 @@ docs/               library survey, benchmark notes
 ## 9. Further reading
 
 - [`docs/library-survey.md`](docs/library-survey.md) — the Mooncakes survey of
-  LLM client libraries that led to choosing moonllm, and the gaps found while
-  integrating it.
+  LLM client libraries, the gaps found while integrating one of them, and why
+  the dependency was eventually removed.
 - [`docs/benchmark-notes.md`](docs/benchmark-notes.md) — a worked
   MiniCPM5-1B vs MiniCPM5-2B comparison, including the result that
   contradicted the obvious reading of the throughput numbers.

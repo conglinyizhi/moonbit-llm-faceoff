@@ -26,6 +26,5 @@ preferred_target = "native"
 description = ""
 
 import {
-  "DC-Z-lab/moonllm@0.1.0",
   "moonbitlang/async@0.20.1",
 }

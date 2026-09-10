@@ -6,10 +6,8 @@ fn test_settings() -> @llm_client.Settings {
 }
 
 ///|
-test "build_request carries model and both messages" {
-  let body = @llm_client.build_request(test_settings(), "hi")
-    .to_json()
-    .stringify()
+test "request_body carries model and both messages" {
+  let body = @llm_client.request_body(test_settings(), "hi").stringify()
   assert_true(body.contains("\"model\":\"test-model\""))
   assert_true(body.contains("\"role\":\"system\""))
   assert_true(body.contains("\"role\":\"user\""))
@@ -18,22 +16,26 @@ test "build_request carries model and both messages" {
 }
 
 ///|
-test "build_request omits unset sampling options" {
-  let body = @llm_client.build_request(test_settings(), "hi")
-    .to_json()
-    .stringify()
+test "request_body omits unset sampling options" {
+  let body = @llm_client.request_body(test_settings(), "hi").stringify()
   assert_false(body.contains("temperature"))
   assert_false(body.contains("max_tokens"))
 }
 
 ///|
-test "build_request includes set sampling options" {
+test "request_body includes set sampling options" {
   let settings = test_settings()
   settings.temperature = Some(0.5)
   settings.max_tokens = Some(128)
-  let body = @llm_client.build_request(settings, "hi").to_json().stringify()
+  let body = @llm_client.request_body(settings, "hi").stringify()
   assert_true(body.contains("\"temperature\":0.5"))
   assert_true(body.contains("\"max_tokens\":128"))
+}
+
+///|
+test "request_body can ask for a stream" {
+  let body = @llm_client.request_body(test_settings(), "hi", stream=true).stringify()
+  assert_true(body.contains("\"stream\":true"))
 }
 
 ///|
@@ -42,6 +44,32 @@ test "response_text decodes the first choice" {
     "{\"id\":\"1\",\"object\":\"chat.completion\",\"created\":0,\"model\":\"m\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}",
   )
   assert_eq(@llm_client.response_text(json), "hello")
+}
+
+///|
+test "response_text reports a malformed body instead of guessing" {
+  let not_an_object = Ok(@llm_client.response_text(@json.parse("[]"))) catch {
+    err => Err(err)
+  }
+  match not_an_object {
+    Err(@llm_client.ClientError::Decode(_)) => ()
+    _ => fail("expected Decode")
+  }
+  let no_choices = Ok(@llm_client.response_text(@json.parse("{\"id\":\"1\"}"))) catch {
+    err => Err(err)
+  }
+  match no_choices {
+    Err(@llm_client.ClientError::Decode(_)) => ()
+    _ => fail("expected Decode")
+  }
+}
+
+///|
+test "response_text tolerates a null content" {
+  let json = @json.parse(
+    "{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":null}}]}",
+  )
+  assert_eq(@llm_client.response_text(json), "")
 }
 
 ///|

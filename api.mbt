@@ -1,27 +1,35 @@
 ///|
-/// Build the chat request for `prompt` under `settings`.
-pub fn build_request(settings : Settings, prompt : String) -> @llm.ChatRequest {
-  let messages = [
-    @llm.Message::system(settings.system),
-    @llm.Message::user(prompt),
-  ]
-  let request = @llm.ChatRequest::new(settings.model, messages)
-  if settings.temperature is Some(t) {
-    request.temperature(t) |> ignore
+/// Build the chat completion request body for `prompt`.
+///
+/// A plain `Json` value on purpose: the wire format is the contract, so nothing
+/// from a client library shows up in this module's public API.
+pub fn request_body(
+  settings : Settings,
+  prompt : String,
+  stream? : Bool = false,
+) -> Json {
+  let messages = Json::array([
+    Json::object({
+      "role": Json::string("system"),
+      "content": Json::string(settings.system),
+    }),
+    Json::object({
+      "role": Json::string("user"),
+      "content": Json::string(prompt),
+    }),
+  ])
+  let body : Map[String, Json] = {
+    "model": Json::string(settings.model),
+    "messages": messages,
+    "stream": Json::boolean(stream),
   }
-  if settings.max_tokens is Some(n) {
-    request.max_tokens(n) |> ignore
+  if settings.temperature is Some(temperature) {
+    body["temperature"] = Json::number(temperature)
   }
-  request
-}
-
-///|
-/// The text of the first choice in a chat completion response.
-pub fn choice_text(response : @llm.ChatResponse) -> String {
-  match response.choices {
-    [choice, ..] => choice.message.content.to_text()
-    [] => ""
+  if settings.max_tokens is Some(max_tokens) {
+    body["max_tokens"] = Json::number(max_tokens.to_double())
   }
+  Json::object(body)
 }
 
 ///|

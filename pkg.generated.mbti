@@ -2,16 +2,11 @@
 package "conglinyizhi/llm_client"
 
 import {
-  "DC-Z-lab/moonllm",
   "moonbitlang/core/debug",
 }
 
 // Values
 pub async fn ask(Settings, String) -> String raise ClientError
-
-pub fn build_request(Settings, String) -> @moonllm.ChatRequest
-
-pub fn choice_text(@moonllm.ChatResponse) -> String
 
 pub let default_base_url : String
 
@@ -21,11 +16,11 @@ pub let default_system : String
 
 pub let default_timeout_ms : Int
 
-pub fn make_client(Settings) -> @moonllm.Client
-
 pub fn parse_sse_line(String) -> SseEvent?
 
 pub async fn read_prompt_from_stdin() -> String
+
+pub fn request_body(Settings, String, stream? : Bool) -> Json
 
 pub fn response_text(Json) -> String raise ClientError
 

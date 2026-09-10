@@ -369,11 +369,15 @@ println(@bench.format_summaries(summaries))
 
 三个从代码里看不出来的决定。
 
-**流式是自己实现的，没走那个 LLM 库。**
-`DC-Z-lab/moonllm` 的 `chat_stream` 收的是**同步**回调，而同步回调里调不了 `@stdio.stdout.write`——也就没法把碎片实时写出去。所以流式路径直接对接 `moonbitlang/async/http` 自己解析 SSE。`parse_sse_line` 是纯函数，分帧逻辑照旧可单测。一次性路径仍然用 moonllm 的类型化客户端。
+**两条路径都直接对接端点，中间没有客户端库。**
+请求体用 `Json` 拼（`request_body`），回复从 `Json` 里读回来（`response_text`）——对外暴露的是**线格式**，不是某个库的类型。流式自己分帧，`parse_sse_line` 是纯函数，分帧逻辑照旧可单测。整个包只依赖 `moonbitlang/async`。
+
+当初试过把流式交给一个库，后来拆了：那个入口收的是**同步**回调，而同步回调里调不了 `@stdio.stdout.write`，碎片没法实时写出去。之后就干脆把依赖整个拿掉，没有只为了保留一次性路径而留着它。
 
 **`web/` 是独立模块，不依赖本库。**
-`rabbita` 需要 `moonbitlang/async` 0.21.x，而本库被 `moonllm` 锁在 0.20.1。放进同一个 workspace 会强制统一 async 版本，**进而把库编译打坏**。所以统计只在 `bench` 里算一次，然后用 JSON 交出去——实时运行走进程边界，静态报告走文件。
+`rabbita` 需要 `moonbitlang/async` 0.21.x，而本库钉在 0.20.1。放进同一个 workspace 会强制统一 async 版本，**进而把库编译打坏**。所以统计只在 `bench` 里算一次，然后用 JSON 交出去——实时运行走进程边界，静态报告走文件。
+
+这个版本钉子现在已经没有外部原因了。第三方 LLM 包拿掉之后，库完全可以升到 0.21.x，两个模块就能并进同一个 workspace，子进程边界和 JSON 中转也就不再必要。那是一次独立的改动，还没做。
 
 **运行状态落在文件里，不在服务端内存里。**
 服务端没有共享可变状态，也没有锁。bench 进程通过 `/bin/sh` 启动，结束时由它把退出码追加到一个文件；**这个文件出现就是完成信号**，而 `runs.jsonl` 的行数就是进度。
@@ -408,7 +412,7 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 - **`--timeout-ms` 不作用于流式路径。** 总时长超时会砍掉合法的长回复，空闲超时又需要给每次 read 套定时器。一次性路径是生效的。
 - **网页服务只绑 `127.0.0.1`，没有鉴权。** 它是本地开发工具，别对外暴露。
 - **运行 id 靠读改写计数器文件分配。** 两个并发的 `POST /api/runs` 可能撞同一个 id。重跑一次很便宜，而且每次运行各自独立目录不会串数据，但 id 分配确实不是原子的。
-- **这里只验证了 OpenAI 兼容的线格式。** moonllm 也能讲 Anthropic，但本仓库没有任何测试覆盖那条路。
+- **只实现了 OpenAI 兼容的线格式。** 没有 Anthropic / Gemini 转换；端点必须接受 `/chat/completions`。
 - **target 声明**：库和两个命令行工具只声明 `native`；`web/` 下 `cmd/app` 是 `js`，`cmd/server` 和 `cmd/ssg` 是 `native`，`shared` 是 `js+native+wasm`。
 - **间隔与重试的默认值是启发式。** 只对着一个网关的限流器调过。你自己的环境用 `--pace-ms 0` 试一下就知道。
 
@@ -460,7 +464,7 @@ docs/               选型调查、基准复盘
 
 ## 9. 延伸阅读
 
-- [`docs/library-survey.md`](docs/library-survey.md)——为选 moonllm 做的 Mooncakes 生态调查，以及集成过程中发现的坑。
+- [`docs/library-survey.md`](docs/library-survey.md)——Mooncakes 生态调查、集成其中一个包时发现的坑，以及最后为什么把那个依赖拿掉了。
 - [`docs/benchmark-notes.md`](docs/benchmark-notes.md)——MiniCPM5-1B 对 MiniCPM5-2B 的完整复盘，包括那个**和吞吐率直觉相反**的结论。
 - MoonBit：<https://www.moonbitlang.cn/> ·
   文档 <https://docs.moonbitlang.com/> ·

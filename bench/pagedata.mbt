@@ -2,9 +2,10 @@
 /// A self-contained data document for the static page.
 ///
 /// The page module deliberately does not link against this library: it is a
-/// separate module with its own (heavier) dependency set, and coupling it to
-/// `moonllm` through a workspace would force one `moonbitlang/async` version on
-/// both. So the numbers are computed here, once, and handed over as JSON.
+/// separate module with its own (heavier) dependency set, and one workspace
+/// would force a single `moonbitlang/async` version on both — the library is
+/// pinned to 0.20.1 while `rabbita` wants 0.21.x. So the numbers are computed
+/// here, once, and handed over as JSON.
 ///
 /// Shape:
 ///

@@ -1,17 +1,4 @@
 ///|
-/// Create a moonllm client for a settings block.
-///
-/// Typical callers can ignore this and use `ask` / `stream_to_stdout`, which
-/// build the client themselves.
-pub fn make_client(settings : Settings) -> @llm.Client {
-  @llm.Client::new(
-    settings.api_key,
-    base_url=settings.base_url,
-    timeout_ms=settings.timeout_ms,
-  )
-}
-
-///|
 /// Errors raised by this client.
 ///
 /// Both paths flatten their lower-level errors into this type so callers do
@@ -35,38 +22,59 @@ pub fn ClientError::to_string(self : ClientError) -> String {
 }
 
 ///|
-/// Flatten a moonllm error so callers only ever see `ClientError`.
-fn map_llm_error(err : @llm.LLMError) -> ClientError {
-  match err {
-    @llm.LLMError::Transport(message) => Transport(message)
-    @llm.LLMError::ApiError(code~, message~) => Status(code~, message~)
-    @llm.LLMError::Decode(message) => Decode(message)
-    @llm.LLMError::Stream(message) => Transport(message)
-  }
-}
-
-///|
 /// Decode a non-streaming chat response body and return its first choice text.
 pub fn response_text(json : Json) -> String raise ClientError {
-  let response : @llm.ChatResponse = @json.from_json(json) catch {
-    err => raise Decode(err.to_string())
+  let obj = match json {
+    Object(obj) => obj
+    _ => raise Decode("response is not a JSON object")
   }
-  choice_text(response)
+  let choices = match obj.get("choices") {
+    Some(Array(choices)) => choices
+    _ => raise Decode("response has no choices")
+  }
+  let choice = match choices {
+    [Object(choice), ..] => choice
+    _ => raise Decode("response has no choices")
+  }
+  let message = match choice.get("message") {
+    Some(Object(message)) => message
+    _ => raise Decode("response choice has no message")
+  }
+  match message.get("content") {
+    Some(String(text)) => text
+    _ => ""
+  }
 }
 
 ///|
 /// Send `prompt` and return the complete reply, without streaming.
 ///
-/// Uses moonllm's typed `Client::chat`, so the response is decoded into
-/// `@llm.ChatResponse` before the text is extracted.
+/// Talks to the endpoint directly, same as the streaming path, so this module
+/// depends on nothing but the standard library and the async runtime.
+/// `Settings::timeout_ms` is honored here (the streaming path deliberately
+/// leaves it to the OS).
 pub async fn ask(
   settings : Settings,
   prompt : String,
 ) -> String raise ClientError {
-  let client = make_client(settings)
-  let request = build_request(settings, prompt)
-  let response = client.chat(request) catch { err => raise map_llm_error(err) }
-  choice_text(response)
+  let headers : Map[String, String] = { "Content-Type": "application/json" }
+  if settings.api_key != "" {
+    headers["Authorization"] = "Bearer " + settings.api_key
+  }
+  let body = request_body(settings, prompt).stringify()
+  let url = settings.chat_completions_url()
+  let (response, data) = @async.with_timeout(settings.timeout_ms, async fn() {
+    @http.post(url, body, headers~)
+  }) catch {
+    err => raise Transport("request failed or timed out: " + err.to_string())
+  }
+  // 错误体也要按 UTF-8 解码；用 to_unchecked_string() 会出乱码
+  let text = data.text() catch { _ => "" }
+  if response.code < 200 || response.code >= 300 {
+    raise Status(code=response.code, message=text)
+  }
+  let json = @json.parse(text) catch { err => raise Decode(err.to_string()) }
+  response_text(json)
 }
 
 ///|
@@ -105,9 +113,10 @@ pub(all) struct StreamOutcome {
 /// as well as answer fragments, which is what a benchmark needs. For a plain
 /// text stream, use `stream_chat`.
 ///
-/// It talks to the raw endpoint instead of going through moonllm's
-/// `chat_stream`, because that entry point takes a synchronous callback and so
-/// cannot write to async stdout as fragments arrive.
+/// Talk to the endpoint directly and frame the SSE stream here. Delegating
+/// this to a client library would mean handing fragments to a *synchronous*
+/// callback, and a synchronous callback cannot write to async stdout as they
+/// arrive — which is exactly what streaming is for.
 ///
 /// `Settings::timeout_ms` is not applied here: a total-duration timeout would
 /// cut off legitimately long streams, and an idle timeout would need a timer
@@ -117,8 +126,7 @@ pub async fn stream_parts(
   prompt : String,
   on_part : async (StreamPart) -> Unit,
 ) -> StreamOutcome raise ClientError {
-  let request = build_request(settings, prompt)
-  request.stream = true
+  let body = request_body(settings, prompt, stream=true).stringify()
   let headers : Map[String, String] = {
     "Content-Type": "application/json",
     "Accept": "text/event-stream",
@@ -126,7 +134,6 @@ pub async fn stream_parts(
   if settings.api_key != "" {
     headers["Authorization"] = "Bearer " + settings.api_key
   }
-  let body = request.to_json().stringify()
   let client = @http.post_stream(settings.chat_completions_url(), headers~) catch {
     err => raise Transport(err.to_string())
   }
