@@ -1,0 +1,317 @@
+///| 离线假 OpenAI 兼容端点：给 demo 和测试用，不需要 API key，也不出网。
+///
+///   moon run --target native scripts/mock_openai.mbtx
+///
+/// 第一行 stdout 输出实际监听的端口，调用方读它就完成了同步（例如重定向到
+/// 端口文件，等文件非空）。端口固定写 0，由内核分配。
+///
+/// 环境变量 MOCK_STREAM_DELAY：流式分片之间的停顿，单位秒，默认 0.15。
+///
+/// 行为与 scripts/smoke.sh、scripts/web-e2e.sh 的断言一一对应：
+///   - 鉴权失败 401
+///   - 指令里含 RATE_LIMIT → 429，正文是**原始 UTF-8** 中文
+///     （客户端若把字节当 UTF-16 重新解释就会出乱码，这条专门用来抓那个错）
+///   - stream: true → chunked SSE：角色块、思考碎片、正文碎片、finish、
+///     usage（choices 为空数组）、[DONE]
+///   - 否则 → 一次性 JSON
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/http" @http,
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/socket" @socket,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/json" @json,
+  "moonbitlang/core/string" @string,
+}
+
+///|
+let expected_key : String = "test-key"
+
+///|
+let reply : String = "Hello from the mock server."
+
+///|
+let fragments : Array[String] = ["Hello from ", "the mock server."]
+
+///|
+/// usage 块的口径固定，测试里断言的就是这几个数
+let prompt_tokens : Int = 11
+
+///|
+let completion_tokens : Int = 9
+
+///|
+let reasoning_tokens : Int = 4
+
+///|
+/// 故意写成字面量而不是走 Json::stringify：要保证正文是**原始 UTF-8 多字节**，
+/// 而不是被转义成 \uXXXX 的纯 ASCII。测试要验的正是多字节解码。
+let rate_limit_body : String =
+  "{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"请求频率过高（已触发每分钟请求数限制），请稍后重试\",\"type\":\"rate_limit_exceeded\"}}"
+
+///|
+async fn main {
+  let server = @http.Server(@socket.Addr::parse("127.0.0.1:0"))
+  // 必须走 @stdio.stdout 而不是 println：stdout 被重定向到文件时 println 是
+  // 块缓冲的，端口行会在缓冲区里待着不出去，调用方就永远等不到端口。
+  @stdio.stdout.write(server.addr.port().to_string() + "\n") catch { _ => () }
+  server.run_forever() <| async fn(request, body, conn) {
+    handle(request, body, conn)
+  }
+}
+
+// ---------------------------------------------------------------- 路由
+
+///|
+async fn handle(
+  request : @http.Request,
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Unit {
+  let raw_path = request.path
+  let path = match raw_path.find("?") {
+    Some(index) => raw_path[:index].to_owned()
+    None => raw_path
+  }
+  if request.meth is Get && path == "/health" {
+    send_body(conn, 200, "text/plain; charset=utf-8", "ok")
+    return
+  }
+  let is_post = request.meth is Post
+  if !is_post || !path.has_prefix("/v1/chat/completions") {
+    send_json_error(conn, 404, "unknown path: " + path)
+    return
+  }
+  let auth = header(request.headers, "Authorization")
+  if auth != "Bearer " + expected_key {
+    send_json_error(conn, 401, "bad authorization: " + auth)
+    return
+  }
+  let payload = read_body(body)
+  if payload == "" {
+    send_json_error(conn, 400, "cannot read request body")
+    return
+  }
+  let parsed = @json.parse(payload) catch {
+    _ => {
+      send_json_error(conn, 400, "request body is not JSON")
+      return
+    }
+  }
+  let obj = match parsed {
+    Object(obj) => obj
+    _ => {
+      send_json_error(conn, 400, "request body must be a JSON object")
+      return
+    }
+  }
+  let model = match obj.get("model") {
+    Some(String(value)) => value
+    _ => ""
+  }
+  if model == "" {
+    send_json_error(conn, 400, "request has no model")
+    return
+  }
+  let messages = match obj.get("messages") {
+    Some(Array(items)) => items
+    _ => []
+  }
+  if messages.length() == 0 {
+    send_json_error(conn, 400, "request has no messages")
+    return
+  }
+  if prompt_text(messages).contains("RATE_LIMIT") {
+    send_body(conn, 429, "application/json; charset=utf-8", rate_limit_body)
+    return
+  }
+  if obj.get("stream") is Some(True) {
+    stream_reply(conn, model)
+  } else {
+    json_reply(conn, model)
+  }
+}
+
+///|
+/// 把所有 role == "user" 的文本拼起来，用来识别 RATE_LIMIT 这个开关词。
+fn prompt_text(messages : Array[Json]) -> String {
+  let buf = StringBuilder()
+  for message in messages {
+    guard message is Object(obj) else { continue }
+    match obj.get("content") {
+      Some(String(text)) => {
+        buf.write_string(text)
+        buf.write_char('\n')
+      }
+      _ => ()
+    }
+  }
+  buf.to_string()
+}
+
+// ---------------------------------------------------------------- 响应
+
+///|
+/// 一次性回复。
+async fn json_reply(conn : @http.ServerConnection, model : String) -> Unit {
+  let payload = Json::object({
+    "id": Json::string("mock-1"),
+    "object": Json::string("chat.completion"),
+    "created": Json::number(0.0),
+    "model": Json::string(model),
+    "choices": Json::array([
+      Json::object({
+        "index": Json::number(0.0),
+        "message": Json::object({
+          "role": Json::string("assistant"),
+          "content": Json::string(reply),
+        }),
+        "finish_reason": Json::string("stop"),
+      }),
+    ]),
+    "usage": usage_object(),
+  })
+  conn.send_response(200, "OK", extra_headers={
+    "Content-Type": "application/json; charset=utf-8",
+  })
+  conn.write_string(payload.stringify())
+  conn.end_response()
+}
+
+///|
+/// 流式回复。send_response 不带 Content-Length，服务端会自动用 chunked 编码，
+/// 所以配合 flush 就是真正的增量投递。
+async fn stream_reply(conn : @http.ServerConnection, model : String) -> Unit {
+  conn.send_response(200, "OK", extra_headers={
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+  })
+  let delay_ms = stream_delay_ms()
+  event(conn, chunk(model, role_delta(), None))
+  event(conn, chunk(model, reasoning_delta("weighing the question"), None))
+  for fragment in fragments {
+    @async.sleep(delay_ms) catch { _ => () }
+    event(conn, chunk(model, content_delta(fragment), None))
+  }
+  event(conn, chunk(model, Map([]), Some("stop")))
+  event(conn, usage_event(model))
+  event(conn, "[DONE]")
+  conn.end_response()
+}
+
+///|
+/// 写一条 SSE 事件并 flush，保证它立刻离开缓冲区。
+async fn event(conn : @http.ServerConnection, payload : String) -> Unit {
+  conn.write_string("data: " + payload + "\n\n")
+  conn.flush() catch { _ => () }
+}
+
+///|
+fn role_delta() -> Map[String, Json] {
+  { "role": Json::string("assistant"), "content": Json::string("") }
+}
+
+///|
+fn reasoning_delta(thought : String) -> Map[String, Json] {
+  { "reasoning_content": Json::string(thought) }
+}
+
+///|
+fn content_delta(text : String) -> Map[String, Json] {
+  { "content": Json::string(text) }
+}
+
+///|
+fn chunk(model : String, delta : Map[String, Json], finish : String?) -> String {
+  let choice : Map[String, Json] = {
+    "index": Json::number(0.0),
+    "delta": Json::object(delta),
+  }
+  choice["finish_reason"] = match finish {
+    Some(reason) => Json::string(reason)
+    None => Json::null()
+  }
+  Json::object({
+    "id": Json::string("mock-1"),
+    "object": Json::string("chat.completion.chunk"),
+    "model": Json::string(model),
+    "choices": Json::array([Json::object(choice)]),
+  }).stringify()
+}
+
+///|
+/// usage 走一个 choices 为空数组的块，和真实网关一致。
+fn usage_event(model : String) -> String {
+  Json::object({
+    "id": Json::string("mock-1"),
+    "object": Json::string("chat.completion.chunk"),
+    "model": Json::string(model),
+    "choices": Json::array(([] : Array[Json])),
+    "usage": usage_object(),
+  }).stringify()
+}
+
+///|
+fn usage_object() -> Json {
+  Json::object({
+    "prompt_tokens": Json::number(prompt_tokens.to_double()),
+    "completion_tokens": Json::number(completion_tokens.to_double()),
+    "total_tokens": Json::number(
+      (prompt_tokens + completion_tokens).to_double(),
+    ),
+    "reasoning_tokens": Json::number(reasoning_tokens.to_double()),
+  })
+}
+
+// ---------------------------------------------------------------- 工具
+
+///|
+async fn send_json_error(conn : @http.ServerConnection, code : Int, message : String) -> Unit {
+  let payload = Json::object({
+    "error": Json::object({ "message": Json::string(message) }),
+  })
+  send_body(conn, code, "application/json; charset=utf-8", payload.stringify())
+}
+
+///|
+async fn send_body(
+  conn : @http.ServerConnection,
+  code : Int,
+  content_type : String,
+  body : String,
+) -> Unit {
+  conn.send_response(code, "OK", extra_headers={ "Content-Type": content_type })
+  conn.write_string(body)
+  conn.end_response()
+}
+
+///|
+async fn read_body(body : &@io.Reader) -> String {
+  let data = body.read_all() catch { _ => return "" }
+  data.text() catch { _ => "" }
+}
+
+///|
+/// 头部查找不区分大小写：客户端可能发 Authorization / authorization。
+fn header(headers : Map[String, String], name : String) -> String {
+  let wanted = name.to_lower()
+  for key, value in headers {
+    if key.to_lower() == wanted {
+      return value
+    }
+  }
+  ""
+}
+
+///|
+fn stream_delay_ms() -> Int {
+  let seconds = match @env.get_env_var("MOCK_STREAM_DELAY") {
+    Some(text) =>
+      @string.parse_double(text) catch {
+        _ => 0.15
+      }
+    None => 0.15
+  }
+  (seconds * 1000.0).to_int()
+}

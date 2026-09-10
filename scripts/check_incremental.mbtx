@@ -1,0 +1,126 @@
+///| 验证 `--stream` 真的在回复结束**之前**就把碎片吐出来了。
+///
+///   moon run --target native scripts/check_incremental.mbtx -- <binary> <base_url>
+///
+/// 必须显式 --target native：不指定时默认后端是 wasm，
+/// 而 @process 的进程/管道 API 和 extern "c" 都只有 native 才有。
+///
+/// 为什么需要单独测：把整个回复缓冲起来再一次性输出，最终文本**完全一样**。
+/// 只比对输出，区分不出「流式」和「攒完再吐」。所以这里量的是
+/// **首字节到达时刻相对于进程退出时刻**——缓冲式实现的首字节会贴着退出时刻。
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/string" @string,
+}
+
+///| 假端点固定返回这个，全 ASCII
+let expected : String = "Hello from the mock server."
+
+///| 首字节必须比退出时刻早这么多毫秒，才算真的在流式。
+/// 这个阈值要求假端点的 MOCK_STREAM_DELAY 明显大于它（测试里用 0.4s）。
+let min_gap_ms : UInt64 = 300
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+///|
+async fn main {
+  let args = @env.args().filter(fn(arg) { arg != "--" })
+  if args.length() < 2 {
+    fail("用法：moon run scripts/check_incremental.mbtx -- <binary> <base_url>")
+  }
+  let raw_binary = args[args.length() - 2]
+  let base_url = args[args.length() - 1]
+  // spawn 用绝对路径更稳：调用方可能传相对的 ./_build/...
+  let binary = if raw_binary.has_prefix("/") {
+    raw_binary
+  } else {
+    match @env.current_dir() {
+      Some(dir) => dir + "/" + raw_binary
+      None => raw_binary
+    }
+  }
+  let child_args : Array[String] = [
+    "--stream",
+    "--base-url",
+    base_url,
+    "--api-key",
+    "test-key",
+    "hi",
+  ]
+  let (reader, sink) = @process.read_from_process() catch {
+    _ => {
+      fail("无法创建读取管道")
+      return
+    }
+  }
+  let start = @env.now()
+  let pid = @process.spawn_orphan(
+    binary,
+    child_args,
+    inherit_env=true,
+    stdout=sink,
+    stderr=@stdio.stderr,
+  ) catch {
+    _ => {
+      fail("无法启动 " + binary)
+      return
+    }
+  }
+  // 逐字节读，记下第一个字节到达的时刻
+  let buf = StringBuilder()
+  let mut first_ms : UInt64 = 0
+  let mut saw_non_ascii = false
+  while true {
+    let chunk = reader.read_some(max_len=1) catch { _ => None }
+    match chunk {
+      None => break
+      Some(bytes) =>
+        if bytes.length() > 0 {
+          if first_ms == 0 {
+            first_ms = @env.now() - start
+          }
+          let byte = bytes[0].to_int()
+          if byte > 127 {
+            saw_non_ascii = true
+          }
+          // 期望文本是全 ASCII，直接按字节拼字符即可；
+          // 一旦出现非 ASCII 就得改成 @utf8.decode，下面会拦下来。
+          buf.write_char(Int::unsafe_to_char(byte))
+        }
+    }
+  }
+  let code = @process.wait_pid(pid) catch { _ => -1 }
+  let total_ms = @env.now() - start
+  let text = buf.to_string().trim(chars=" \t\r\n").to_owned()
+  if saw_non_ascii {
+    fail("输出含非 ASCII 字节，本脚本的逐字节拼装不再成立，请改用 @utf8.decode")
+  }
+  if code != 0 {
+    fail("子进程退出码 \{code}")
+  }
+  if text != expected {
+    fail("流式输出为「\{text}」，期望「\{expected}」")
+  }
+  if first_ms == 0 {
+    fail("完全没有输出")
+  }
+  if first_ms + min_gap_ms > total_ms {
+    fail(
+      "首字节在 \{first_ms}ms，进程在 \{total_ms}ms 结束——输出被缓冲了，不是流式",
+    )
+  }
+  println(
+    "ok: 首字节 \{first_ms}ms，结束 \{total_ms}ms（增量投递）",
+  )
+}
+
+///|
+async fn fail(message : String) -> Unit {
+  @stdio.stderr.write("FAIL: " + message + "\n") catch { _ => () }
+  c_exit(1)
+}
