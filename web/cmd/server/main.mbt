@@ -16,7 +16,8 @@
 ///   LLM_WEB_WORK    运行目录（默认 runs）
 ///   LLM_WEB_CASES   用例文件（默认 ../bench/cases.example.jsonl）
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
-///   LLM_WEB_MODELS  允许的模型白名单，逗号分隔
+///   LLM_WEB_SSG    静态报告生成器（默认 ../web/_build/.../ssg.exe）
+///   LLM_WEB_MODELS  默认模型菜单，逗号分隔（请求也可使用其它模型）
 ///   MOONLLM_API_KEY / OPENAI_API_KEY   网关密钥（不下发给浏览器）
 ///   MOONLLM_BASE_URL / OPENAI_BASE_URL 网关地址
 async fn main {
@@ -29,11 +30,15 @@ async fn main {
   let bench_bin = @env.get_env_var("LLM_BENCH_BIN").unwrap_or(
     "../_build/native/debug/build/cmd/bench/bench.exe",
   )
+  let ssg_bin = @env.get_env_var("LLM_WEB_SSG").unwrap_or(
+    "_build/native/debug/build/cmd/ssg/ssg.exe",
+  )
   let config : ServerConfig = {
     static_dir,
     work_dir,
     cases_path,
     bench_bin,
+    ssg_bin,
     models: allowed_models(),
     base_url: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or(
       "https://api.openai.com/v1",
@@ -76,6 +81,7 @@ struct ServerConfig {
   work_dir : String
   cases_path : String
   bench_bin : String
+  ssg_bin : String
   models : Array[String]
   base_url : String
   api_key : String
@@ -143,7 +149,7 @@ async fn handle(
     (Get, "/api/meta") => send_json(conn, 200, meta_json(config))
     (Post, "/api/runs") => start_run(config, body, conn)
     (Get, _) if path.has_prefix("/api/runs/") =>
-      get_run(config, path[10:].to_owned(), conn)
+      get_run_route(config, path[10:].to_owned(), conn)
     (Get, _) => serve_static(config, path, conn)
     (Post, _) => send_text(conn, 404, "no such endpoint")
     _ => send_text(conn, 405, "method not allowed")
@@ -303,7 +309,10 @@ async fn start_run(
       return
     }
   }
-  write_text(dir + "/request.json", json.stringify(indent=2) + "\n")
+  // apiKey is deliberately omitted from the on-disk request document. It is
+  // only carried in the child environment below.
+  let safe_json = sanitized_request_json(obj)
+  write_text(dir + "/request.json", safe_json.stringify(indent=2) + "\n")
   let command = match build_command(config, request, dir) {
     Ok(command) => command
     Err(message) => {
@@ -314,7 +323,7 @@ async fn start_run(
   let spawned = @process.spawn_orphan(
     "/bin/sh",
     ["-c", command],
-    extra_env=run_env(config),
+    extra_env=run_env(config, request),
     inherit_env=true,
     stderr=@process.redirect_to_file(
       dir + "/stderr.log",
@@ -339,8 +348,11 @@ async fn start_run(
 
 ///|
 /// 网关密钥只在服务端；bench 从环境读它，不进命令行参数。
-fn run_env(config : ServerConfig) -> Map[String, String] {
-  { "MOONLLM_API_KEY": config.api_key, "MOONLLM_BASE_URL": config.base_url }
+fn run_env(config : ServerConfig, request : RunRequest) -> Map[String, String] {
+  {
+    "MOONLLM_API_KEY": request.api_key.unwrap_or(config.api_key),
+    "MOONLLM_BASE_URL": request.base_url.unwrap_or(config.base_url),
+  }
 }
 
 ///|
@@ -357,6 +369,8 @@ struct RunRequest {
   temperature : Double
   pace_ms : Int
   retry : Int
+  base_url : String?
+  api_key : String?
 }
 
 ///|
@@ -384,9 +398,18 @@ async fn parse_run_request(
       })
     _ => []
   }
-  let models = models.filter(fn(model) { config.models.contains(model) })
+  let models = models.filter(fn(model) {
+    let clean = model.trim(chars=" \t\r\n")
+    clean.length() > 0 &&
+    clean.length() <= 128 &&
+    !clean.contains("\n") &&
+    !clean.contains("\r")
+  })
   if models.is_empty() {
-    return Err("models: pick at least one of " + config.models.join(", "))
+    return Err("models: pick at least one non-empty model id")
+  }
+  if models.length() > 8 {
+    return Err("models: at most 8 model ids")
   }
   let case_ids = match obj.get("cases") {
     Some(Array(items)) =>
@@ -417,6 +440,14 @@ async fn parse_run_request(
   let pace_ms = int_of(obj, "paceMs", 0)
   let retry = int_of(obj, "retry", 1)
   let temperature = number_of(obj, "temperature", 0.0)
+  let base_url = optional_string(obj, "baseUrl")
+  let api_key = optional_string(obj, "apiKey")
+  if base_url is Some(url) && url.length() > 2048 {
+    return Err("baseUrl is too long")
+  }
+  if api_key is Some(key) && key.length() > 4096 {
+    return Err("apiKey is too long")
+  }
   if repeats < 1 || repeats > 20 {
     return Err("repeats must be between 1 and 20")
   }
@@ -435,7 +466,25 @@ async fn parse_run_request(
     temperature,
     pace_ms,
     retry,
+    base_url,
+    api_key,
   })
+}
+
+///|
+fn optional_string(obj : Map[String, Json], key : String) -> String? {
+  match obj.get(key) {
+    Some(String(value)) => Some(value)
+    _ => None
+  }
+}
+
+///|
+/// Make the persisted request safe: credentials never enter request.json.
+fn sanitized_request_json(obj : Map[String, Json]) -> Json {
+  let safe : Map[String, Json] = Map([])
+  obj.each(fn(key, value) { if key != "apiKey" { safe[key] = value } })
+  Json::object(safe)
 }
 
 ///|
@@ -480,6 +529,9 @@ async fn build_command(
   if request.retry > 0 {
     argv.push("--retry")
     argv.push(request.retry.to_string())
+  }
+  if request.api_key.unwrap_or(config.api_key) == "" {
+    argv.push("--no-key")
   }
   let quoted = argv.map(quote).join(" ")
   Ok(
@@ -571,6 +623,122 @@ async fn allocate_run_dir(
 }
 
 ///|
+/// Route the status document and the five result export forms.
+async fn get_run_route(
+  config : ServerConfig,
+  suffix : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  let slash = suffix.find("/")
+  let id = match slash {
+    Some(index) => suffix[:index].to_owned()
+    None => suffix
+  }
+  let wanted = match slash {
+    Some(index) => Some(suffix[index + 1:].to_owned())
+    None => None
+  }
+  match wanted {
+    Some("runs.jsonl") => send_run_file(config, id, "runs.jsonl", conn)
+    Some("data.json") => send_run_file(config, id, "data.json", conn)
+    Some("report.html") => send_report(config, id, conn)
+    Some(_) => send_text(conn, 404, "no such run export")
+    None => get_run(config, id, conn)
+  }
+}
+
+///|
+async fn send_run_file(
+  config : ServerConfig,
+  id : String,
+  name : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let path = config.work_dir + "/" + id + "/" + name
+  if !(@fs.exists(path) catch { _ => false }) {
+    send_text(conn, 404, "export is not ready")
+    return
+  }
+  let content = @fs.read_file(path) catch {
+    _ => {
+      send_text(conn, 500, "cannot read export")
+      return
+    }
+  }
+  conn.send_response(200, "OK", extra_headers={
+    "Content-Type": content_type(name),
+    // 文件名都是简单 token（runs.jsonl / data.json），RFC 6266 不要求引号，
+    // 而不引号就不用往字符串里塞双引号
+    "Content-Disposition": "attachment; filename=" + name,
+  })
+  conn.write_string(content.text() catch { _ => "" })
+  conn.end_response()
+}
+
+///|
+async fn send_report(
+  config : ServerConfig,
+  id : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let dir = config.work_dir + "/" + id
+  let report = dir + "/report/report.html"
+  if !(@fs.exists(report) catch { _ => false }) {
+    let data = dir + "/data.json"
+    if !(@fs.exists(data) catch { _ => false }) {
+      send_text(conn, 409, "report is not ready")
+      return
+    }
+    let pid = @process.spawn_orphan(
+      config.ssg_bin,
+      [],
+      extra_env={ "LLM_WEB_DATA": data, "LLM_WEB_OUT": dir + "/report" },
+      inherit_env=true,
+    ) catch {
+      _ => {
+        send_text(conn, 500, "cannot start report generator")
+        return
+      }
+    }
+    ignore(@process.wait_pid(pid))
+  }
+  let html = read_text(report)
+  let css = read_text(dir + "/report/site.css")
+  // 下载是单文件，不能指望旁边的 site.css 跟着走：把样式内联进去，
+  // 保存到本地或者贴给别人都是自包含的。
+  let html = if css == "" { html } else { inline_css(html, css) }
+  conn.send_response(200, "OK", extra_headers={
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Disposition": "attachment; filename=report.html",
+  })
+  conn.write_string(html)
+  conn.end_response()
+}
+
+///|
+/// 把样式表插到 `</head>` 前面。ssg 生成的 HTML 会引用同目录的 site.css，
+/// 而下载下来的是单个文件，那个引用会悬空。
+fn inline_css(html : String, css : String) -> String {
+  match html.find("</head>") {
+    Some(index) =>
+      html[:index].to_owned() +
+      "<style>\n" +
+      css +
+      "</style>\n" +
+      html[index:].to_owned()
+    None => html + "<style>\n" + css + "</style>\n"
+  }
+}
+
+///|
 async fn get_run(
   config : ServerConfig,
   id : String,
@@ -600,24 +768,65 @@ async fn get_run(
     "status": Json::string(status),
     "done": Json::number(done.to_double()),
     "total": Json::number(total.to_double()),
-    "exitCode": if exit_code.length() == 0 {
-      Json::null()
-    } else {
-      Json::string(exit_code)
-    },
   }
-  if status == "running" {
-    payload["tail"] = Json::string(tail_text(dir + "/stderr.log", 12))
+  // 可选字段一律「有就加、没有就不加」。别发 null：MoonBit 派生的 Option 解码
+  // 只认「键缺失」，遇到 null 会报 String::from_json: expected string，
+  // 而客户端一旦整个响应解析失败就会把运行当成失败并停掉轮询。
+  // （曾经就这么错过一次：运行中 exitCode 发 null，页面直接死在第一次轮询。）
+  if exit_code.length() > 0 {
+    payload["exitCode"] = Json::string(exit_code)
   }
+  payload["tail"] = Json::string(tail_text(dir + "/stderr.log", 12))
+  let counts = run_counts(dir + "/runs.jsonl")
+  payload["failures"] = Json::number(counts.0.to_double())
+  payload["retried"] = Json::number(counts.1.to_double())
+  payload["truncated"] = Json::number(counts.2.to_double())
   if status == "done" {
-    let data = read_text(dir + "/data.json")
-    let parsed = @json.parse(data) catch { _ => Json::null() }
-    payload["data"] = parsed
+    match parse_json(read_text(dir + "/data.json")) {
+      Some(parsed) => payload["data"] = parsed
+      None => ()
+    }
   }
   if status == "failed" {
     payload["error"] = Json::string(tail_text(dir + "/stderr.log", 20))
   }
   send_json(conn, 200, Json::object(payload))
+}
+
+///|
+/// 解析 JSON，解析不出来就返回 None——而不是一个 Json::null() 值。
+/// 这两种在派生解码面前不是一回事：键缺失会被 Option 接受，null 会报错。
+fn parse_json(text : String) -> Json? {
+  if text == "" {
+    return None
+  }
+  Some(@json.parse(text) catch { _ => return None })
+}
+
+///|
+/// Count live raw records, including retry and truncation counters.
+async fn run_counts(path : String) -> (Int, Int, Int) {
+  let mut failures = 0
+  let mut retried = 0
+  let mut truncated = 0
+  for line in read_text(path).split("\n") {
+    let json = @json.parse(line.trim(chars=" \t\r").to_owned()) catch {
+      _ => continue
+    }
+    guard json is Object(obj) else { continue }
+    if obj.get("ok") != Some(Json::boolean(true)) {
+      failures += 1
+    }
+    match obj.get("attempts") {
+      Some(Number(value, ..)) => if value.to_int() > 1 { retried += 1 }
+      _ => ()
+    }
+    match obj.get("finish_reason") {
+      Some(String(reason)) => if reason == "length" { truncated += 1 }
+      _ => ()
+    }
+  }
+  (failures, retried, truncated)
 }
 
 ///|

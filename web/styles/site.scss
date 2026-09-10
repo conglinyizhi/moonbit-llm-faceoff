@@ -480,3 +480,88 @@ button.primary {
   height: 100%;
   transition: width 0.3s ease;
 }
+
+// ---------------------------------------------------------------- 新增控件
+
+// 网关覆盖项：和模型选择区分开，这里填的东西只对本次运行生效
+.gateway-row {
+  border-top: 1px solid $border;
+  padding-top: 1rem;
+}
+
+// 导出那一排：复用 .actions 的布局，只是按钮换成次级样式
+.export-row {
+  flex-wrap: wrap;
+  margin-bottom: 1.6rem;
+  margin-top: 1.2rem;
+
+  a {
+    background: $panel-2;
+    border: 1px solid $border;
+    border-radius: 0.35rem;
+    color: $text;
+    font-size: 0.85rem;
+    padding: 0.35rem 0.8rem;
+    text-decoration: none;
+
+    &:hover {
+      border-color: $accent;
+      color: $title;
+    }
+  }
+
+  .copied {
+    color: $accent-2;
+  }
+}
+
+button.ghost {
+  background: $panel-2;
+  border: 1px solid $border;
+  border-radius: 0.35rem;
+  color: $text;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.8rem;
+
+  &:hover {
+    border-color: $accent;
+    color: $title;
+  }
+}
+
+// 失败 / 重试 / 截断，跟着运行实时变
+.progress-counts {
+  color: $muted;
+  font-size: 0.85rem;
+  margin-top: 0.6rem;
+}
+
+// 实时日志尾：默认折起来，要看的时候再展开
+.log-tail {
+  margin-top: 0.8rem;
+
+  summary {
+    color: $muted;
+    cursor: pointer;
+    font-size: 0.85rem;
+
+    &:hover {
+      color: $text;
+    }
+  }
+
+  pre {
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 0.35rem;
+    color: $muted;
+    font-size: 0.78rem;
+    margin: 0.6rem 0 0;
+    max-height: 16rem;
+    overflow: auto;
+    padding: 0.6rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}

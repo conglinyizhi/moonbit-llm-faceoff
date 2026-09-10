@@ -7,14 +7,32 @@
 // 结果是「页面永远停在正在载入」。这里改成真实等待。
 //
 // 用法：node scripts/cdp-dump.mjs <debugPort> <url> <waitMs> [outFile] [shotPng]
+//                      [--script <js>] [--script-wait <ms>]
 //
 // shotPng 给定时额外存一张整页截图（captureBeyondViewport），
 // 用来做视觉检查——DOM 对了不代表页面长得对。
+//
+// --script 在初次等待之后执行（awaitPromise=true，所以可以是 async 函数），
+// 然后再等 --script-wait 毫秒才转储。返回值与抛出的异常都打到 stderr，
+// 调用方可以 grep —— 想验证「点一下按钮到底发生了什么」就用它。
 
 import { writeFileSync } from "node:fs"
 
-const [port, url, waitMsRaw, outFile, shotFile] = process.argv.slice(2)
+const argv = process.argv.slice(2)
+const flags = {}
+const positional = []
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i].startsWith("--")) {
+    flags[argv[i].slice(2)] = argv[i + 1] ?? true
+    i++
+  } else {
+    positional.push(argv[i])
+  }
+}
+
+const [port, url, waitMsRaw, outFile, shotFile] = positional
 const waitMs = Number(waitMsRaw || 8000)
+const scriptWait = Number(flags["script-wait"] || 1200)
 
 const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
 const page = list.find((target) => target.type === "page")
@@ -66,6 +84,31 @@ await call("Emulation.setDeviceMetricsOverride", {
 })
 await call("Page.navigate", { url })
 await new Promise((resolve) => setTimeout(resolve, waitMs))
+
+// 剪贴板读取要显式授权，否则 navigator.clipboard.readText() 直接抛。
+if (flags.script) {
+  await call("Browser.grantPermissions", {
+    origin: new URL(url).origin,
+    permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+  })
+  const outcome = await call("Runtime.evaluate", {
+    expression: String(flags.script),
+    returnByValue: true,
+    awaitPromise: true,
+  })
+  const details = outcome.result?.exceptionDetails
+  if (details) {
+    notes.push(
+      "SCRIPT ERROR " +
+        (details.exception?.description || details.text || "unknown"),
+    )
+  }
+  const value = outcome.result?.result?.value
+  if (value !== undefined) {
+    notes.push("SCRIPT " + JSON.stringify(value))
+  }
+  await new Promise((resolve) => setTimeout(resolve, scriptWait))
+}
 
 const result = await call("Runtime.evaluate", {
   expression: "document.documentElement.outerHTML",

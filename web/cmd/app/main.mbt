@@ -49,6 +49,11 @@ struct RunStatus {
   total : Int
   data : Json?
   error : String?
+  tail : String?
+  exitCode : String?
+  failures : Int
+  retried : Int
+  truncated : Int
 } derive(Eq, FromJson)
 
 ///|
@@ -57,6 +62,15 @@ struct RunStatus {
 /// 有了它就能把一次配置直接做成可分享的链接，例如
 ///   /?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short&repeats=1
 extern "js" fn current_search() -> String = "() => window.location.search"
+
+///|
+/// 复制到剪贴板。优先用异步 Clipboard API（需要 secure context，127.0.0.1
+/// 算），拿不到就退到 execCommand 的老路子。返回是否已经发出复制指令。
+extern "js" fn copy_text(text : String) -> Bool = "(text) => { try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text); return true } const a = document.createElement('textarea'); a.value = text; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); const ok = document.execCommand('copy'); document.body.removeChild(a); return ok } catch (e) { return false } }"
+
+///|
+/// 当前页面的 origin + path，用来拼分享链接。
+extern "js" fn page_base() -> String = "() => window.location.origin + window.location.pathname"
 
 // ---------------------------------------------------------------- 状态
 
@@ -84,6 +98,20 @@ struct AppModel {
   /// 页面打开时的 query string（?autorun / models / cases / repeats / …）。
   /// meta 到齐后套用，让链接本身就能表达一次完整配置。
   query : Map[String, String]
+  /// 服务端菜单之外的模型 id，逗号或换行分隔；与勾选结果合并后生效。
+  extra_models : String
+  /// 页面覆盖的网关地址。空串表示用服务端环境里的那份。
+  base_url : String
+  /// 页面覆盖的网关密钥。空串表示用服务端环境里的那份。
+  /// 只活在页面内存里：不进 URL、不进 localStorage、也不写进请求的存档。
+  api_key : String
+  /// 上一次复制操作的反馈文字。
+  copied : String?
+  /// 运行中的实时信息：日志尾 + 失败/重试/截断计数。
+  tail : String
+  failures : Int
+  retried : Int
+  truncated : Int
 } derive(Eq)
 
 ///|
@@ -109,6 +137,14 @@ fn initial_model() -> AppModel {
     total: 0,
     data: None,
     error: None,
+    extra_models: "",
+    base_url: query.get("baseUrl").unwrap_or(""),
+    api_key: "",
+    copied: None,
+    tail: "",
+    failures: 0,
+    retried: 0,
+    truncated: 0,
   }
 }
 
@@ -230,6 +266,11 @@ enum Msg {
   StartRun
   RunStarted(Result[StartResponse, Error])
   RunProgress(Result[RunStatus, Error])
+  ExtraModelsChanged(String)
+  BaseUrlChanged(String)
+  ApiKeyChanged(String)
+  CopyMarkdown
+  CopyShareLink
 }
 
 // ---------------------------------------------------------------- 命令
@@ -363,6 +404,13 @@ fn update(
       }
     UsePrompt(value) => ({ ..model, use_prompt: value, }, @cmd.none)
     PromptChanged(text) => ({ ..model, prompt: text, }, @cmd.none)
+    ExtraModelsChanged(text) => ({ ..model, extra_models: text, }, @cmd.none)
+    BaseUrlChanged(text) => ({ ..model, base_url: text, }, @cmd.none)
+    ApiKeyChanged(text) => ({ ..model, api_key: text, }, @cmd.none)
+    CopyMarkdown =>
+      ({ ..model, copied: Some(copy_markdown(model)), }, @cmd.none)
+    CopyShareLink =>
+      ({ ..model, copied: Some(copy_share_link(model)), }, @cmd.none)
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
     MaxTokensChanged(text) =>
@@ -439,6 +487,10 @@ fn update(
             total: status.total,
             data,
             error: status.error,
+            tail: status.tail.unwrap_or(""),
+            failures: status.failures,
+            retried: status.retried,
+            truncated: status.truncated,
           }
           let id = match model.run_id {
             Some(id) => id
@@ -513,12 +565,15 @@ struct RunPayload {
   temperature : Double
   paceMs : Int
   retry : Int
+  /// 空表示用服务端环境里的那份。不要发空串——那会把服务端的配置覆盖成空。
+  baseUrl : String?
+  apiKey : String?
 } derive(ToJson)
 
 ///|
 fn RunPayload::of(model : AppModel) -> RunPayload {
   {
-    models: model.selected_models,
+    models: effective_models(model),
     cases: if model.use_prompt {
       []
     } else {
@@ -534,6 +589,115 @@ fn RunPayload::of(model : AppModel) -> RunPayload {
     temperature: model.temperature,
     paceMs: model.pace_ms,
     retry: model.retry,
+    baseUrl: if model.base_url == "" {
+      None
+    } else {
+      Some(model.base_url)
+    },
+    apiKey: if model.api_key == "" {
+      None
+    } else {
+      Some(model.api_key)
+    },
+  }
+}
+
+///|
+/// 勾选的模型 + 手输的额外模型，去重后就是本次真正要跑的列表。
+fn effective_models(model : AppModel) -> Array[String] {
+  let out : Array[String] = []
+  for id in model.selected_models {
+    out.push(id)
+  }
+  let normalized = model.extra_models.replace_all(old="\n", new=",")
+  for piece in normalized.split(",") {
+    let clean = piece.trim(chars=" \t\r").to_owned()
+    if clean != "" && !out.contains(clean) {
+      out.push(clean)
+    }
+  }
+  out
+}
+
+///|
+/// 只转义会破坏 query 的字符。`:` `/` 这些在 query 里合法，转了反而难读。
+fn percent_encode(text : String) -> String {
+  let buf = StringBuilder()
+  let n = text.length()
+  let mut i = 0
+  while i < n {
+    let code = text[i].to_int()
+    let escape = match code {
+      0x20 => Some("%20")
+      0x22 => Some("%22")
+      0x23 => Some("%23")
+      0x25 => Some("%25")
+      0x26 => Some("%26")
+      0x2B => Some("%2B")
+      0x3D => Some("%3D")
+      0x3C => Some("%3C")
+      0x3E => Some("%3E")
+      0x5C => Some("%5C")
+      _ => None
+    }
+    match escape {
+      Some(replacement) => buf.write_string(replacement)
+      None => buf.write_char(Int::unsafe_to_char(code))
+    }
+    i = i + 1
+  }
+  buf.to_string()
+}
+
+///|
+/// 把当前配置拼回一个可分享的链接。
+/// **刻意不含 api_key**——链接是拿去贴的，里面不能带凭证。
+fn share_url(model : AppModel) -> String {
+  let parts : Array[String] = []
+  let models = effective_models(model)
+  if models.length() > 0 {
+    parts.push("models=" + percent_encode(models.join(",")))
+  }
+  if model.use_prompt && model.prompt != "" {
+    parts.push("prompt=" + percent_encode(model.prompt))
+  } else if model.selected_cases.length() > 0 {
+    parts.push("cases=" + percent_encode(model.selected_cases.join(",")))
+  }
+  parts.push("repeats=" + model.repeats.to_string())
+  parts.push("maxTokens=" + model.max_tokens.to_string())
+  parts.push("temperature=" + model.temperature.to_string())
+  parts.push("paceMs=" + model.pace_ms.to_string())
+  parts.push("retry=" + model.retry.to_string())
+  if model.base_url != "" {
+    parts.push("baseUrl=" + percent_encode(model.base_url))
+  }
+  page_base() + "?" + parts.join("&")
+}
+
+///|
+/// 复制 Markdown 报告，返回一句给用户看的反馈。
+fn copy_markdown(model : AppModel) -> String {
+  match model.data {
+    None => "还没有结果可复制"
+    Some(data) => {
+      let text = @shared.results_markdown(data)
+      if text == "" {
+        "还没有结果可复制"
+      } else if copy_text(text) {
+        "已复制 Markdown 报告"
+      } else {
+        "复制失败：浏览器不允许访问剪贴板"
+      }
+    }
+  }
+}
+
+///|
+fn copy_share_link(model : AppModel) -> String {
+  if copy_text(share_url(model)) {
+    "已复制分享链接"
+  } else {
+    "复制失败：浏览器不允许访问剪贴板"
   }
 }
 
@@ -547,6 +711,7 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       controls(model, emit),
       progress(model),
       result_section(model),
+      export_row(model, emit),
     ]),
     footer(model),
   ])
@@ -606,7 +771,12 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         @html.h1([txt("模型对比")]),
         @html.p([
           txt(
-            "勾选模型与用例、调好参数，点开始。运行在服务端串行执行，进度实时回传；网关密钥不下发到浏览器。",
+            "勾选或直接填模型、调好参数，点开始。运行在服务端串行执行，进度实时回传。",
+          ),
+        ]),
+        @html.p([
+          txt(
+            "网关默认用服务端配置；下面填了地址或密钥就只对本次运行生效，密钥只经过本页内存，不落盘。",
           ),
         ]),
         if !meta.hasKey {
@@ -622,6 +792,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         case_picker(meta, model, emit),
         prompt_picker(model, emit),
         param_row(model, emit),
+        gateway_row(model, emit),
         action_row(model, emit),
       ])
   }
@@ -644,6 +815,20 @@ fn model_picker(
   el("fieldset", "picker", [
     el("legend", "", [txt("模型")]),
     el("div", "picker-items", boxes),
+    el("div", "field", [
+      @html.label(for_="extra-models", [
+        txt(
+          "也可以直接填模型 id（逗号分隔，与服务端菜单合并）",
+        ),
+      ]),
+      @html.input(
+        input_type=@html.InputType::Text,
+        id="extra-models",
+        value=model.extra_models,
+        placeholder="例如 deepseek-chat,deepseek-reasoner",
+        on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
+      ),
+    ]),
   ])
 }
 
@@ -768,7 +953,7 @@ fn number_field(
 ///|
 fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let running = model.status == "running" || model.status == "starting"
-  let total = model.selected_models.length() *
+  let total = effective_models(model).length() *
     (if model.use_prompt { 1 } else { model.selected_cases.length() }) *
     model.repeats
   el("div", "actions", [
@@ -783,6 +968,80 @@ fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ),
     el("span", "hint", [txt("约 \{total} 次请求")]),
   ])
+}
+
+///|
+/// 网关覆盖项。留空就用服务端环境里的那份；填了只对本次运行生效。
+fn gateway_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let base_hint = match model.meta {
+    Some(meta) => "留空用服务端的：" + meta.baseUrl
+    None => ""
+  }
+  let key_hint = match model.meta {
+    Some(meta) =>
+      if meta.hasKey {
+        "留空用服务端已配置的密钥"
+      } else {
+        "服务端没配密钥；留空表示不带 key"
+      }
+    None => ""
+  }
+  el("div", "params gateway-row", [
+    el("div", "field", [
+      @html.label(for_="base-url", [txt("网关地址")]),
+      @html.input(
+        input_type=@html.InputType::Text,
+        id="base-url",
+        value=model.base_url,
+        placeholder=base_hint,
+        on_input=emit.map(fn(text) { BaseUrlChanged(text) }),
+      ),
+    ]),
+    el("div", "field", [
+      @html.label(for_="api-key", [txt("API key")]),
+      // type=password：不让人从截屏里读走；也不回显服务端已有的那把。
+      @html.input(
+        input_type=@html.InputType::Password,
+        id="api-key",
+        value=model.api_key,
+        placeholder=key_hint,
+        on_input=emit.map(fn(text) { ApiKeyChanged(text) }),
+      ),
+    ]),
+  ])
+}
+
+///|
+/// 结果导出。前三个是纯下载链接（交给浏览器），后两个要写剪贴板。
+fn export_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  match model.run_id {
+    None => @html.fragment([])
+    Some(id) => {
+      let base = "/api/runs/" + id
+      el("div", "actions export-row", [
+        el("span", "hint", [txt("导出：")]),
+        @html.button(class="ghost", on_click=emit(Msg::CopyMarkdown), [
+          txt("复制 Markdown 报告"),
+        ]),
+        @html.button(class="ghost", on_click=emit(Msg::CopyShareLink), [
+          txt("复制分享链接"),
+        ]),
+        @html.a(href=base + "/runs.jsonl", download="runs.jsonl", [
+          txt("下载 runs.jsonl"),
+        ]),
+        @html.a(href=base + "/data.json", download="data.json", [
+          txt("下载 data.json"),
+        ]),
+        @html.a(href=base + "/report.html", download="report.html", [
+          txt("下载静态报告"),
+        ]),
+        match model.copied {
+          Some(text) => el("span", "hint copied", [txt(text)])
+          None => @html.fragment([])
+        },
+      ])
+    }
+  }
 }
 
 ///|
@@ -810,6 +1069,19 @@ fn progress(model : AppModel) -> @html.Html {
         ([] : Array[@html.Html]),
       ),
     ]),
+    el("div", "progress-counts", [
+      txt(
+        "失败 \{model.failures} · 重试 \{model.retried} · 截断 \{model.truncated}",
+      ),
+    ]),
+    if model.tail == "" {
+      @html.fragment([])
+    } else {
+      el("details", "log-tail", [
+        el("summary", "", [txt("实时日志尾部（stderr）")]),
+        @html.pre([txt(model.tail)]),
+      ])
+    },
     match model.error {
       Some(error) => @html.pre([txt(error)])
       None => @html.fragment([])

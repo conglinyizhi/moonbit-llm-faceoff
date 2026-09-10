@@ -272,9 +272,14 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 # → http://127.0.0.1:8137/
 ```
 
-页面上可以勾模型、选用例、调重复次数 / `max_tokens` / 温度 / 间隔 / 重试、填一次性指令，然后点开始。进度和结果实时回传。
+页面上可以：
 
-**网关密钥由服务端读取，不会作为页面的一部分下发给浏览器**——页面只知道「配了 key 没有」。万一上游错误把密钥回显回来，正文在到达页面或磁盘之前就已经遮蔽了，见 [`SECURITY.md`](SECURITY.md)。
+- 从服务端菜单里勾模型，**也可以直接手填模型 id**；调重复次数 / `max_tokens` / 温度 / 间隔 / 重试，填一次性指令，然后点开始；
+- 为这一次运行**覆盖网关地址和 API key**，切本地 `ollama` 或换一家 provider 不用重启服务端。两项都可留空，留空就用服务端环境里的；
+- 看进度、实时的失败/重试/截断计数，以及可展开的运行 `stderr` 尾部；
+- 导出结果——复制 Markdown 报告、复制可分享链接，或下载 `runs.jsonl` / `data.json` / 自包含的 `report.html`。
+
+**在页面上填的密钥只活在标签页内存里**，走环境变量交给子进程（不走命令行，所以 `ps` 里看不到），并且写 `request.json` 之前会被摘掉。**服务端持有的密钥从不下发给浏览器**。两种情况下一旦上游错误把密钥回显回来，正文在到达页面或磁盘之前就已经遮蔽了，见 [`SECURITY.md`](SECURITY.md)。
 
 ### URL 本身就是配置
 
@@ -284,7 +289,7 @@ query 参数覆盖默认值，`autorun=1` 表示打开即跑——所以一条�
 http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=1
 ```
 
-支持：`autorun`、`models`、`cases`、`prompt`、`repeats`、`maxTokens`、`temperature`、`paceMs`、`retry`。
+支持：`autorun`、`models`、`cases`、`prompt`、`repeats`、`maxTokens`、`temperature`、`paceMs`、`retry`、`baseUrl`。**刻意没有 `apiKey`**——密钥不该出现在 URL 里。
 
 ### API
 
@@ -292,7 +297,10 @@ http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short
 | --- | --- |
 | `GET /api/meta` | `{models, cases, defaults, hasKey, baseUrl}` |
 | `POST /api/runs` | 建一次运行 → `{id, total}` |
-| `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail?, data?, error?}` |
+| `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
+| `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |
+| `GET /api/runs/<id>/data.json` | 页面数据文档，直接下载 |
+| `GET /api/runs/<id>/report.html` | 自包含的静态报告，首次请求时生成 |
 
 `data` 和静态报告消费的是同一份文档。一次运行是一个**子进程**（`bench --json … --web-data …`），全部状态落在 `web/runs/<id>/` 里的文件：
 
@@ -315,8 +323,9 @@ web/runs/<id>/
 | `LLM_WEB_STATIC` | `out` |
 | `LLM_WEB_WORK` | `runs` |
 | `LLM_WEB_CASES` | `../bench/cases.example.jsonl` |
-| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` |
+| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` —— 只是默认菜单，运行可以指定任意模型 |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
+| `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
 | `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
 
@@ -400,7 +409,7 @@ println(@bench.format_summaries(summaries))
 各 target 只是脚本的薄封装，两边不会跑偏。
 
 ```bash
-make ci        # deps + check + 单测 + smoke + 构建页面
+make ci        # deps + check + 单测 + smoke + 服务端 API + 构建页面
 make e2e       # 再加上浏览器测试——需要 chromium，比较慢
 make           # 列出全部 target
 ```
@@ -408,8 +417,9 @@ make           # 列出全部 target
 底下实际执行的是：
 
 ```bash
-moon test --target native      # 54 个单测，不联网
+moon test --target native      # 58 个单测，不联网（54 + web/ 里 4 个）
 bash scripts/smoke.sh          # 命令行端到端，对着本地假端点
+bash scripts/server-api.sh     # 服务端 HTTP 契约，含密钥处理
 bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 ```
 
@@ -417,7 +427,8 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 | --- | --- |
 | `moon test` | 配置解析与优先级、参数解析与错误分支、请求 JSON 结构、响应解码、SSE 分帧（正文/思考/usage/finish/`[DONE]`/CRLF/畸形输入）、用例文件解析、统计量、吞吐推导、运行记录往返、页面数据契约、上游错误体里的密钥遮蔽 |
 | `scripts/smoke.sh` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败、鉴权失败时不得回显密钥，以及 bench 打同一个假端点 |
-| `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来，`?autorun` 链接确实能跑完一次评测并渲染结果，八个并发 `POST /api/runs` 拿到八个不同 id，且跑完之后开始按钮回到可用状态 |
+| `scripts/server-api.sh` | 请求体里的 `baseUrl`/`apiKey` 与服务端自己那套（故意设坏）相反能否生效、菜单外的模型 id、实时计数、三种导出，**密钥绝不落进运行目录或响应**，以及路径穿越被拒 |
+| `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来（含模型 / 网关 / 密钥输入框），`?autorun` 链接确实能跑完一次评测并渲染结果，八个并发 `POST /api/runs` 拿到八个不同 id，跑完之后开始按钮回到可用状态，且导出区产出的 Markdown 与分享链接内容正确（分享链接不含密钥） |
 
 其中三条是刻意写成这样的——**用「显而易见的写法」会在实现坏了的情况下照样通过**：
 

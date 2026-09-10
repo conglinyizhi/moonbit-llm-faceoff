@@ -40,6 +40,8 @@ pub fn parse_page_data_json(Json) -> Result[PageData, String]
 
 pub fn plain(String, Array[@html.Html]) -> @html.Html
 
+pub fn results_markdown(PageData) -> String
+
 pub fn results_section(PageData) -> @html.Html
 
 pub fn stat(String, MetricStats?, String) -> @html.Html

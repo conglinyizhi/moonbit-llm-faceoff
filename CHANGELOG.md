@@ -26,6 +26,13 @@ All notable changes to this project are documented here. The format follows
 - License changed from Apache-2.0 to MIT. The repository contains no third-party
   source, so the change applies cleanly.
 - `web/` now depends on `conglinyizhi/precss` 0.1.1.
+- `POST /api/runs` accepts `baseUrl` and `apiKey`, and `LLM_WEB_MODELS` became a
+  default menu rather than a hard allowlist. Empty fields still mean "use the
+  server's", which is why the payload sends them as absent rather than blank.
+- `GET /api/runs/<id>` gained `failures`, `retried` and `truncated`, and now
+  always returns `tail` instead of only while the run is going.
+- The key reaches the child process through the **environment** rather than its
+  command line, so it no longer appears in `ps`.
 
 ### Fixed
 
@@ -65,6 +72,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The web page is a workbench now.** Model ids can be typed instead of only
+  picked from the server's menu, the gateway address and API key can be
+  overridden for a single run, the run's live failure/retry/truncation counts and
+  its `stderr` tail are visible while it runs, and the result can be exported
+  five ways: copy the report as Markdown, copy a shareable URL, or download
+  `runs.jsonl`, `data.json`, or a self-contained `report.html`.
+- `scripts/server-api.sh`: the server's HTTP contract, asserted — a run whose
+  `baseUrl` and `apiKey` come from the request body while the server's own are
+  deliberately broken, model ids outside the menu, the live counters, all three
+  exports, that the key never reaches the run directory or a response, and that
+  path traversal is refused.
+- `web/` has unit tests now (`web/shared/markdown_test.mbt`), and `make test`
+  runs both modules rather than only the root.
+- `scripts/cdp-dump.mjs` grew `--script` / `--script-wait`, so a browser test can
+  drive the page before dumping it.
 - `Makefile`: `make ci` is the definition of passing — deps, type check, unit
   tests, smoke, page build — and it is the same command locally as in CI, so
   there is one definition rather than two. `make` lists the targets, and the

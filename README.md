@@ -296,14 +296,25 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 # → http://127.0.0.1:8137/
 ```
 
-From the page you can pick models and cases, set repeats / `max_tokens` /
-temperature / pacing / retries, type a one-off prompt, and start a run. Progress
-and results stream back while it runs.
+From the page you can:
 
-The gateway key is read by the **server**, never handed to the browser as part
-of the page. The page only learns whether a key is configured. Should an
-upstream error echo the key back, the body is masked before it reaches the page
-or the disk — see [`SECURITY.md`](SECURITY.md).
+- pick models from the server's menu **or type model ids directly**, set repeats /
+  `max_tokens` / temperature / pacing / retries, type a one-off prompt, and start
+  a run;
+- override the **gateway address and API key** for that one run, so a local
+  `ollama` or a second provider does not need a server restart. Both fields are
+  optional and fall back to the server's environment;
+- watch progress, the live failure/retry/truncation counts, and a collapsible
+  tail of the run's `stderr`;
+- export the result — copy the report as Markdown, copy a shareable URL, or
+  download `runs.jsonl`, `data.json`, or a self-contained `report.html`.
+
+A key typed into the page stays in the tab's memory, is passed to the child
+process through the environment rather than its command line, and is stripped
+out of the run's `request.json` before it is written. A key the *server* holds is
+never handed to the browser. Either way, if an upstream error echoes the key
+back the body is masked before it reaches the page or the disk — see
+[`SECURITY.md`](SECURITY.md).
 
 ### The URL is the configuration
 
@@ -315,7 +326,8 @@ http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short
 ```
 
 Supported: `autorun`, `models`, `cases`, `prompt`, `repeats`, `maxTokens`,
-`temperature`, `paceMs`, `retry`.
+`temperature`, `paceMs`, `retry`, `baseUrl`. There is deliberately no `apiKey`
+parameter — a key does not belong in a URL.
 
 ### API
 
@@ -323,7 +335,10 @@ Supported: `autorun`, `models`, `cases`, `prompt`, `repeats`, `maxTokens`,
 | --- | --- |
 | `GET /api/meta` | `{models, cases, defaults, hasKey, baseUrl}` |
 | `POST /api/runs` | start a run → `{id, total}` |
-| `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail?, data?, error?}` |
+| `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
+| `GET /api/runs/<id>/runs.jsonl` | the raw per-attempt log, as a download |
+| `GET /api/runs/<id>/data.json` | the page-data document, as a download |
+| `GET /api/runs/<id>/report.html` | a self-contained static report, generated on first request |
 
 `data` is the same document the static report consumes. A run is a
 **subprocess** (`bench --json … --web-data …`), and its whole state lives in
@@ -348,8 +363,9 @@ web/runs/<id>/
 | `LLM_WEB_STATIC` | `out` |
 | `LLM_WEB_WORK` | `runs` |
 | `LLM_WEB_CASES` | `../bench/cases.example.jsonl` |
-| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` |
+| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` — the default menu; a run may name any model |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
+| `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
 | `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
 
@@ -463,7 +479,7 @@ and it is the same single command you can run locally. The targets are thin
 wrappers over the scripts, so the two cannot drift.
 
 ```bash
-make ci        # deps, check, unit tests, smoke, build the page
+make ci        # deps, check, unit tests, smoke, server API, build the page
 make e2e       # the browser test as well — needs chromium, and it is slow
 make           # list every target
 ```
@@ -471,8 +487,9 @@ make           # list every target
 Underneath:
 
 ```bash
-moon test --target native      # 54 unit tests, no network
+moon test --target native      # 58 unit tests, no network (54 + 4 in web/)
 bash scripts/smoke.sh          # CLI end-to-end against a local mock endpoint
+bash scripts/server-api.sh     # server HTTP contract, including key handling
 bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 ```
 
@@ -480,7 +497,8 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | --- | --- |
 | `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
 | `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock |
-| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta`, an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, and the start button is usable again once the run finishes |
+| `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
+| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 
 Three of these exist because the obvious version would pass on a broken
 implementation:

@@ -3,9 +3,11 @@
 # 浏览器端到端测试：真的起服务、真的用 chromium 打开页面。
 #
 # 覆盖：
-#   1. 页面加载 → /api/meta → 表单渲染（证明静态服务 + js + API 通了）
+#   1. 页面加载 → /api/meta → 表单渲染（含手输模型 / 网关 / 密钥）
 #   2. ?autorun 链接 → 真的跑一次评测 → 结果渲染出来
-#   3. 静态资源与 404
+#   3. 导出区与复制（真的点按钮，真的读剪贴板）
+#   4. 并发创建运行：8 个并发必须拿到 8 个不同 id
+#   5. 服务端运行目录与静态资源
 #
 # 全程用 mock LLM 端点，不碰真实网关、不需要 key。
 
@@ -112,6 +114,13 @@ dump_page() {
   node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" 2>"$3.err" || true
 }
 
+# 转储前先跑一段 JS（cdp-dump.mjs 的 --script）。脚本的返回值与异常都打到
+# $3.err，调用方 grep SCRIPT 那一行就能拿到结果。
+dump_page_script() {
+  node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" \
+    --script "$4" --script-wait "${5:-1500}" 2>"$3.err" || true
+}
+
 start_browser
 dump_page "http://127.0.0.1:$PORT/" 6000 "$tmp/form.html"
 
@@ -120,7 +129,12 @@ grep -q 'id="model-mock-b"' "$tmp/form.html" || fail "表单里没有第二个�
 grep -q 'id="case-math-short"' "$tmp/form.html" || fail "表单里没有用例选项" "$tmp/form.html"
 grep -q '开始评测' "$tmp/form.html" || fail "表单里没有开始按钮" "$tmp/form.html"
 grep -q 'id="repeats"' "$tmp/form.html" || fail "表单里没有参数输入" "$tmp/form.html"
-echo "ok: 浏览器里表单渲染出来了（/api/meta 链路通）"
+# 新增的输入控件：能手填模型 id、网关地址与密钥
+grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模型 id 的输入框" "$tmp/form.html"
+grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
+grep -q 'id="api-key"' "$tmp/form.html" || fail "表单里没有 API key 输入框" "$tmp/form.html"
+grep -q 'type="password"' "$tmp/form.html" || fail "API key 输入框不是 password 类型" "$tmp/form.html"
+echo "ok: 浏览器里表单渲染出来了（含手输模型 / 网关 / 密钥，/api/meta 链路通）"
 
 echo "==> 浏览器触发一次评测（?autorun）"
 run_url="http://127.0.0.1:$PORT/?autorun=1&models=mock-a,mock-b&cases=math-short&repeats=1&maxTokens=64&paceMs=0&retry=0"
@@ -137,6 +151,83 @@ grep -q 'Hello from the mock server' "$tmp/run.html" || fail "结果里没有模
 grep -q 'primary busy' "$tmp/run.html" && fail "跑完之后按钮仍是忙碌态" "$tmp/run.html"
 grep -q '开始评测' "$tmp/run.html" || fail "跑完之后没有回到可点的开始按钮" "$tmp/run.html"
 echo "ok: 浏览器里跑完一次评测并渲染出了结果（按钮已回到可用态）"
+
+echo "==> 导出区与复制"
+# 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
+# 这样拿到的正是应用要写进剪贴板的内容，且不依赖无头浏览器是否允许读剪贴板。
+# 这段 JS 刻意只用双引号，好安全地裹在 shell 的单引号里。
+export_probe='(async () => {
+  const row = document.querySelector(".export-row");
+  if (!row) { return { error: "no export row" }; }
+  const buttons = Array.from(row.querySelectorAll("button"));
+  const links = Array.from(row.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+  let captured = null;
+  try {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (text) => { captured = text; return Promise.resolve(); } },
+    });
+  } catch (e) {}
+  const grabs = {};
+  for (const pair of [["markdown", 0], ["share", 1]]) {
+    captured = null;
+    buttons[pair[1]].click();
+    await new Promise((r) => setTimeout(r, 350));
+    grabs[pair[0]] = captured;
+  }
+  const copied = row.querySelector(".copied");
+  return {
+    labels: buttons.map((b) => b.textContent),
+    links: links,
+    feedback: copied ? copied.textContent : "",
+    markdown: grabs.markdown,
+    share: grabs.share,
+  };
+})()'
+dump_page_script "$run_url" 30000 "$tmp/export.html" "$export_probe" 2000
+
+probe=$(grep -o 'SCRIPT {.*' "$tmp/export.html.err" | head -1)
+[ -n "$probe" ] || fail "导出探针没返回结果" "$tmp/export.html.err"
+echo "$probe" | grep -q '复制 Markdown 报告' || fail "没有「复制 Markdown 报告」按钮：$probe"
+echo "$probe" | grep -q '复制分享链接' || fail "没有「复制分享链接」按钮：$probe"
+echo "$probe" | grep -q '/runs.jsonl' || fail "没有 runs.jsonl 下载链接：$probe"
+echo "$probe" | grep -q '/data.json' || fail "没有 data.json 下载链接：$probe"
+echo "$probe" | grep -q '/report.html' || fail "没有静态报告下载链接：$probe"
+grep -q '已复制' "$tmp/export.html" ||
+  fail "点了复制之后页面上没有反馈文字" "$tmp/export.html"
+
+# 复制出来的 Markdown 要是真报告：表头、指标名、逐例输出
+echo "$probe" | grep -q '指标' || fail "复制的 Markdown 里没有对比表：$probe"
+echo "$probe" | grep -q 'math-short' || fail "复制的 Markdown 里没有用例：$probe"
+echo "$probe" | grep -q 'Hello from the mock server' ||
+  fail "复制的 Markdown 里没有模型输出：$probe"
+
+# 分享链接要能重建配置，且绝不能带密钥
+echo "$probe" | grep -q 'models=' || fail "分享链接里没有 models 参数：$probe"
+echo "$probe" | grep -q 'repeats=' || fail "分享链接里没有 repeats 参数：$probe"
+if echo "$probe" | grep -qE 'apiKey|test-key'; then
+  fail "分享链接里带了密钥：$probe"
+fi
+echo "ok: 导出区五项齐全，Markdown 与分享链接内容正确"
+
+echo "==> 运行中就要能读到状态"
+# 这一条是为一个真实 bug 加的：服务端曾经在运行中发 "exitCode": null，
+# 而 MoonBit 派生的 Option 解码只认「键缺失」不认 null —— 页面在第一次轮询
+# 就整个解析失败，把运行标成失败并停止轮询。只测「跑完之后」是抓不到的，
+# 因为那时候 exitCode 已经是真字符串了。
+# 这里让一次运行持续几秒（3 次 x 700ms 间隔），在 1.2 秒时采样。
+mid_url="http://127.0.0.1:$PORT/?autorun=1&models=mock-a&cases=math-short&repeats=3&maxTokens=32&paceMs=700&retry=0"
+dump_page "$mid_url" 1200 "$tmp/mid.html"
+
+grep -q 'JsonDecodeError' "$tmp/mid.html" &&
+  fail "运行中响应解析失败了（页面会把运行误判成失败）" "$tmp/mid.html"
+grep -q '运行中' "$tmp/mid.html" ||
+  fail "运行中页面没有「运行中」状态" "$tmp/mid.html"
+grep -q '失败 0 · 重试 0 · 截断 0' "$tmp/mid.html" ||
+  fail "运行中看不到实时失败/重试/截断计数" "$tmp/mid.html"
+grep -q '实时日志尾部' "$tmp/mid.html" ||
+  fail "运行中看不到日志尾" "$tmp/mid.html"
+echo "ok: 运行中状态可读（进行中 / 实时计数 / 日志尾）"
 
 echo "==> 并发创建运行：id 必须互不重复"
 # 每个请求各写各的文件：8 个进程并发 >> 同一个文件不可靠，也不好诊断

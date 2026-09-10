@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke e2e demo web fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -30,11 +30,15 @@ check:  ## type-check the root (native) and web (native + js)
 	cd web && $(MOON) check --target native
 	cd web && $(MOON) check --target js
 
-test:  ## unit tests
+test:  ## unit tests, both modules
 	$(MOON) test --target native
+	cd web && $(MOON) test --target native
 
 smoke:  ## the CLIs end to end, against a local mock endpoint
 	bash scripts/smoke.sh
+
+api:  ## the server HTTP contract: overrides, exports, traversal guards
+	bash scripts/server-api.sh
 
 e2e:  ## browser end to end; needs chromium, and it is slow
 	bash scripts/web-e2e.sh
@@ -51,7 +55,7 @@ fmt:  ## format, and refresh the generated .mbti
 	cd web && $(MOON) fmt
 	cd web && $(MOON) info
 
-ci: deps check test smoke web  ## the deterministic suite CI runs
+ci: deps check test smoke api web  ## the deterministic suite CI runs
 	@echo
 	@echo "ci: ok"
 

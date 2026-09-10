@@ -11,8 +11,9 @@ describes what it does; this file is what an agent needs before touching it.
 the targets, and the Makefile sets `MOON_CC` for you.
 
 ```bash
-make ci                       # deps, check, tests, smoke, page build
+make ci                       # deps, check, tests, smoke, server API, page build
 make e2e                      # add the browser test (real Chromium; slow)
+bash scripts/server-api.sh    # server HTTP contract; asserts the key handling
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
@@ -46,6 +47,12 @@ Breaking any of these produces a confusing failure, not a clean error.
 - **The start button does not use the `disabled` attribute.** A VDOM diff that
   goes busy → idle does not remove it, which left the button permanently dead.
   Busy state is a class; repeat clicks are ignored in `update`.
+- **A key typed into the page must never reach disk.** `web/runs/<id>/request.json`
+  is written from a scrubbed copy of the request body, with `apiKey` removed
+  before serialization. Keep it that way, and add an assertion when you touch it.
+- **The export routes match a fixed allowlist of names** rather than joining
+  user input onto a path. Do not turn `send_run_file` into a general file
+  server.
 - **Never commit a key,** and read `SECURITY.md` before writing anything that
   persists response bodies — an upstream error can echo the key back.
 
