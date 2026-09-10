@@ -22,9 +22,10 @@ every path, and then searching the whole working tree for that key.
   environment.
 - It is sent to exactly one destination: the endpoint at `MOONLLM_BASE_URL`.
   There is no telemetry and no second service.
-- The page never receives the key. `GET /api/meta` reports only whether a key is
-  configured (`"hasKey": true|false`); the key stays on the server's side of the
-  request boundary, and the browser talks to the server, not to the endpoint.
+- The page is never handed the key. `GET /api/meta` reports only whether one is
+  configured (`"hasKey": true|false`); the browser talks to the server and the
+  server talks to the endpoint. The one path by which a fragment can reach the
+  page is a masked upstream error body, described below.
 - Run output under `web/runs/<id>/` holds the request payload, the metrics and
   the model output. It does not hold the key.
 

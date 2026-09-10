@@ -10,7 +10,7 @@ describes what it does; this file is what an agent needs before touching it.
 ```bash
 export MOON_CC=gcc            # Linux: without it native builds look for /usr/bin/lib.exe
 moon check --target native
-moon test --target native     # 48 tests
+moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
 bash scripts/demo.sh          # zero-API-key demo

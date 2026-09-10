@@ -157,6 +157,7 @@ echo "总结一下这段日志" | faceoff --stream
 | `--timeout-ms <n>` | 单请求超时（默认 60000；**只作用于一次性路径**） |
 | `--no-key` | 允许空 key（本地端点） |
 | `--` | 后面的全部当作 prompt 文本 |
+| `-h`, `--help` | 打印上面的用法 |
 
 ### 环境变量
 
@@ -273,7 +274,7 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 
 页面上可以勾模型、选用例、调重复次数 / `max_tokens` / 温度 / 间隔 / 重试、填一次性指令，然后点开始。进度和结果实时回传。
 
-**网关密钥由服务端读取，不会下发到浏览器。**
+**网关密钥由服务端读取，不会作为页面的一部分下发给浏览器**——页面只知道「配了 key 没有」。万一上游错误把密钥回显回来，正文在到达页面或磁盘之前就已经遮蔽了，见 [`SECURITY.md`](SECURITY.md)。
 
 ### URL 本身就是配置
 
@@ -389,28 +390,29 @@ println(@bench.format_summaries(summaries))
 这个版本钉子现在已经没有外部原因了。第三方 LLM 包拿掉之后，库完全可以升到 0.21.x，两个模块就能并进同一个 workspace，子进程边界和 JSON 中转也就不再必要。那是一次独立的改动，还没做。
 
 **运行状态落在文件里，不在服务端内存里。**
-服务端没有共享可变状态，也没有锁。bench 进程通过 `/bin/sh` 启动，结束时由它把退出码追加到一个文件；**这个文件出现就是完成信号**，而 `runs.jsonl` 的行数就是进度。
+服务端不在内存里保存任何一次运行的状态：bench 进程通过 `/bin/sh` 启动，结束时由它把退出码追加到一个文件；**这个文件出现就是完成信号**，而 `runs.jsonl` 的行数就是进度。运行 id 靠**建目录**来分配——目录已存在时 `mkdir` 会失败，这个失败本身就是原子的 test-and-set——所以两个并发请求不可能选到同一个 id。服务端里唯一的锁是一把信号量，用来串行化 `stderr` 写入：`@stdio.stderr` 是全局单句柄，并发写会让进程直接 abort。
 
 ---
 
 ## 6. 测试
 
 ```bash
-moon test --target native      # 45 个单测，不联网
+moon test --target native      # 54 个单测，不联网
 bash scripts/smoke.sh          # 命令行端到端，对着本地假端点
 bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 ```
 
 | 套件 | 覆盖 |
 | --- | --- |
-| `moon test` | 配置解析与优先级、参数解析与错误分支、请求 JSON 结构、响应解码、SSE 分帧（正文/思考/usage/finish/`[DONE]`/CRLF/畸形输入）、用例文件解析、统计量、吞吐推导、运行记录往返、页面数据契约 |
-| `scripts/smoke.sh` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败，以及 bench 打同一个假端点 |
-| `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来，`?autorun` 链接确实能跑完一次评测并渲染结果 |
+| `moon test` | 配置解析与优先级、参数解析与错误分支、请求 JSON 结构、响应解码、SSE 分帧（正文/思考/usage/finish/`[DONE]`/CRLF/畸形输入）、用例文件解析、统计量、吞吐推导、运行记录往返、页面数据契约、上游错误体里的密钥遮蔽 |
+| `scripts/smoke.sh` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败、鉴权失败时不得回显密钥，以及 bench 打同一个假端点 |
+| `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来，`?autorun` 链接确实能跑完一次评测并渲染结果，八个并发 `POST /api/runs` 拿到八个不同 id，且跑完之后开始按钮回到可用状态 |
 
-其中两条是刻意写成这样的——**用「显而易见的写法」会在实现坏了的情况下照样通过**：
+其中三条是刻意写成这样的——**用「显而易见的写法」会在实现坏了的情况下照样通过**：
 
 - **增量投递**：假端点每片之间 sleep，测试测量的是「首字节到达时刻相对于进程退出时刻」。只比对最终输出的话，缓冲式实现和流式实现的结果一模一样。
 - **非 ASCII 错误体**：假端点返回中文 429 正文，测试断言它能被解码。把字节当 UTF-16 重新解释而不是按 UTF-8 解码，这个错**只在非 ASCII 载荷上**才会暴露成乱码。
+- **并发建运行**：八个并发 `POST /api/runs` 必须拿到八个不同 id。单请求测试在 id 分配还是「读改写计数器」的时候照样能通过——只有两个请求同时到达才会崩，而手动测试恰恰永远不会那么干。
 
 `scripts/web-e2e.sh` 通过 DevTools 协议驱动 Chromium，按真实时间等待。它**刻意不用** `--virtual-time-budget`：虚拟时间会和页面自己的 `fetch` 抢时钟，转储出半加载的页面。用 `CHROME=/path/to/chrome` 可以换别的浏览器。
 
@@ -420,7 +422,6 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 
 - **`--timeout-ms` 不作用于流式路径。** 总时长超时会砍掉合法的长回复，空闲超时又需要给每次 read 套定时器。一次性路径是生效的。
 - **网页服务只绑 `127.0.0.1`，没有鉴权。** 它是本地开发工具，别对外暴露。
-- **运行 id 靠读改写计数器文件分配。** 两个并发的 `POST /api/runs` 可能撞同一个 id。重跑一次很便宜，而且每次运行各自独立目录不会串数据，但 id 分配确实不是原子的。
 - **只实现了 OpenAI 兼容的线格式。** 没有 Anthropic / Gemini 转换；端点必须接受 `/chat/completions`。
 - **target 声明**：库和两个命令行工具只声明 `native`；`web/` 下 `cmd/app` 是 `js`，`cmd/server` 和 `cmd/ssg` 是 `native`，`shared` 是 `js+native+wasm`。
 - **间隔与重试的默认值是启发式。** 只对着一个网关的限流器调过。你自己的环境用 `--pace-ms 0` 试一下就知道。
@@ -437,8 +438,10 @@ cli.mbt             Cli::parse，用法文本
 api.mbt             请求构造、响应/SSE 解析
 runner.mbt          ask / stream_chat / stream_parts / stream_to_stdout
 *_test.mbt          黑盒单测
+*_wbtest.mbt        白盒单测（内部辅助函数）
 
 bench/              测试工具
+  bench.mbt         入口
   case.mbt          用例解析
   runner.mbt        run_case / run_bench、重试、JSON 往返
   metrics.mbt       Stats、summarize
@@ -446,7 +449,7 @@ bench/              测试工具
   pagedata.mbt      网页模块消费的数据文档
   cli.mbt           bench 参数解析
 
-cmd/faceoff/          faceoff 可执行文件
+cmd/faceoff/        faceoff 可执行文件
 cmd/bench/          bench 可执行文件
 
 web/                前端（独立模块：Rabbita + precss）
@@ -464,7 +467,8 @@ scripts/
   check_incremental.mbtx  量 --stream 是否真的在流式
   smoke.sh              命令行端到端
   web-e2e.sh            浏览器端到端
-  cdp-dump.mjs          DevTools 协议 DOM 转储工具
+  cdp-dump.mjs          DevTools 协议 DOM 转储 / 整页截图
+  lib.sh                上面几个脚本共用的辅助函数
 
 docs/               选型调查、基准复盘
 ```

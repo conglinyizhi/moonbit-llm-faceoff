@@ -166,6 +166,7 @@ echo "总结一下这段日志" | faceoff --stream
 | `--timeout-ms <n>` | per-request timeout (default 60000; **one-shot path only**) |
 | `--no-key` | allow an empty API key (local endpoints) |
 | `--` | treat every following argument as prompt text |
+| `-h`, `--help` | print the usage above |
 
 ### Environment variables
 
@@ -299,7 +300,10 @@ From the page you can pick models and cases, set repeats / `max_tokens` /
 temperature / pacing / retries, type a one-off prompt, and start a run. Progress
 and results stream back while it runs.
 
-The gateway key is read by the **server** and never sent to the browser.
+The gateway key is read by the **server**, never handed to the browser as part
+of the page. The page only learns whether a key is configured. Should an
+upstream error echo the key back, the body is masked before it reaches the page
+or the disk — see [`SECURITY.md`](SECURITY.md).
 
 ### The URL is the configuration
 
@@ -441,28 +445,32 @@ subprocess boundary and the JSON hand-off would become unnecessary. That is a
 separate change and has not been made.
 
 **Run state lives in files, not in server memory.**
-The server has no shared mutable state and no locks. The bench process is
-spawned through `/bin/sh`, which appends its exit code to a file when it
-finishes; that file's presence is the completion signal, and counting lines in
-`runs.jsonl` gives progress.
+The server keeps no per-run state in memory: the bench process is spawned
+through `/bin/sh`, which appends its exit code to a file when it finishes; that
+file's presence is the completion signal, and counting lines in `runs.jsonl`
+gives progress. Run ids are handed out by *creating* the directory — `mkdir`
+fails when the directory already exists, and that failure is the test-and-set —
+so two simultaneous requests cannot pick the same id. The one lock in the server
+is a semaphore serializing `stderr` writes, because `@stdio.stderr` is a single
+global handle and concurrent writes to it abort the process.
 
 ---
 
 ## 6. Testing
 
 ```bash
-moon test --target native      # 45 unit tests, no network
+moon test --target native      # 54 unit tests, no network
 bash scripts/smoke.sh          # CLI end-to-end against a local mock endpoint
 bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 ```
 
 | suite | covers |
 | --- | --- |
-| `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract |
-| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, and the bench harness against the same mock |
-| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta`, and an `?autorun` link actually completes a run and renders its results |
+| `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
+| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock |
+| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta`, an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, and the start button is usable again once the run finishes |
 
-Two of these exist because the obvious version would pass on a broken
+Three of these exist because the obvious version would pass on a broken
 implementation:
 
 - **Incremental delivery.** The mock sleeps between fragments, and the test
@@ -471,6 +479,10 @@ implementation:
 - **Non-ASCII error bodies.** The mock sends a Chinese 429 body; the test
   asserts it decodes. Reinterpreting the bytes as UTF-16 instead of decoding
   UTF-8 is a mistake that produces mojibake only on non-ASCII payloads.
+- **Concurrent run creation.** Eight parallel `POST /api/runs` must come back
+  with eight distinct ids. A single-request test passes even while the id
+  allocation is a read-modify-write counter — it only breaks when two requests
+  arrive together, which is exactly what a hand-run test never does.
 
 `scripts/web-e2e.sh` drives Chromium over the DevTools protocol and waits in
 real time. It deliberately does **not** use `--virtual-time-budget`: virtual
@@ -486,10 +498,6 @@ time races the page's own `fetch`, and dumps a half-loaded page. Set
   need a timer around each read. The one-shot path does honor it.
 - **The web server binds `127.0.0.1` and has no authentication.** It is a local
   dev tool. Do not expose it.
-- **Run ids are allocated by read-modify-write on a counter file.** Two
-  simultaneous `POST /api/runs` can collide on an id. Runs are cheap to
-  re-trigger, and each lives in its own directory, so nothing gets mixed up —
-  but the id allocation is not atomic.
 - **Only the OpenAI-compatible wire format is implemented.** No Anthropic or
   Gemini translation; the endpoint must accept `/chat/completions`.
 - **Targets.** The library and its two CLIs declare `native` only; in `web/`,
@@ -511,8 +519,10 @@ cli.mbt             Cli::parse, usage text
 api.mbt             request building, response/SSE decoding
 runner.mbt          ask / stream_chat / stream_parts / stream_to_stdout
 *_test.mbt          blackbox unit tests
+*_wbtest.mbt        whitebox unit tests (internal helpers)
 
 bench/              the measurement harness
+  bench.mbt         entry point
   case.mbt          suite parsing
   runner.mbt        run_case / run_bench, retry, JSON round-trip
   metrics.mbt       Stats, summarize
@@ -520,7 +530,7 @@ bench/              the measurement harness
   pagedata.mbt      the document the web module consumes
   cli.mbt           bench flag parsing
 
-cmd/faceoff/          the faceoff executable
+cmd/faceoff/        the faceoff executable
 cmd/bench/          the bench executable
 
 web/                the frontends (own module: Rabbita + precss)
@@ -538,6 +548,8 @@ scripts/
   check_incremental.mbtx  measures that --stream really streams
   smoke.sh              CLI end-to-end
   web-e2e.sh            browser end-to-end
+  cdp-dump.mjs          drives headless chromium over the DevTools protocol
+  lib.sh                helpers shared by the scripts above
   cdp-dump.mjs          DevTools-protocol DOM dump helper
 
 docs/               library survey, benchmark notes

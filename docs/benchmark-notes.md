@@ -4,8 +4,9 @@
 
 Gateway: `https://api.modelbest.cn/v1` (OpenAI-compatible).
 Models: `MiniCPM5-1B` (1B) and `MiniCPM5-2B` (2B).
-Suite: `bench/cases.example.jsonl` — 5 cases (arithmetic, word problem, factual
-Chinese, JSON formatting, Python code) x 3 repeats x 2 models = 36 attempts.
+Suite: `bench/cases.example.jsonl` — 6 cases (arithmetic, a word problem, factual
+Chinese, JSON formatting, Python code, Chinese prose) x 3 repeats x 2 models = 36
+attempts.
 Serial, `temperature 0.0`, `max_tokens 2048`, `--pace-ms 3000 --retry 3`.
 Raw data: `bench/results-example.jsonl`. 0 failures, 0 truncations, 0 retries.
 
