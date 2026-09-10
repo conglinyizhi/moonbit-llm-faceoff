@@ -1,0 +1,543 @@
+# llm_client
+
+**English** · [中文](README.zh.md)
+
+A MoonBit client for OpenAI-compatible chat endpoints, plus a harness for
+comparing models on the same prompt suite.
+
+Three things you can run:
+
+| binary | what it does | source |
+| --- | --- | --- |
+| `llm_client` | ask one prompt, once or streamed | `cmd/main` |
+| `bench` | run a suite against several models and compare them | `cmd/bench` |
+| `web server` | interactive page: pick models/params, run, watch results | `web/cmd/server` |
+
+Every test in this repo runs offline against a bundled mock — no API key needed
+to see it work.
+
+---
+
+## Get it running
+
+You do **not** need to know MoonBit to run this. You need:
+
+- the MoonBit toolchain (step 1)
+- a C compiler — `gcc` or `clang`, usually already present
+
+That is the whole list. The demo and the tests need nothing else: the fake
+endpoint they run against is itself a MoonBit script
+([`scripts/mock_openai.mbtx`](scripts/mock_openai.mbtx)).
+
+### 1. Install MoonBit
+
+**Follow the official instructions — they are authoritative and stay current:**
+
+- English: <https://www.moonbitlang.com/download/>
+- 中文: <https://www.moonbitlang.cn/download/>
+
+For convenience, the three official methods are:
+
+| platform | command |
+| --- | --- |
+| macOS / Linux | `curl -fsSL https://cli.moonbitlang.com/install/unix.sh \| bash` |
+| Windows (PowerShell) | `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser; irm https://cli.moonbitlang.com/install/powershell.ps1 \| iex` |
+| VS Code | command palette → `MoonBit:install latest moonbit toolchain` |
+
+Then make sure `~/.moon/bin` is on your `PATH` and verify:
+
+```bash
+moon version
+```
+
+If any of the above fails or has changed, use the official page linked above
+rather than this table — this is a copy, that is the source.
+
+### 2. Build it and try it — without any API key
+
+```bash
+git clone <this repo> && cd llm_client
+bash scripts/demo.sh
+```
+
+`scripts/demo.sh` builds everything, starts a **local fake OpenAI-compatible
+endpoint**, and walks the three main paths: one-shot, streaming, and a two-model
+comparison. Entirely offline.
+
+```
+==> 1/3 one-shot
+航空母舰是一种以舰载机为主要作战武器的大型水面舰艇。
+
+==> 2/3 streaming (fragments arrive one by one)
+侧风掠过甲板，把雨线吹成斜的。
+
+==> 3/3 comparing two models
+model mock-a
+  runs 1   failures 0   truncated 0   retried 0
+    first token (ms)       1          0 ...
+...
+```
+
+### 3. Point it at a real endpoint
+
+Any OpenAI-compatible service works. Copy your provider's base URL and key:
+
+```bash
+export MOONLLM_BASE_URL="https://api.deepseek.com/v1"   # or any compatible base URL
+export MOONLLM_MODEL="deepseek-chat"
+export MOONLLM_API_KEY="sk-..."
+
+client=./_build/native/debug/build/cmd/main/main.exe
+$client "用一句话说明什么是航空母舰"
+$client --stream "写一首关于侧风的短诗"
+```
+
+Next steps: [compare models](#2-comparing-models), or [run the web page](#3-the-web-page).
+
+### New to MoonBit?
+
+A five-line orientation for reading this repo:
+
+| you see | it is |
+| --- | --- |
+| `moon.mod` | the module manifest — one per repository, like `package.json` or `Cargo.toml` |
+| `moon.pkg` | the package manifest — **one directory = one package**, listing that package's imports |
+| `*.mbt` | source files; `foo_test.mbt` / `foo_wbtest.mbt` are blackbox / whitebox tests |
+| `*.mbtx` | a **single-file script** — `moon run --target native file.mbtx`, no module or package manifest needed. Used here for the test utilities under `scripts/` |
+| `_build/` | build output (`_build/native/debug/build/.../main.exe`) |
+| `moon build` / `run` / `test` / `check` | build, run, test, type-check |
+
+Everything else in the language — see <https://docs.moonbitlang.com/> and the
+package registry <https://mooncakes.io/>.
+
+This repo is two modules: the library + CLIs at the root, and the web frontends
+under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
+`cd web` for the page.
+
+### If the build fails
+
+| symptom | fix |
+| --- | --- |
+| `failed to resolve native archiver executable /usr/bin/lib.exe`, or `new native backend requires a C compiler/linker driver` | a C compiler exists but wasn't picked up. Set it explicitly: `MOON_CC=gcc moon build --target native`. All scripts here already default to `MOON_CC=gcc`. |
+| `Cannot find import '...'` | stale registry index: run `moon update` |
+| browser tests fail with `cannot open shared object file` | the browser binary is older than the system libraries it links against. Check with `ldd $(command -v chromium)`, or point the tests elsewhere with `CHROME=/path/to/chrome` |
+
+---
+
+## Contents
+
+- [1. One-shot and streaming](#1-one-shot-and-streaming)
+- [2. Comparing models](#2-comparing-models)
+- [3. The web page](#3-the-web-page)
+- [4. Using the library](#4-using-the-library)
+- [5. Architecture notes](#5-architecture-notes)
+- [6. Testing](#6-testing)
+- [7. Known limits](#7-known-limits)
+- [8. Layout](#8-layout)
+- [9. Further reading](#9-further-reading)
+
+---
+
+## 1. One-shot and streaming
+
+```bash
+# one-shot
+llm_client "用一句话说明什么是航空母舰"
+
+# streamed, printed as fragments arrive
+llm_client --stream "写一首关于侧风的短诗"
+
+# prompt from stdin
+echo "总结一下这段日志" | llm_client --stream
+```
+
+### Flags
+
+| flag | meaning |
+| --- | --- |
+| `-s`, `--stream` | stream the reply as it is generated |
+| `--model <id>` | model id |
+| `--base-url <url>` | API base URL |
+| `--api-key <key>` | bearer token |
+| `--system <text>` | system prompt |
+| `--temperature <t>` | sampling temperature |
+| `--max-tokens <n>` | maximum generated tokens |
+| `--timeout-ms <n>` | per-request timeout (default 60000; **one-shot path only**) |
+| `--no-key` | allow an empty API key (local endpoints) |
+| `--` | treat every following argument as prompt text |
+
+### Environment variables
+
+Each setting uses the first non-empty variable in its list.
+
+| setting | variables | default |
+| --- | --- | --- |
+| API key | `MOONLLM_API_KEY`, `OPENAI_API_KEY`, `LLM_API_KEY` | — |
+| base URL | `MOONLLM_BASE_URL`, `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+| model | `MOONLLM_MODEL`, `OPENAI_MODEL` | `gpt-4o-mini` |
+| system | `MOONLLM_SYSTEM` | `You are a helpful assistant.` |
+
+Flags override the environment. Errors go to stderr and exit non-zero, so the
+CLI is safe to use in a pipeline:
+
+```
+$ llm_client --api-key wrong "hi"
+error: http 401: {"error":{"message":"invalid api key"}}
+```
+
+---
+
+## 2. Comparing models
+
+`bench` runs the same suite against several models, serially, and reports the
+comparison. Serial on purpose: two models competing for one connection is not a
+comparison.
+
+```bash
+bench \
+  --base-url https://api.modelbest.cn/v1 --api-key "$MB_KEY" \
+  --models MiniCPM5-1B,MiniCPM5-2B \
+  --cases bench/cases.example.jsonl \
+  --repeats 3 --max-tokens 2048 --temperature 0.0 \
+  --pace-ms 3000 --retry 3 \
+  --json bench/results-example.jsonl
+```
+
+A single ad-hoc prompt works without a suite file:
+
+```bash
+bench --model MiniCPM5-1B --prompt "用一句话说明什么是航空母舰" --show-cot
+```
+
+### Suite format
+
+JSON Lines, one case per line — or a single JSON array. Blank lines and lines
+starting with `#` are skipped. Only `prompt` is required.
+
+```json
+{"id": "math-short", "prompt": "计算 17 × 23。只输出数字。", "max_tokens": 512, "temperature": 0.0}
+```
+
+`id`, `system`, `max_tokens` and `temperature` are per-case overrides; anything
+absent falls back to the benchmark options. See `bench/cases.example.jsonl`.
+
+### What it measures
+
+Every attempt is a streamed request, so the timings come from real chunk
+arrival rather than from a total wall time.
+
+| metric | meaning |
+| --- | --- |
+| `first token` | until the first fragment of anything, reasoning included |
+| `first answer` | until the first fragment of the visible answer, i.e. after the chain of thought |
+| `total` | until the stream ends |
+| `decode tok/s` | `completion_tokens` over the window *after* the first token — the closest thing to decode speed a client can observe |
+| `end-to-end tok/s` | `completion_tokens` over the whole request |
+| `reasoning tokens` / `reasoning share` | how much of the budget went into thinking |
+| `failures` / `retried` / `truncated` | rate limits, server errors, replies cut off by `max_tokens` |
+
+Reasoning models make the last group matter: a model that is twice as fast per
+token but emits five times as many thinking tokens can lose on total time. See
+[`docs/benchmark-notes.md`](docs/benchmark-notes.md) for a worked example where
+exactly that happened.
+
+The report gives median / mean / min / max per model plus a side-by-side table,
+with a ratio column when exactly two models are given.
+
+### Rate limits
+
+A fast model can trip a per-minute request cap. `--pace-ms` spaces attempts
+out; `--retry` repeats 429/5xx with exponential backoff. The timer restarts on
+each retry, so a run that backed off still reports the latency of the attempt
+that produced tokens, and `attempts > 1` in the output records that it happened.
+
+### Replaying a run
+
+`--from-json` skips the model calls entirely and rebuilds the report and page
+data from a previous run log:
+
+```bash
+# no network, no API key needed
+bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
+```
+
+Useful for re-rendering after changing the report, or for re-scoring later
+without paying for the calls again.
+
+### Outputs
+
+| flag | what |
+| --- | --- |
+| `--json <file>` | every raw attempt as JSON Lines, including the full answer and reasoning text |
+| `--web-data <file>` | the page-data document the web module renders (schema in `bench/pagedata.mbt`) |
+| `--show-cot` | stream chain-of-thought text to stderr as it arrives |
+| `--show-output` | print each answer to stderr when the run settles |
+
+Progress goes to stderr, the report to stdout.
+
+```bash
+jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.content)"' \
+  bench/results-example.jsonl
+```
+
+---
+
+## 3. The web page
+
+```bash
+bash web/build.sh
+
+MOONLLM_API_KEY=... \
+MOONLLM_BASE_URL=https://api.modelbest.cn/v1 \
+LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
+  ./web/_build/native/debug/build/cmd/server/server.exe
+# → http://127.0.0.1:8137/
+```
+
+From the page you can pick models and cases, set repeats / `max_tokens` /
+temperature / pacing / retries, type a one-off prompt, and start a run. Progress
+and results stream back while it runs.
+
+The gateway key is read by the **server** and never sent to the browser.
+
+### The URL is the configuration
+
+Query parameters override the defaults, and `autorun=1` starts immediately on
+load — so a link can carry a whole comparison:
+
+```
+http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=1
+```
+
+Supported: `autorun`, `models`, `cases`, `prompt`, `repeats`, `maxTokens`,
+`temperature`, `paceMs`, `retry`.
+
+### API
+
+| endpoint | purpose |
+| --- | --- |
+| `GET /api/meta` | `{models, cases, defaults, hasKey, baseUrl}` |
+| `POST /api/runs` | start a run → `{id, total}` |
+| `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail?, data?, error?}` |
+
+`data` is the same document the static report consumes. A run is a
+**subprocess** (`bench --json … --web-data …`), and its whole state lives in
+files under `web/runs/<id>/`:
+
+```
+web/runs/<id>/
+  request.json     what was asked for
+  cases.jsonl      the filtered suite (when cases were selected)
+  runs.jsonl       bench's raw output, grows as it runs — progress is its line count
+  stdout.log       bench's stdout (the rendered report)
+  stderr.log       bench's progress log
+  exit_code        written last by the wrapper shell; its presence means "finished"
+  data.json        the final page-data document
+```
+
+### Server environment
+
+| variable | default |
+| --- | --- |
+| `LLM_WEB_PORT` | `8137` |
+| `LLM_WEB_STATIC` | `out` |
+| `LLM_WEB_WORK` | `runs` |
+| `LLM_WEB_CASES` | `../bench/cases.example.jsonl` |
+| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` |
+| `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
+| `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
+| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+
+### Static report
+
+`web/cmd/ssg` renders the same result components into a self-contained page —
+no JavaScript, no server:
+
+```bash
+bash web/build.sh path/to/other-runs.jsonl   # → web/out/report.html
+```
+
+### Styling
+
+`web/styles/site.scss` is compiled by [`conglinyizhi/precss`](https://mooncakes.io/docs/conglinyizhi/precss)
+at build time. It uses variables, nesting, `&`, `@mixin`/`@include` and
+`@media`; the compiled `out/site.css` has all of it resolved, with no leftover
+`$`, `@mixin` or `@include`. No CSS framework is involved.
+
+---
+
+## 4. Using the library
+
+The `bench` package is usable on its own; so is the client.
+
+```moonbit
+// one-shot
+let settings = @llm_client.Settings::from_env(env)
+let reply = @llm_client.ask(settings, "用一句话说明什么是航空母舰")
+
+// streaming, with reasoning fragments separated from the answer
+let outcome = @llm_client.stream_parts(settings, prompt, async fn(part) {
+  match part {
+    Content(text) => handle_answer(text)
+    Reasoning(thought) => handle_thought(thought)
+  }
+})
+// outcome.content, outcome.reasoning, outcome.usage, outcome.finish_reason
+```
+
+```moonbit
+// benchmarking
+let cases = @bench.parse_cases(text)
+let results = @bench.run_bench(settings, models, cases, options, on_start, on_part, on_result)
+let summaries = @bench.summarize_all(models, results)
+println(@bench.format_summaries(summaries))
+```
+
+`@bench.parse_results` reads a run log back, `RunResult::to_json` /
+`RunResult::from_json` round-trip a single attempt, and `page_data_json` builds
+the document the web module renders.
+
+Errors are flattened into `ClientError` (`Transport` / `Status` / `Decode`) so
+callers do not need to import the transport packages.
+
+---
+
+## 5. Architecture notes
+
+Three decisions that are not obvious from the code.
+
+**Streaming is implemented directly, not through the LLM library.**
+`DC-Z-lab/moonllm`'s `chat_stream` takes a *synchronous* callback, and a
+synchronous callback cannot call `@stdio.stdout.write` — so it cannot write
+fragments out as they arrive. The streaming path therefore talks to
+`moonbitlang/async/http` directly and parses SSE itself. `parse_sse_line` is a
+pure function so the framing logic stays unit-testable. The one-shot path still
+uses moonllm's typed client.
+
+**`web/` is a separate module that does not depend on the library.**
+`rabbita` needs `moonbitlang/async` 0.21.x while the library is pinned to 0.20.1
+(by `moonllm`). Putting both in one workspace forces a single async version, and
+that breaks the library. So the numbers are computed once, in `bench`, and
+handed over as JSON — across a process boundary for live runs, and as a file for
+the static report.
+
+**Run state lives in files, not in server memory.**
+The server has no shared mutable state and no locks. The bench process is
+spawned through `/bin/sh`, which appends its exit code to a file when it
+finishes; that file's presence is the completion signal, and counting lines in
+`runs.jsonl` gives progress.
+
+---
+
+## 6. Testing
+
+```bash
+moon test --target native      # 45 unit tests, no network
+bash scripts/smoke.sh          # CLI end-to-end against a local mock endpoint
+bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
+```
+
+| suite | covers |
+| --- | --- |
+| `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract |
+| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, and the bench harness against the same mock |
+| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta`, and an `?autorun` link actually completes a run and renders its results |
+
+Two of these exist because the obvious version would pass on a broken
+implementation:
+
+- **Incremental delivery.** The mock sleeps between fragments, and the test
+  measures *when the first byte arrived relative to process exit*. Comparing
+  final output alone cannot tell a streaming client from a buffering one.
+- **Non-ASCII error bodies.** The mock sends a Chinese 429 body; the test
+  asserts it decodes. Reinterpreting the bytes as UTF-16 instead of decoding
+  UTF-8 is a mistake that produces mojibake only on non-ASCII payloads.
+
+`scripts/web-e2e.sh` drives Chromium over the DevTools protocol and waits in
+real time. It deliberately does **not** use `--virtual-time-budget`: virtual
+time races the page's own `fetch`, and dumps a half-loaded page. Set
+`CHROME=/path/to/chrome` to use another browser binary.
+
+---
+
+## 7. Known limits
+
+- **`--timeout-ms` does not apply to the streaming path.** A total-duration
+  timeout would cut off legitimately long replies, and an idle timeout would
+  need a timer around each read. The one-shot path does honor it.
+- **The web server binds `127.0.0.1` and has no authentication.** It is a local
+  dev tool. Do not expose it.
+- **Run ids are allocated by read-modify-write on a counter file.** Two
+  simultaneous `POST /api/runs` can collide on an id. Runs are cheap to
+  re-trigger, and each lives in its own directory, so nothing gets mixed up —
+  but the id allocation is not atomic.
+- **Only OpenAI-compatible wire formats are exercised here.** moonllm can also
+  speak Anthropic; nothing in this repo tests that path.
+- **Targets.** The library and its two CLIs declare `native` only; in `web/`,
+  `cmd/app` is `js`, `cmd/server` and `cmd/ssg` are `native`, and `shared`
+  builds for `js+native+wasm`.
+- **Pacing and retry defaults are heuristics.** They were tuned against one
+  gateway's rate limiter. Check your own with `--pace-ms 0` and see what
+  happens.
+
+---
+
+## 8. Layout
+
+```text
+moon.pkg            library package imports (native only)
+llm_client.mbt      package documentation
+settings.mbt        Settings + ConfigError, environment resolution
+cli.mbt             Cli::parse, usage text
+api.mbt             request building, response/SSE decoding
+runner.mbt          ask / stream_chat / stream_parts / stream_to_stdout
+*_test.mbt          blackbox unit tests
+
+bench/              the measurement harness
+  case.mbt          suite parsing
+  runner.mbt        run_case / run_bench, retry, JSON round-trip
+  metrics.mbt       Stats, summarize
+  report.mbt        the human-readable report
+  pagedata.mbt      the document the web module consumes
+  cli.mbt           bench flag parsing
+
+cmd/main/           the llm_client executable
+cmd/bench/          the bench executable
+
+web/                the frontends (own module: Rabbita + precss)
+  shared/           data model + result components (js + native)
+  cmd/app/          interactive page (js, Rabbita TEA)
+  cmd/server/       static + API server (native)
+  cmd/ssg/          static report (native)
+  styles/           site.scss → precss → site.css
+  shell/            index.html shell for the interactive page
+  build.sh          one-command build
+
+scripts/
+  demo.sh               offline, no-API-key demo of all three paths
+  mock_openai.mbtx      offline OpenAI-compatible endpoint, as a MoonBit script
+  check_incremental.mbtx  measures that --stream really streams
+  smoke.sh              CLI end-to-end
+  web-e2e.sh            browser end-to-end
+  cdp-dump.mjs          DevTools-protocol DOM dump helper
+
+docs/               library survey, benchmark notes
+```
+
+---
+
+## 9. Further reading
+
+- [`docs/library-survey.md`](docs/library-survey.md) — the Mooncakes survey of
+  LLM client libraries that led to choosing moonllm, and the gaps found while
+  integrating it.
+- [`docs/benchmark-notes.md`](docs/benchmark-notes.md) — a worked
+  MiniCPM5-1B vs MiniCPM5-2B comparison, including the result that
+  contradicted the obvious reading of the throughput numbers.
+- MoonBit: <https://www.moonbitlang.com/> ·
+  docs <https://docs.moonbitlang.com/> ·
+  packages <https://mooncakes.io/>
+
+## License
+
+Apache-2.0. See [`LICENSE`](LICENSE).
