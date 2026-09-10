@@ -95,6 +95,8 @@ struct AppModel {
   error : String?
   /// 打开页面就立刻跑一次（来自 ?autorun=1），触发后置回 false。
   autorun : Bool
+  /// autorun 请求了、但当下没有可用的密钥，所以没跑。页面要解释一句。
+  autorun_held : Bool
   /// 页面打开时的 query string（?autorun / models / cases / repeats / …）。
   /// meta 到齐后套用，让链接本身就能表达一次完整配置。
   query : Map[String, String]
@@ -119,6 +121,7 @@ fn initial_model() -> AppModel {
   let query = parse_query(current_search())
   {
     autorun: query.get("autorun") == Some("1"),
+    autorun_held: false,
     query,
     meta: None,
     meta_error: None,
@@ -368,14 +371,22 @@ fn update(
             },
             use_prompt: query_prompt is Some(_),
           }
+          let has_key = meta.hasKey || next.api_key != ""
           if next.autorun &&
             !next.selected_models.is_empty() &&
             !next.selected_cases.is_empty() {
-            let payload = RunPayload::of(next)
-            (
-              { ..next, autorun: false, status: "starting", },
-              start_run(payload, emit),
-            )
+            if has_key {
+              let payload = RunPayload::of(next)
+              (
+                { ..next, autorun: false, status: "starting" },
+                start_run(payload, emit),
+              )
+            } else {
+              // 没有可用密钥就不自动开跑：跑下去只会撞上鉴权失败，而看到那个
+              // 错的人会以为是自己环境坏了。也不做成「填完就自动开跑」——
+              // 那样每敲一个字符都会被当成一次触发。
+              ({ ..next, autorun: false, autorun_held: true }, @cmd.none)
+            }
           } else {
             (next, @cmd.none)
           }
@@ -782,7 +793,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         if !meta.hasKey {
           el("p", "failed", [
             txt(
-              "服务端没有读到 API key（MOONLLM_API_KEY / OPENAI_API_KEY），运行会失败。",
+              "服务端没有读到 API key。可以在启动服务端前设好 MOONLLM_API_KEY / OPENAI_API_KEY，也可以直接在下面的 API key 里填一把。",
             ),
           ])
         } else {
@@ -794,6 +805,15 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         param_row(model, emit),
         gateway_row(model, emit),
         action_row(model, emit),
+        if model.autorun_held {
+          el("p", "notice", [
+            txt(
+              "链接里带了 autorun=1，但眼下没有可用的 API key，所以没有自动开跑——直接跑只会撞上鉴权失败。填好上面的 API key（或确认网关不需要 key）后点「开始评测」。",
+            ),
+          ])
+        } else {
+          @html.fragment([])
+        },
       ])
   }
 }

@@ -34,6 +34,17 @@ All notable changes to this project are documented here. The format follows
 - The key reaches the child process through the **environment** rather than its
   command line, so it no longer appears in `ps`.
 
+### Changed
+
+- `autorun=1` no longer starts a run when no API key is available anywhere. The
+  run could only fail with an authentication error, and that error reads like a
+  broken setup. The page now says why it did not start and waits for you to fill
+  the key in and press **开始评测**. Filling the key does not auto-start either —
+  that would fire on every keystroke.
+- The quick start no longer shows a long `?autorun=1&models=…&cases=…&repeats=…`
+  URL. It just says to open the page and work there. The query parameters keep
+  their own reference section, with a shorter example.
+
 ### Fixed
 
 - **The documented way to start the web server was broken.** Both READMEs ran it

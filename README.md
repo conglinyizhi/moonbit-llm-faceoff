@@ -86,13 +86,10 @@ cd web
 ./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
 ```
 
-Open <http://127.0.0.1:8137/> and the page is ready to use: models, cases and
-parameters all come from the server. Put the configuration in the URL to skip the
-clicking — `autorun=1` starts the run as soon as the page loads:
-
-```
-http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=3
-```
+Open <http://127.0.0.1:8137/> and work there: pick models and cases, adjust the
+parameters, put your API key in (or export it before starting the server), and
+press **开始评测**. The progress, the live counters and the exports are all on
+that page.
 
 **Start the server from inside `web/`.** It resolves `out/`, `runs/` and
 `../bench/cases.example.jsonl` relative to its working directory; started from
@@ -345,16 +342,20 @@ back the body is masked before it reaches the page or the disk — see
 
 ### The URL is the configuration
 
-Query parameters override the defaults, and `autorun=1` starts immediately on
-load — so a link can carry a whole comparison:
+Query parameters override the defaults, so a link can carry a whole comparison —
+handy for bookmarking a setup or sending it to someone:
 
 ```
-http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=1
+http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 ```
 
-Supported: `autorun`, `models`, `cases`, `prompt`, `repeats`, `maxTokens`,
-`temperature`, `paceMs`, `retry`, `baseUrl`. There is deliberately no `apiKey`
-parameter — a key does not belong in a URL.
+Supported: `models`, `cases`, `prompt`, `repeats`, `maxTokens`, `temperature`,
+`paceMs`, `retry`, `baseUrl`. There is deliberately no `apiKey` parameter — a key
+does not belong in a URL.
+
+`autorun=1` starts the run as soon as the page loads. It will not fire when no
+API key is available anywhere, because the run could only fail: the page says so
+and waits for you to fill the key in and press **开始评测**.
 
 ### API
 

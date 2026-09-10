@@ -47,7 +47,8 @@ bash web/build.sh >/dev/null
 tmp=$(mktemp -d -p .)
 tmp=$(cd "$tmp" && pwd)
 cleanup() {
-  kill "${webkit_pid:-}" "${chrome_pid:-}" "${web_pid:-}" "${mock_pid:-}" 2>/dev/null || true
+  kill "${webkit_pid:-}" "${chrome_pid:-}" "${web_pid:-}" "${web2_pid:-}" \
+    "${mock_pid:-}" 2>/dev/null || true
   rm -rf "$tmp" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -209,6 +210,32 @@ if echo "$probe" | grep -qE 'apiKey|test-key'; then
   fail "分享链接里带了密钥：$probe"
 fi
 echo "ok: 导出区五项齐全，Markdown 与分享链接内容正确"
+
+echo "==> autorun 在拿不到 key 时不该开跑"
+# autorun 本来会在第一次轮询就撞鉴权失败，而看到那个错的人会以为是自己环境坏了。
+# 所以现在没有可用密钥时干脆不跑，改为在页面上说明。
+# 起第二个服务端：不配 key，独立工作目录，其余一样。
+(cd web && exec env \
+  MOONLLM_BASE_URL="http://127.0.0.1:$mock_port/v1" \
+  LLM_WEB_MODELS="mock-a" \
+  LLM_WEB_WORK="$tmp/runs-nokey" \
+  LLM_WEB_PORT=0 \
+  ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web2.port" 2>/dev/null) &
+web2_pid=$!
+for _ in $(seq 1 200); do [ -s "$tmp/web2.port" ] && break; sleep 0.05; done
+PORT2=$(tr -d '\n' <"$tmp/web2.port" 2>/dev/null)
+[ -n "$PORT2" ] || fail "第二个服务端（无 key）没起来"
+
+dump_page "http://127.0.0.1:$PORT2/?autorun=1&models=mock-a&cases=math-short&repeats=1&maxTokens=32&paceMs=0&retry=0" 8000 "$tmp/nokey.html"
+
+grep -q '没有自动开跑' "$tmp/nokey.html" ||
+  fail "无 key 时 autorun 被拦下了，但页面没说明原因" "$tmp/nokey.html"
+if [ -d "$tmp/runs-nokey/run-1" ]; then
+  fail "无 key 却仍然开跑了（建出了运行目录）"
+fi
+grep -q '运行中\|已完成' "$tmp/nokey.html" &&
+  fail "无 key 却仍然开跑了（页面出现了运行状态）" "$tmp/nokey.html"
+echo "ok: 无 key 时 autorun 不开跑，并在页面上说明了原因"
 
 echo "==> 运行中就要能读到状态"
 # 这一条是为一个真实 bug 加的：服务端曾经在运行中发 "exitCode": null，

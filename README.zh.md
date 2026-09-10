@@ -80,11 +80,7 @@ cd web
 ./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
 ```
 
-打开 <http://127.0.0.1:8137/> 就能用：模型、用例、参数都从服务端来。不想点，就把配置写进 URL——`autorun=1` 表示打开即跑：
-
-```
-http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=3
-```
+打开 <http://127.0.0.1:8137/> 就在那儿干活：勾模型、选用例、调参数、把 API key 填进去（或者在启动服务端前就设好），然后点 **开始评测**。进度、实时计数、导出都在那一页上。
 
 **服务端要从 `web/` 目录里启动。** 它的 `out/`、`runs/` 和 `../bench/cases.example.jsonl` 都按当前工作目录解析；从仓库根目录启动的话，`/api/meta` 会通，但页面本身一律 404。
 
@@ -303,13 +299,15 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 
 ### URL 本身就是配置
 
-query 参数覆盖默认值，`autorun=1` 表示打开即跑——所以一条链接就能携带整套对比配置：
+query 参数覆盖默认值，所以一条链接就能携带整套对比配置——适合存书签或者发给别人：
 
 ```
-http://127.0.0.1:8137/?autorun=1&models=MiniCPM5-1B,MiniCPM5-2B&cases=math-short,fact-zh&repeats=1
+http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 ```
 
-支持：`autorun`、`models`、`cases`、`prompt`、`repeats`、`maxTokens`、`temperature`、`paceMs`、`retry`、`baseUrl`。**刻意没有 `apiKey`**——密钥不该出现在 URL 里。
+支持：`models`、`cases`、`prompt`、`repeats`、`maxTokens`、`temperature`、`paceMs`、`retry`、`baseUrl`。**刻意没有 `apiKey`**——密钥不该出现在 URL 里。
+
+加上 `autorun=1` 表示打开即跑。但没有任何可用密钥时它不会跑——那种情况下跑下去只会失败，所以页面会说明原因，等你填好 key 点 **开始评测**。
 
 ### API
 

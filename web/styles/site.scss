@@ -565,3 +565,16 @@ button.ghost {
     word-break: break-word;
   }
 }
+
+// autorun 被按住时的解释：不是错误，所以不用告警色，但要够显眼
+.notice {
+  background: $panel-2;
+  border: 1px solid $border;
+  border-left: 3px solid $warn;
+  border-radius: 0.35rem;
+  color: $text;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin: -0.6rem 0 1.6rem;
+  padding: 0.7rem 0.9rem;
+}
