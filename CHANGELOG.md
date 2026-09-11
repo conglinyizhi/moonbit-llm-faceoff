@@ -102,6 +102,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Import prompts a line at a time.** Both prompt lists — the playground's and the
+  workbench's case editor — take a paste of raw text: one line becomes one case,
+  blank lines and `#` comments are skipped, and 追加导入 / 替换为这些行 choose between
+  appending and replacing. Typing a batch of prompts into a web form one line at a
+  time is the kind of work a form should not be asking for.
+
 - **The verdicts are editable in the page, and they are on both pages.** Under every
   answer in the workbench: ✅ 通过 / ❌ 不行 / 🤔 拿不准 and a note box. The verdict
   saves on click (clicking the same one again clears it — no separate undo), the note

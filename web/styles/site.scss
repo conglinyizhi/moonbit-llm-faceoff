@@ -1290,3 +1290,16 @@ button.ghost {
     font-size: 0.8rem;
   }
 }
+
+// 「按行导入」：一行一条 prompt
+.import-box {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed $border;
+
+  .prompt-input {
+    // 导入框里是要粘的原始文本，等宽字体更好数行
+    font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+    font-size: 0.8rem;
+  }
+}

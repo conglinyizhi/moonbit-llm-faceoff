@@ -59,6 +59,10 @@ struct RunStatus {
 } derive(Eq, FromJson)
 
 ///|
+/// 一次能一共带多少条 prompt。和服务端对用例集的上限一致。
+let max_prompts : Int = 500
+
+///|
 /// 一条 prompt 的草稿。`system` 非空就覆盖顶上的全局 system（bench 的用例本来就
 /// 支持 per-case system），空则跟着全局走。
 struct PromptDraft {
@@ -91,6 +95,9 @@ struct AppModel {
   expanded : Int?
   /// 展开的那一行用差异视图，而不是左右并排。
   diff_mode : Bool
+  /// 「按行导入」的文本框，以及导入后的反馈（导入了几条 / 为什么一条都没有）。
+  import_text : String
+  import_note : String?
   /// 这条运行的人工标注。
   annotations : Array[@shared.Annotation]
   /// 正在编辑哪条答案的备注（"case\u0000model"）与草稿。
@@ -124,6 +131,8 @@ fn initial_model() -> AppModel {
     error: None,
     expanded: None,
     diff_mode: false,
+    import_text: "",
+    import_note: None,
     annotations: [],
     note_key: None,
     note_draft: "",
@@ -143,6 +152,8 @@ enum Msg {
   PromptSystemChanged(Int, String)
   AddPrompt
   RemovePrompt(Int)
+  ImportTextChanged(String)
+  ImportLines(Bool)
   ToggleModel(String)
   ExtraModelsChanged(String)
   MaxTokensChanged(String)
@@ -532,6 +543,42 @@ fn update(
       let prompts = model.prompts.copy()
       prompts.push({ prompt: "", system: "", })
       ({ ..model, prompts, }, @cmd.none)
+    }
+    ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
+    ImportLines(replace) => {
+      let (lines, skipped) = split_import_lines(model.import_text, max_prompts)
+      if lines.length() == 0 {
+        (
+          {
+            ..model,
+            import_note: Some(
+              "没有可导入的行（空行与 # 注释会跳过）",
+            ),
+          },
+          @cmd.none,
+        )
+      } else {
+        // 追加时把「点了再加一条但还没填内容」的空行摘掉：留着只会变成空 prompt
+        let prompts = if replace {
+          []
+        } else {
+          model.prompts.filter(fn(draft) {
+            draft.prompt.trim(chars=" \t\r\n") != ""
+          })
+        }
+        for line in lines {
+          prompts.push({ prompt: line, system: "", })
+        }
+        let note = if skipped > 0 {
+          "导入了 \{lines.length()} 条（另有 \{skipped} 行超出上限被丢掉）"
+        } else {
+          "导入了 \{lines.length()} 条"
+        }
+        (
+          { ..model, prompts, import_text: "", import_note: Some(note), },
+          @cmd.none,
+        )
+      }
     }
     RemovePrompt(index) => {
       let kept : Array[PromptDraft] = []
@@ -937,7 +984,61 @@ fn prompts_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       ]),
       el("span", "hint", [txt("\{model.prompts.length()} 条")]),
     ]),
+    import_box(model, emit),
   ])
+}
+
+///|
+/// 按行导入：一行一条 prompt。这是给「手上已经有一堆文本」的人准备的入口——
+/// 一行行手敲是最不必要的劳动。
+fn import_box(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  el("div", "import-box", [
+    @html.textarea(
+      class="prompt-input",
+      id="import-lines",
+      value=model.import_text,
+      rows=4,
+      on_input=emit.map(fn(text) { ImportTextChanged(text) }),
+      ([] : Array[@html.Html]),
+    ),
+    el("div", "editor-actions", [
+      @html.button(class="ghost", on_click=emit(Msg::ImportLines(false)), [
+        txt("追加导入"),
+      ]),
+      @html.button(class="ghost", on_click=emit(Msg::ImportLines(true)), [
+        txt("替换为这些行"),
+      ]),
+      el("span", "hint", [
+        txt(
+          "一行一条；空行与 # 开头的行跳过（导入会替换掉当前所有空行）",
+        ),
+      ]),
+      match model.import_note {
+        Some(note) => el("span", "hint copied", [txt(note)])
+        None => @html.fragment([])
+      },
+    ]),
+  ])
+}
+
+///|
+/// 把多行文本切成 prompt 列表：去空白、丢空行、丢 `#` 注释行，最多留 `limit` 条。
+/// 返回 (留下的行, 因为超限被丢掉的条数)。
+fn split_import_lines(text : String, limit : Int) -> (Array[String], Int) {
+  let out : Array[String] = []
+  let mut skipped = 0
+  for raw in text.split("\n") {
+    let line = raw.trim(chars=" \t\r").to_owned()
+    if line == "" || line.has_prefix("#") {
+      continue
+    }
+    if out.length() >= limit {
+      skipped = skipped + 1
+      continue
+    }
+    out.push(line)
+  }
+  (out, skipped)
 }
 
 ///|
