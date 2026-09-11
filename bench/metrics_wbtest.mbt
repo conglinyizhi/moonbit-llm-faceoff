@@ -222,6 +222,22 @@ test "page data carries sources, summaries and answers" {
     ok_run("b", "c1", 200.0, Some(20.0), 40, 10, 1),
   ]
   let text = page_data_json("t.jsonl", ["a", "b"], results).stringify()
+  // 报告要能回答「这条问题问的是什么」：prompt 与生效的 system 一起出去
+  let cases = [
+    Case::new("c1", "17 × 23 等于多少？", system="只输出数字。"),
+    Case::new("c2", "说一句话。"),
+  ]
+  let with_context = page_data_json(
+    "t.jsonl",
+    ["a"],
+    results,
+    cases~,
+    system="默认 system",
+  ).stringify()
+  assert_true(with_context.contains("17 × 23 等于多少？"))
+  assert_true(with_context.contains("只输出数字。"))
+  // 用例没带 system 的，落到运行级那个
+  assert_true(with_context.contains("默认 system"))
   assert_true(text.contains("\"source\":\"t.jsonl\""))
   assert_true(text.contains("\"model\":\"a\""))
   assert_true(text.contains("\"metrics\""))

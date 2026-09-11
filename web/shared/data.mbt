@@ -49,6 +49,10 @@ pub(all) struct Answer {
 /// 一道用例及其各模型输出。
 pub(all) struct CaseBlock {
   id : String
+  /// 这道题问的是什么（user prompt）。老的结果文件里没有这个字段，读出来是空串
+  prompt : String
+  /// 这条用例实际生效的 system prompt（用例自带的优先于运行级的）
+  system : String
   answers : Array[Answer]
 } derive(Eq)
 
@@ -119,7 +123,12 @@ pub fn with_annotations(
           })
       }
     }
-    cases.push({ id: block.id, answers, })
+    cases.push({
+      id: block.id,
+      prompt: block.prompt,
+      system: block.system,
+      answers,
+    })
   }
   { ..data, cases, }
 }
@@ -203,6 +212,8 @@ fn parse_case(json : Json) -> CaseBlock {
   let obj = as_object(json)
   {
     id: string_field(obj, "id", ""),
+    prompt: string_field(obj, "prompt", ""),
+    system: string_field(obj, "system", ""),
     answers: array_field(obj, "answers").map(parse_answer),
   }
 }

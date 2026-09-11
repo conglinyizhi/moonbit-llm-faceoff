@@ -134,9 +134,11 @@ port=$(head -1 "$tmp/web.port")
 [ -n "$port" ] || { echo "服务端没起来（见 $tmp/server.log）" >&2; exit 1; }
 
 if [ "$seed" -eq 1 ]; then
-  python3 - "$port" "$mock_port" "$seed_repeats" <<'PY'
+  python3 - "$port" "$mock_port" "$seed_repeats" "$system_text" <<'PY'
 import json, sys, time, urllib.request
 port, mock = sys.argv[1], sys.argv[2]
+# --system 给了就让这次预置运行也用它：看「system 有没有进报告」时需要
+system_text = sys.argv[4]
 body = json.dumps({
     "models": ["mock-a", "mock-b"],
     "caseSet": "default",
@@ -148,6 +150,7 @@ body = json.dumps({
     "retry": 0,
     "baseUrl": f"http://127.0.0.1:{mock}/v1",
     "apiKey": "test-key",
+    **({"system": system_text} if system_text else {}),
 }).encode()
 request = urllib.request.Request(
     f"http://127.0.0.1:{port}/api/runs",

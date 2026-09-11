@@ -40,6 +40,15 @@ pub fn results_markdown(data : PageData) -> String {
   out.write_string("\n")
   for block in data.cases {
     out.write_string("\n## 用例 `\{block.id}`\n")
+    // 问题与 system 一起进导出：只有 id 和答案的报告，过几天自己也读不懂
+    if block.prompt != "" {
+      out.write_string("\n> \{block.prompt}\n")
+    }
+    if block.system != "" {
+      out.write_string(
+        "\n<details><summary>system prompt</summary>\n\n```text\n\{block.system}\n```\n\n</details>\n",
+      )
+    }
     for answer in block.answers {
       out.write_string("\n### \{answer.model}\n")
       if answer.ok {

@@ -33,13 +33,18 @@ pub fn page_data_json(
   source : String,
   models : Array[String],
   results : Array[RunResult],
+  cases? : Array[Case] = [],
+  system? : String = "",
 ) -> Json {
   let summaries = summarize_all(models, results)
   Json::object({
     "source": Json::string(source),
     "models": Json::array(models.map(Json::string)),
+    // 运行级 system：每条用例那格里也给生效值（用例自带的优先），这一份是
+    // 「这次运行本来填的是什么」
+    "system": Json::string(system),
     "summaries": Json::array(summaries.map(summary_json)),
-    "cases": Json::array(cases_json(models, results)),
+    "cases": Json::array(cases_json(models, results, cases, system)),
   })
 }
 
@@ -97,6 +102,8 @@ fn put_stats(metrics : Map[String, Json], key : String, stats : Stats?) -> Unit 
 fn cases_json(
   models : Array[String],
   results : Array[RunResult],
+  cases : Array[Case],
+  global_system : String,
 ) -> Array[Json] {
   let order : Array[String] = []
   for result in results {
@@ -105,8 +112,31 @@ fn cases_json(
     }
   }
   order.map(fn(case_id) {
+    // 报告里只给 id 是不够的：看的人得知道「这条问题问的是什么」
+    let mut source_case : Case? = None
+    for item in cases {
+      if item.id == case_id {
+        source_case = Some(item)
+        break
+      }
+    }
+    let prompt = match source_case {
+      Some(item) => item.prompt
+      None => ""
+    }
+    // 生效的 system：用例自带的优先，否则用运行级的——和 bench 实际发的保持一致
+    let system = match source_case {
+      Some(item) =>
+        match item.system {
+          Some(own) => own
+          None => global_system
+        }
+      None => global_system
+    }
     Json::object({
       "id": Json::string(case_id),
+      "prompt": Json::string(prompt),
+      "system": Json::string(system),
       "answers": Json::array(
         models.map(fn(model) { answer_json(results, case_id, model) }),
       ),

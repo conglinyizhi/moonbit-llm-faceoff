@@ -47,6 +47,8 @@ fn sample_data() -> PageData {
     cases: [
       {
         id: "math-short",
+        prompt: "计算 17 × 23。只输出数字。",
+        system: "你是一个只说一个词的助手。",
         answers: [
           {
             model: "mock-a",

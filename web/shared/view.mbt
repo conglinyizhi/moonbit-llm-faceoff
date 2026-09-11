@@ -237,6 +237,21 @@ pub fn case_block(
         None => @html.fragment([])
       },
     ]),
+    // 问题本身：报告里只给一个 id，读的人不知道这条到底问的是什么
+    if block.prompt == "" {
+      @html.fragment([])
+    } else {
+      el("p", "case-prompt", [txt(block.prompt)])
+    },
+    // system 可能很长，折起来；没有就不渲染（这个条件不会随轮询变化，不会跳）
+    if block.system == "" {
+      @html.fragment([])
+    } else {
+      el("details", "case-system", [
+        el("summary", "", [txt("system prompt")]),
+        @html.pre([txt(block.system)]),
+      ])
+    },
     match mode {
       "columns" => answer_columns(block, editor?)
       "diff" => answer_diffs(block)
@@ -606,26 +621,46 @@ fn context_params(context : RunContext) -> @html.Html {
 /// came out of the gateway.
 pub fn live_row(live : LiveProgress?) -> @html.Html {
   let live = match live {
-    None => return @html.fragment([])
+    // 运行刚开始、第一个 tick 还没到：给一行空占位，别让卡片先矮一截再长回来
+    None =>
+      {
+        event: "waiting",
+        model: "",
+        case_id: "",
+        repeat: 0,
+        phase: "",
+        tok_per_s: 0.0,
+        chars: 0,
+        tokens: 0,
+        elapsed_ms: 0.0,
+        max_tokens: 0,
+        index: 0,
+        total: 0,
+        age_ms: 0.0,
+      }
     Some(live) => live
   }
-  // 上一条已经返回、而它又不新鲜了：说明现在没有请求在飞（用例之间的间隔、
-  // 或者整次运行已经结束、轮询停了）。这时候留着那一行只有坏处——数字是旧的，
-  // 动画还在跑，看着就像「还在生成」。宁可不显示。
-  if live.event == "case_done" && live.age_ms > 1500.0 {
-    return @html.fragment([])
-  }
+  // 上一条已经返回、而它又不新鲜了：现在没有请求在飞（用例之间的间隔）。
+  // 这时候不能像以前那样整行收起来——那一行没了，下面的失败/重试计数和日志尾
+  // 就顶上来，等下一个请求开始又弹回去，页面在「等待」和「生成」之间反复跳。
+  // 改成进入「等待」状态：占位还在，只是不再有数字和动画
+  let waiting = live.event == "waiting" ||
+    (live.event == "case_done" && live.age_ms > 1500.0)
   // 2 秒没有任何新分片就算安静下来了：可能是模型在长思考，也可能是上游卡住，
   // 页面分不清，但能说清「多久没有输出了」——这就够人决定要不要再等。
   let stalled = live.age_ms > 2000.0
-  let who = if live.case_id == "" {
-    live.model
+  let who = if waiting {
+    "下一条请求"
+  } else if live.case_id == "" {
+    "准备中"
   } else {
     "\{live.model} · \{live.case_id} #\{live.repeat + 1}"
   }
   // 等首 token 的那一秒是页面上最像死掉的一秒：请求发出去了，什么都没有。
   // 把它单独标出来，比笼统写「生成中」有用得多。
-  let state = if live.event == "case_start" {
+  let state = if waiting {
+    "等待下一条"
+  } else if live.event == "case_start" {
     "等首 token"
   } else if live.event == "case_done" {
     if live.age_ms > 3000.0 {
@@ -638,20 +673,25 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
   } else {
     "生成中"
   }
-  let clock = if live.event == "case_start" {
+  let clock = if waiting || live.event == "case_start" {
     ""
   } else {
     " \{fmt_number(live.elapsed_ms / 1000.0)}s"
   }
   // 空的时候不留空节点、也不隐藏：一律渲染，内容用占位。隐藏元素会让后面的
   // 元素顶上来，数字一变就来回跳——这跟「数字宽度在变」是同一类闪动。
-  let numbers = if live.chars > 0 { "\{live.chars} 字符" } else { "0 字符" }
-  let rate = if live.tok_per_s >= 0.5 {
-    "≈\{fmt_number(live.tok_per_s)} tok/s"
+  let numbers = if waiting || live.chars == 0 {
+    "0 字符"
   } else {
-    "≈—  tok/s"
+    "\{live.chars} 字符"
   }
-  el("div", if stalled { "live-row stalled" } else { "live-row" }, [
+  let rate = if waiting || live.tok_per_s < 0.5 {
+    "≈—  tok/s"
+  } else {
+    "≈\{fmt_number(live.tok_per_s)} tok/s"
+  }
+  let quiet = stalled || waiting
+  el("div", if quiet { "live-row stalled" } else { "live-row" }, [
     el("span", "pulse", []),
     el("span", "live-who", [txt(who)]),
     // state 为空（刚返回且已经过时）时也给个占位：这一格不能塌
@@ -660,7 +700,7 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
     ]),
     el("span", "live-nums", [txt(numbers)]),
     el("span", "live-rate", [txt(rate)]),
-    live_bar(live),
+    live_bar(live, quiet),
     if stalled {
       el("span", "live-stalled", [
         txt("\{fmt_number(live.age_ms / 1000.0)}s 没有新输出"),
@@ -677,11 +717,17 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
 /// 分母是 `max_tokens`——那是**上限**不是目标，模型随时可能提前收尾，所以这条
 /// 只能当参考看，标签上写 `≤`。它动的速度是真正的分片速度，页面上最活跃的
 /// 就是它。
-fn live_bar(live : LiveProgress) -> @html.Html {
+fn live_bar(live : LiveProgress, quiet : Bool) -> @html.Html {
+  // 上限未知（等待、或刚启动）时也要给一条空条：这一格塌了整行就会跳
   if live.max_tokens <= 0 {
-    return @html.fragment([])
+    return el("span", "live-bar", [el("span", "live-bar-fill", [])])
   }
-  let share = live.tokens.to_double() / live.max_tokens.to_double()
+  // 等待 / 停滞时把条清空：停在上一条的进度上会像是「卡在那儿了」
+  let share = if quiet {
+    0.0
+  } else {
+    live.tokens.to_double() / live.max_tokens.to_double()
+  }
   let percent = if share > 1.0 { 100 } else { (share * 100.0).to_int() }
   // 分母是上限不是目标，所以宽度经常几乎为零（9 个 token 的短回答 vs 1024 的上限）。
   // 光靠宽度会像是坏掉了，于是里面再叠一层流动纹样：有分片在进来它就在动，

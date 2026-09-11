@@ -143,6 +143,15 @@ for _ in $(seq 1 200); do
   [ -s "$tmp/web.port" ] && break
   sleep 0.05
 done
+
+# 第二套测试集：给「全选/全不选按当前那套来」那条断言用（只有一套时切不了集）。
+# 必须在服务端第一次启动**之后**写：它用「目录为空」判断要不要把默认集播种进来，
+# 先写会让它以为已经有了
+mkdir -p "$tmp/cases"
+printf '%s\n' \
+  '{"id":"second-1","prompt":"第二套的第一条。"}' \
+  '{"id":"second-2","prompt":"第二套的第二条。"}' \
+  > "$tmp/cases/second.jsonl"
 PORT=$(tr -d '\n' < "$tmp/web.port" 2>/dev/null)
 [ -n "$PORT" ] || fail "评测服务没吐出端口" "$tmp/server.log"
 curl -sf -o /dev/null "http://127.0.0.1:$PORT/api/meta" || fail "评测服务没起来" "$tmp/server.log"
@@ -452,6 +461,48 @@ echo "ok: 勾两次运行能进对比视图（参数差异 / 指标差值 / 逐�
 
 # 结果区的三种摆法：长回答竖着堆下来没法比，所以要能换成并排，也得能只留下
 # 分岔的地方（差异视图）。
+echo "==> 全选按当前测试集来"
+# 这条是给一个真 bug 加的：全选取的是 meta.cases（默认那套），切到别的集之后
+# 勾的是一批不属于这套的 id——面板上什么都没变，跑起来还「一道都没选中」
+setall_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const select = document.querySelector(".set-select");
+  out.sets = Array.from(select.options).map((o) => o.value);
+  if (out.sets.length < 2) { return out; }
+  // 切到**非默认**那套：bug 是「全选取了默认集的用例」，切到别集才会露出来
+  const target = out.sets.find((name) => name !== "default") || out.sets[1];
+  out.target = target;
+  select.value = target;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 1500));
+  byText("全不选").click();
+  await new Promise((r) => setTimeout(r, 400));
+  out.noneAfterClear = Array.from(document.querySelectorAll("input[type=checkbox]"))
+    .filter((c) => c.id.startsWith("case-")).filter((c) => c.checked).length;
+  byText("全选").click();
+  await new Promise((r) => setTimeout(r, 400));
+  const boxes = Array.from(document.querySelectorAll("input[type=checkbox]"))
+    .filter((c) => c.id.startsWith("case-"));
+  out.casesShown = boxes.length;
+  out.checkedAfterAll = boxes.filter((c) => c.checked).length;
+  out.label = (document.querySelector(".case-panel .muted") || {}).textContent || "";
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/setall.html" "$setall_probe" 2000 "$DUMP_READY_FORM"
+probe=$(grep -o 'SCRIPT .*' "$tmp/setall.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -qE '"casesShown":[1-9]' ||
+  fail "切到第二套之后没看到用例：$probe"
+echo "$probe" | grep -q '"noneAfterClear":0' ||
+  fail "全不选没清干净：$probe"
+shown=$(echo "$probe" | sed -n 's/.*"casesShown":\([0-9]*\).*/\1/p')
+checked=$(echo "$probe" | sed -n 's/.*"checkedAfterAll":\([0-9]*\).*/\1/p')
+[ -n "$shown" ] && [ -n "$checked" ] && [ "$shown" -gt 0 ] && [ "$shown" = "$checked" ] ||
+  fail "全选没有把当前测试集的用例全勾上（$shown 条，勾了 $checked）：$probe"
+echo "$probe" | grep -q '"target":"second"' ||
+  fail "没有切到非默认的那套测试集，这条测不出这个 bug：$probe"
+echo "ok: 全选/全不选按当前测试集来（切到第二套也管用）"
+
 echo "==> 结果区：每个模型一条 / 并排对比 / 差异"
 views_probe='(async () => {
   const out = {};
@@ -587,6 +638,20 @@ context_probe='(async () => {
     empty.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 300));
   }
+  // 下载链接不能被框架拦下来：@html.a 默认是「被捕获的链接」，点击会被
+  // preventDefault（留给框架内部路由），download 于是永远不触发
+  const downloads = Array.from(document.querySelectorAll(".export-row a"));
+  out.downloads = downloads.length;
+  if (downloads.length > 0) {
+    let prevented = null;
+    document.addEventListener("click", (e) => { prevented = e.defaultPrevented; }, false);
+    downloads[0].click();
+    await new Promise((r) => setTimeout(r, 200));
+    out.downloadPrevented = prevented;
+  }
+  // 用例正文与 system 要有地方看
+  out.casePrompt = (document.querySelector(".case-prompt") || {}).textContent || "";
+  out.caseSystem = !!document.querySelector(".case-system");
   const buttons = Array.from(document.querySelectorAll(".context-btn"));
   out.buttons = buttons.length;
   if (buttons.length === 0) { return out; }
@@ -617,6 +682,12 @@ echo "$probe" | grep -q '测试集不参与' ||
   fail "在测试集那一页没有提醒「这次不会跑它」：$probe"
 echo "$probe" | grep -q '"importRowVisible":true' ||
   fail "测试集那一页没有「从纯文本文件新建」：$probe"
+echo "$probe" | grep -qE '"downloads":[1-9]' ||
+  fail "导出区没有下载链接：$probe"
+echo "$probe" | grep -q '"downloadPrevented":false' ||
+  fail "点下载链接被拦截了（defaultPrevented 为真，download 不会触发）：$probe"
+echo "$probe" | grep -qE '"casePrompt":"[^"]{4,}"' ||
+  fail "用例输出里没有这道题的正文：$probe"
 echo "$probe" | grep -qE '"buttons":[1-9]' ||
   fail "用例行上没有「请求上下文」按钮：$probe"
 echo "$probe" | grep -q '"modal":true' ||

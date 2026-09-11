@@ -250,6 +250,8 @@ async fn main {
   let mut models = cli.models
   let mut results : Array[@harness.RunResult] = []
   let mut source = ""
+  /// 这次跑用的用例（重放时没有，页面数据里那几格就是空的）
+  let mut cli_cases : Array[@harness.Case] = []
   match cli.from_json {
     Some(path) => {
       let text = match read_text(path) {
@@ -278,6 +280,7 @@ async fn main {
           return
         }
       }
+      cli_cases = cases
       let options : @harness.BenchOptions = {
         repeats: cli.repeats,
         max_tokens: cli.max_tokens,
@@ -372,7 +375,13 @@ async fn main {
   }
   match cli.web_data {
     Some(path) => {
-      let document = @harness.page_data_json(source, models, results)
+      let document = @harness.page_data_json(
+        source,
+        models,
+        results,
+        cases=cli_cases,
+        system=cli.system,
+      )
       write_text(path, document.stringify(indent=2) + "\n")
     }
     None => ()

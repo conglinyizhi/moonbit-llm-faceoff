@@ -8,6 +8,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The download links did nothing.** `@html.a` renders a *captured* link by
+  default — Rabbita attaches its own click listener and calls `preventDefault`
+  (it is meant for the app to intercept navigation), so `download` never fired
+  and a plain click was swallowed; Ctrl+click worked because that opens a new tab
+  and bypasses the handler. The three export links now pass `escape=true`, which
+  renders a plain `<a>`.
+- **全选 only worked for the first test set.** It selected `meta.cases` — the
+  *default* set — while the panel shows the currently selected one, so after
+  switching sets it ticked a batch of ids belonging to another set: nothing moved
+  on screen and a run would find no cases at all.
+- **The live line no longer collapses while a run waits.** Between two requests
+  the row used to disappear entirely, which pushed the failure counters and the
+  log tail up and then back down when the next request started. It now stays in
+  place in a waiting state (grey dot, no animation, empty number slots), and the
+  same placeholder covers the moment between "run started" and the first tick.
+
+### Added
+
+- **The static report carries the question.** `data.json` now includes each case's
+  `prompt` and the `system` prompt that was in effect for it (a case-level system
+  wins over the run-level one), and both the page and the Markdown export render
+  them — a report that lists answers by case id is unreadable a week later,
+  including for the person who ran it.
+
+### Fixed
+
 - **Opening the page with a run id in the URL.** The boot path had two branches,
   and the one for `?run=<id>` forgot to fetch `/api/meta` — so with a run id in
   the address bar the page sat at "正在载入配置…" forever, the sidebar never

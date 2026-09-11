@@ -702,15 +702,14 @@ fn update(
         { ..model, selected_cases: toggle(model.selected_cases, id), },
         @cmd.none,
       )
+    // 全选勾的是**当前这套**用例。以前取的是 meta.cases（默认那套），于是
+    // 切到别的测试集之后，全选勾上一批别的集的 id——面板上什么都没变，
+    // 跑起来还会「一道都没选中」
     SelectAllCases =>
-      match model.meta {
-        Some(meta) =>
-          (
-            { ..model, selected_cases: meta.cases.map(fn(c) { c.id }), },
-            @cmd.none,
-          )
-        None => (model, @cmd.none)
-      }
+      (
+        { ..model, selected_cases: model.available_cases.map(fn(c) { c.id }), },
+        @cmd.none,
+      )
     // 开始打字就把面板跟到临时那一页：用户的动作说明了他要看哪一页
     PromptChanged(text) =>
       (
@@ -2280,19 +2279,29 @@ fn export_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         @html.button(class="chip", on_click=emit(Msg::CopyShareLink), [
           txt("复制分享链接"),
         ]),
+        // escape=true：@html.a 默认渲染成 Rabbita 自己那个被「捕获」的链接，
+        // 点击会被它拦下来（留给框架内部路由用），于是 download 根本不触发——
+        // 表现就是「点了没反应，只有 Ctrl+点击开新标签才行」。这里要的就是
+        // 浏览器原生的下载行为
         @html.a(
           href=base + "/runs.jsonl",
           download="runs.jsonl",
           class="chip",
+          escape=true,
           [txt("下载 runs.jsonl")],
         ),
-        @html.a(href=base + "/data.json", download="data.json", class="chip", [
-          txt("下载 data.json"),
-        ]),
+        @html.a(
+          href=base + "/data.json",
+          download="data.json",
+          class="chip",
+          escape=true,
+          [txt("下载 data.json")],
+        ),
         @html.a(
           href=base + "/report.html",
           download="report.html",
           class="chip",
+          escape=true,
           [txt("下载静态报告")],
         ),
         match model.copied {
@@ -2329,7 +2338,12 @@ fn progress(model : AppModel) -> @html.Html {
         ([] : Array[@html.Html]),
       ),
     ]),
-    @shared.live_row(if model.status == "running" { model.live } else { None }),
+    if model.status == "running" {
+      @shared.live_row(model.live)
+    } else {
+      // 跑完之后整行收起来：数字是旧的、动画还在跑，留着只会骗人
+      @html.fragment([])
+    },
     el("div", "progress-counts", [
       txt(
         "失败 \{model.failures} · 重试 \{model.retried} · 截断 \{model.truncated}",

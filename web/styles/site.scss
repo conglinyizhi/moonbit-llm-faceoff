@@ -147,6 +147,36 @@ body.page {
   border-color: rgba(248, 81, 73, 0.4);
 }
 
+// 用例头下面的「问的是什么」与 system
+.case-prompt {
+  color: $text;
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.6rem;
+  white-space: pre-wrap;
+}
+
+.case-system {
+  margin: 0 0 0.6rem;
+
+  summary {
+    color: $muted;
+    cursor: pointer;
+    font-size: 0.76rem;
+  }
+
+  pre {
+    background: $bg;
+    border-radius: 0.35rem;
+    color: $muted;
+    font-size: 0.78rem;
+    margin: 0.3rem 0 0;
+    max-height: 16vh;
+    overflow: auto;
+    padding: 0.5rem 0.65rem;
+    white-space: pre-wrap;
+  }
+}
+
 // 一个指标一块：第一行「标签 …… P50 主值」，第二行三个分位
 //
 // 之前是 dt/dd 各一格、分位数跟在主值后面同一行——卡片一窄，标签被折成两行
