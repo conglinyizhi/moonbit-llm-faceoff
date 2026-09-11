@@ -94,7 +94,7 @@ fn RunInfo::case_count(self : RunInfo) -> Int {
   if request_string(self, "prompt") is Some(_) {
     return 1
   }
-  // playground 的运行把用例内联在请求里，没有 cases 字段
+  // 内联用例的运行把 prompt 写在请求里，没有 cases 字段
   let inline_cases = @shared.array_field(request_obj(self), "inlineCases")
   if inline_cases.length() > 0 {
     return inline_cases.length()
@@ -180,6 +180,9 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
       None => ""
     },
     caseSet: request_string(info, "caseSet"),
+    // 重跑要重放的是「当时问的那一套」，system 也算：用页面上当前的会把
+    // 一次运行悄悄变成另一次
+    system: request_string(info, "system"),
     repeats: request_int(info, "repeats", 1),
     maxTokens: request_int(info, "maxTokens", 1024),
     temperature: request_number(info, "temperature", 0.0),

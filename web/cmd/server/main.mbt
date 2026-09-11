@@ -21,6 +21,7 @@
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
 ///   LLM_WEB_SSG    静态报告生成器（默认 ../web/_build/.../ssg.exe）
 ///   LLM_WEB_MODELS  默认模型菜单，逗号分隔（请求也可使用其它模型）
+///   LLM_WEB_SYSTEM  默认 system prompt（页面里预填，可以改；空 = 不带）
 ///   MOONLLM_API_KEY / OPENAI_API_KEY   网关密钥（不下发给浏览器）
 ///   MOONLLM_BASE_URL / OPENAI_BASE_URL 网关地址
 async fn main {
@@ -40,6 +41,8 @@ async fn main {
   let ssg_bin = @env.get_env_var("LLM_WEB_SSG").unwrap_or(
     "_build/native/debug/build/cmd/ssg/ssg.exe",
   )
+  // 空串 = 不带 system（和 bench 的 --system 默认一致）
+  let default_system = @env.get_env_var("LLM_WEB_SYSTEM").unwrap_or("")
   let config : ServerConfig = {
     static_dir,
     work_dir,
@@ -53,6 +56,7 @@ async fn main {
       "https://api.openai.com/v1",
     ),
     api_key: first_env(["MOONLLM_API_KEY", "OPENAI_API_KEY"]).unwrap_or(""),
+    default_system,
   }
   @fs.mkdir(work_dir, recursive=true) catch {
     _ => ()
@@ -113,6 +117,10 @@ struct ServerConfig {
   models : Array[String]
   base_url : String
   api_key : String
+  /// 默认 system prompt：页面打开时预填进那个框，跑的时候按页面上的值发。
+  /// 「固定 system + 变动的 user prompt」时，把它写在启动服务端的地方，
+  /// 就不用每次在页面上敲一遍。
+  default_system : String
 }
 
 ///|
@@ -311,6 +319,7 @@ async fn meta_json(config : ServerConfig) -> Json {
       "temperature": Json::number(0.0),
       "paceMs": Json::number(3000.0),
       "retry": Json::number(3.0),
+      "system": Json::string(config.default_system),
     }),
     "hasKey": Json::boolean(config.api_key != ""),
     "baseUrl": Json::string(config.base_url),
@@ -826,7 +835,7 @@ struct RunRequest {
   /// 解析后的用例集名字（不是请求里那个可选的字符串）。
   case_set : String
   case_ids : Array[String]
-  /// 请求里内联带过来的用例（playground 那一页用）。非空时优先于 `case_ids`：
+  /// 请求里内联带过来的用例（一组临时 prompt，不走用例集文件）。非空时优先于 `case_ids`：
   /// 它们不进用例集文件，直接写进这次运行目录的 cases.jsonl。
   inline_cases : Array[Json]
   /// 这次运行的全局 system prompt。每条用例自己的 system 仍然可以覆盖它。
@@ -918,7 +927,7 @@ async fn parse_run_request(
       }
     None => default_case_set(config)
   }
-  // 内联用例（playground 那一页）：跟用例集 / 单条 prompt 三者互斥，
+  // 内联用例：跟用例集 / 单条 prompt 三者互斥，
   // 同时给两个只会让人不确定到底跑了什么。
   if raw_inline.length() > 0 {
     if prompt is Some(_) || !case_ids.is_empty() {
@@ -1109,7 +1118,7 @@ async fn build_argv(
     None => {
       let path = dir + "/cases.jsonl"
       if request.inline_cases.length() > 0 {
-        // playground 带过来的用例：不进用例集文件，直接落进这次运行目录。
+        // 内联用例：不进用例集文件，直接落进这次运行目录。
         // bench 侧只认文件，所以这里就是把它们写成文件。
         let lines = StringBuilder()
         for entry in request.inline_cases {
@@ -1652,7 +1661,7 @@ async fn total_of(request_path : String) -> Int {
 
 ///|
 fn case_count(obj : Map[String, Json]) -> Int {
-  // playground 那种「一组临时 prompt」走 inlineCases，没有 cases 字段
+  // 「一组临时 prompt」走 inlineCases，没有 cases 字段
   match obj.get("inlineCases") {
     Some(Array(items)) => if items.length() > 0 { return items.length() }
     _ => ()

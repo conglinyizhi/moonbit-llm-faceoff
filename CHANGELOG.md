@@ -102,6 +102,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The run-level system prompt is in the workbench, and the playground is gone.**
+  The two pages had converged: the workbench grew columns, a diff view, the
+  annotation editor and the line import, so the second page was a duplicate that
+  had to be understood before it could be ignored. The workbench now has a
+  **System prompt** field — the fixed half of "fixed system, varying user prompt",
+  with the cases holding nothing but user prompts. `LLM_WEB_SYSTEM` prefills it so
+  you set it once when starting the server; presets and share links carry it;
+  rerunning a run replays the system it actually used. A case that carries its own
+  `system` still overrides it, and 请求上下文 marks which ones did.
+  `web/cmd/playground/` and `web/shell/playground.html` are gone, along with the
+  matrix styles and the e2e section that covered them.
+- **The gateway address and API key moved under the model picker.** They belong
+  with "which model am I talking to", not between the retry count and the start
+  button.
+
 - **The progress bar moves while a run is going.** It was counting finished
   requests from `runs.jsonl`, and the harness writes that file once, when the
   whole suite is done — so the bar sat at 0 for the entire run and jumped to 100%

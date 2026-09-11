@@ -451,18 +451,21 @@ From the page you can:
 - pick models from the server's menu **or type model ids directly**, set repeats /
   `max_tokens` / temperature / pacing / retries, type a one-off prompt, and start
   a run;
-- override the **gateway address and API key** for that one run, so a local
-  `ollama` or a second provider does not need a server restart. Both fields are
-  optional and fall back to the server's environment;
+- set the **gateway address and API key** for that one run (they sit right under
+  the model picker), so a local `ollama` or a second provider does not need a
+  server restart. Both fields are optional and fall back to the server's
+  environment;
+- write one **system prompt** for the run and let the cases be nothing but user
+  prompts — the fixed half and the varying half in separate places. A case that
+  carries its own `system` overrides it, and 请求上下文 marks which ones did;
 - watch progress, the live failure/retry/truncation counts, and a collapsible
   tail of the run's `stderr`;
 - **go back to any earlier run**: the left column lists every run with its time,
   models, scale and counters. Open one to read its results (read-only, exports
   follow it), rerun it with exactly the parameters it ran with, or delete it;
-- **paste text in a line at a time**: every prompt list (the playground's, and the
-  workbench's case editor) has an import box — one line becomes one case, blank
-  lines and `#` comments are skipped, and 追加导入 / 替换为这些行 decide whether the
-  new lines follow the old ones or replace them;
+- **paste text in a line at a time**: the case editor has an import box — one line
+  becomes one case, blank lines and `#` comments are skipped, and 追加导入 /
+  替换为这些行 decide whether the new lines follow the old ones or replace them;
 - **keep your suites in the page**: the case panel switches between case sets
   (`web/cases/<name>.jsonl`), ticks the cases to run, and edits them in place —
   prompt, id, and per-case `system` / `max_tokens` / `temperature` under a folded
@@ -523,34 +526,6 @@ out of the run's `request.json` before it is written. A key the *server* holds i
 never handed to the browser. Either way, if an upstream error echoes the key
 back the body is masked before it reaches the page or the disk — see
 [`SECURITY.md`](SECURITY.md).
-
-### The playground page — a fixed system prompt, one prompt suite, side by side
-
-`/playground.html` is the page for trying things out, as opposed to the workbench
-above, which is for managing tests. One system prompt at the top, a list of user
-prompts below it, tick the models you want, press the button:
-
-```
-┌─ #1  用一句话说明什么是甲板风。 ─────────────── 对比 ─┐
-│ mock-a   101ms · 9 tok │ mock-b   100ms · 9 tok      │   ← 等高等宽
-│ 甲板风是指…（截断）     │ 甲板风是风吹过甲板…（截断）  │
-└──────────────────────────────────────────────────────┘
-```
-
-Every cell is the same width and height regardless of how long the answer is —
-that is what makes a screenful scannable. Press 对比 on a row and that row opens
-underneath: the models side by side with the full answer and the folded chain of
-thought, or 差异视图, a character-level diff between the first model and each of
-the others (green = only on the right, red = only on the left). A single prompt can
-override the shared system prompt; leaving it empty means "use the shared one".
-
-Cells carry the verdict as a small mark (`🤔 拿不准`) when a run has been
-annotated, and the same editor appears in the expanded comparison.
-
-It talks to the same `POST /api/runs` as the workbench (with `inlineCases` +
-`system`), so these runs also land in the run history and can be rerun from there.
-`存成用例集` writes the current system + prompts into `web/cases/`, which is how a
-prompt that turned out to be interesting graduates into a repeatable test.
 
 ### The URL is the configuration
 
@@ -626,6 +601,7 @@ web/runs/<id>/
 | `LLM_WEB_CASES` | `../bench/cases.example.jsonl` — only a seed for `cases/default.jsonl` |
 | `LLM_WEB_PRESETS` | `presets.json` |
 | `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` — the default menu; a run may name any model |
+| `LLM_WEB_SYSTEM` | a system prompt to prefill the run-level box with. Set it once and every run starts from it (the page shows it, so you can still change it per run) |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
 | `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
