@@ -689,7 +689,7 @@ Underneath:
 ```bash
 moon test --target native      # 58 unit tests, no network (54 + 4 in web/)
 moon run --target native scripts/smoke.mbtx   # CLI end-to-end against a local mock endpoint
-bash scripts/server-api.sh     # server HTTP contract, including key handling
+moon run --target native scripts/server-api.mbtx   # server HTTP contract, incl. key handling
 bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 ```
 
@@ -697,7 +697,7 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | --- | --- |
 | `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding (one-shot outcome: content / reasoning / usage / stop reason), SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
 | `scripts/smoke.mbtx` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, **status lines on stderr with stdout left alone**, `--quiet`, `--show-cot`, **an empty reply warned about and non-zero instead of a blank line**, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
-| `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
+| `scripts/server-api.mbtx` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results (including the chain of thought folded under every answer), **the run-history rail lists that run and opening it switches to the read-only view**, **editing a case in the page reaches the file on disk and a preset saved in the page shows up in the list**, **ticking two runs opens the comparison (parameter diff, metric deltas, per-case answers)**, **deleting a run drops it from the list**, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 | `scripts/real-gateway.sh` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |
 
