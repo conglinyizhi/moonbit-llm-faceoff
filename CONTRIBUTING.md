@@ -30,7 +30,7 @@ Those are thin wrappers over the raw commands, which you can also run directly:
 ```bash
 moon check --target native
 moon test --target native
-bash scripts/smoke.sh
+moon run --target native scripts/smoke.mbtx
 bash scripts/web-e2e.sh
 bash web/build.sh
 ```

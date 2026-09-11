@@ -1,4 +1,5 @@
-# 被 demo.sh / smoke.sh / web-e2e.sh source 的公共函数。
+# 被 demo.sh / web-e2e.sh source 的公共函数。
+# （smoke 已经换成 smoke.mbtx，不再用这里的东西。）
 
 # build_mbtx <src.mbtx> <out-binary>
 #

@@ -64,7 +64,7 @@ used — the reason for logging it at all — and not enough to use it. Keys sho
 than 12 characters are masked whole: showing four characters of an
 eight-character secret gives away half of it.
 
-`scripts/smoke.sh` asserts this end to end. The bundled mock endpoint echoes the
+`scripts/smoke.mbtx` asserts this end to end. The bundled mock endpoint echoes the
 `Authorization` header back on a 401, exactly as a careless gateway would, so
 the test fails if the masking stops working.
 

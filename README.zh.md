@@ -584,7 +584,7 @@ make           # 列出全部 target
 
 ```bash
 moon test --target native      # 58 个单测，不联网（54 + web/ 里 4 个）
-bash scripts/smoke.sh          # 命令行端到端，对着本地假端点
+moon run --target native scripts/smoke.mbtx   # 命令行端到端，对着本地假端点
 bash scripts/server-api.sh     # 服务端 HTTP 契约，含密钥处理
 bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 ```
@@ -592,7 +592,7 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 | 套件 | 覆盖 |
 | --- | --- |
 | `moon test` | 配置解析与优先级、参数解析与错误分支、请求 JSON 结构、响应解码（一次性路径的 outcome：content / reasoning / usage / 停止原因）、SSE 分帧（正文/思考/usage/finish/`[DONE]`/CRLF/畸形输入）、用例文件解析、统计量、吞吐推导、运行记录往返、页面数据契约、上游错误体里的密钥遮蔽 |
-| `scripts/smoke.sh` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败、鉴权失败时不得回显密钥、**状态行走 stderr 而 stdout 保持干净**、`--quiet`、`--show-cot`、**空回复会告警并非零退出而不是一个空行**，以及 bench 打同一个假端点：**会清掉的 429 是真的重试**（`attempts: 2`）、`--retry n` 确实等于额外 n 次 HTTP 尝试、`finish_reason: length` 会落进截断计数而不是当成功混过去 |
+| `scripts/smoke.mbtx` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败、鉴权失败时不得回显密钥、**状态行走 stderr 而 stdout 保持干净**、`--quiet`、`--show-cot`、**空回复会告警并非零退出而不是一个空行**，以及 bench 打同一个假端点：**会清掉的 429 是真的重试**（`attempts: 2`）、`--retry n` 确实等于额外 n 次 HTTP 尝试、`finish_reason: length` 会落进截断计数而不是当成功混过去 |
 | `scripts/server-api.sh` | 请求体里的 `baseUrl`/`apiKey` 与服务端自己那套（故意设坏）相反能否生效、菜单外的模型 id、实时计数、三种导出，**密钥绝不落进运行目录或响应**，以及路径穿越被拒 |
 | `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来（含模型 / 网关 / 密钥输入框），`?autorun` 链接确实能跑完一次评测并渲染结果（含每个答案下可折叠的思考过程），**运行记录侧栏列得出那一次、点开能切到只读的历史视图**，**在页面上改用例会落到磁盘、在页面上存的预设会出现于列表**，**勾两次运行能进对比视图（参数差异 / 指标差值 / 逐用例答案）**，**删掉一条运行之后它从列表里消失**，八个并发 `POST /api/runs` 拿到八个不同 id，跑完之后开始按钮回到可用状态，且导出区产出的 Markdown 与分享链接内容正确（分享链接不含密钥） |
 | `scripts/real-gateway.sh` | **唯一不离线、也不进 CI 的那一套。** 对着真实端点跑四个探针：one-shot、流式是否增量到达、错 key 会不会被报成 4xx 且不回显、被 `--max-tokens` 截断的回复会不会计进截断数。留证写到 `docs/real-gateway-run.md`。需要 export `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` |
@@ -670,7 +670,7 @@ scripts/
   demo.sh               离线、免 API key 的三路径演示
   mock_openai.mbtx      离线 OpenAI 兼容端点，MoonBit 脚本
   check_incremental.mbtx  量 --stream 是否真的在流式
-  smoke.sh              命令行端到端
+  smoke.mbtx            命令行端到端
   web-e2e.sh            浏览器端到端
   cdp-dump.mjs          DevTools 协议 DOM 转储 / 整页截图
   lib.sh                上面几个脚本共用的辅助函数
