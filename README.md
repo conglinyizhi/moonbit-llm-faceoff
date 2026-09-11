@@ -115,6 +115,59 @@ $client --stream "写一首关于侧风的短诗"
 
 Next steps: [compare models](#2-comparing-models), or [run the web page](#3-the-web-page).
 
+### 5. Zero to a real comparison
+
+Steps 2–4 stop at one prompt. This is the whole loop — a suite, two real models,
+a report — and it is the one path that needs a gateway. Step 2 stays as it is:
+the offline demo is still how you check a change without spending anything.
+
+```bash
+# 1. build once (the demo in step 2 builds as well)
+make deps
+MOON_CC=gcc moon build --target native
+
+# 2. point at your gateway — export it, never commit it
+#    any OpenAI-compatible service will do
+bench=./_build/native/debug/build/cmd/bench/bench.exe
+export MOONLLM_BASE_URL="https://<your-gateway>/v1"
+export MOONLLM_API_KEY="sk-..."
+
+# 3. write the suite: JSON Lines, one case per line, `prompt` is the only
+#    required field (bench/cases.example.jsonl is a fuller example)
+mkdir -p my-run
+cat > my-run/cases.jsonl <<'JSONL'
+{"id": "math-short", "prompt": "计算 17 × 23。只输出数字。", "max_tokens": 512, "temperature": 0.0}
+{"id": "fact-zh", "prompt": "用一句话说明什么是航空母舰。"}
+JSONL
+
+# 4. compare — the same suite, one model at a time
+$bench \
+  --models <model-a>,<model-b> \
+  --cases my-run/cases.jsonl \
+  --repeats 3 --max-tokens 2048 --temperature 0.0 \
+  --pace-ms 1000 --retry 2 \
+  --json my-run/runs.jsonl
+
+# 5. render it as a self-contained page — no server, no key
+bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+```
+
+Two things to get right the first time:
+
+- **Send `--json` somewhere of your own.** `bench/results-example.jsonl` is a
+  committed sample of a real run, not scratch space.
+- **Read the counters before the latency.** `failures`, `retried` and
+  `truncated` head each model's block. A reply cut off by `--max-tokens` is not
+  a slow model, it is a model that ran out of budget: raise the budget and run
+  again before comparing `tok/s`. The `[truncated]` marker on the progress line
+  and `attempts > 1` in `runs.jsonl` are the same information one layer down.
+
+If the gateway rate-limits you, `--pace-ms` spaces the attempts out and
+`--retry` re-sends 429/5xx with exponential backoff — see
+[Rate limits](#rate-limits). The key lives in the environment (or in the page's
+memory for one run); it is never written to a run directory or a commit, see
+[`SECURITY.md`](SECURITY.md).
+
 ### New to MoonBit?
 
 A five-line orientation for reading this repo:
@@ -163,14 +216,18 @@ under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
 ## 1. One-shot and streaming
 
 ```bash
+# the build puts the binaries under _build/; name them once per shell
+faceoff=./_build/native/debug/build/cmd/faceoff/faceoff.exe
+bench=./_build/native/debug/build/cmd/bench/bench.exe
+
 # one-shot
-faceoff "用一句话说明什么是航空母舰"
+$faceoff "用一句话说明什么是航空母舰"
 
 # streamed, printed as fragments arrive
-faceoff --stream "写一首关于侧风的短诗"
+$faceoff --stream "写一首关于侧风的短诗"
 
 # prompt from stdin
-echo "总结一下这段日志" | faceoff --stream
+echo "总结一下这段日志" | $faceoff --stream
 ```
 
 ### Flags
@@ -204,7 +261,7 @@ Flags override the environment. Errors go to stderr and exit non-zero, so the
 CLI is safe to use in a pipeline:
 
 ```
-$ faceoff --api-key wrong "hi"
+$ $faceoff --api-key wrong "hi"
 error: http 401: {"error":{"message":"invalid api key"}}
 ```
 
@@ -217,19 +274,19 @@ comparison. Serial on purpose: two models competing for one connection is not a
 comparison.
 
 ```bash
-bench \
+$bench \
   --base-url https://api.modelbest.cn/v1 --api-key "$MB_KEY" \
   --models MiniCPM5-1B,MiniCPM5-2B \
   --cases bench/cases.example.jsonl \
   --repeats 3 --max-tokens 2048 --temperature 0.0 \
   --pace-ms 3000 --retry 3 \
-  --json bench/results-example.jsonl
+  --json my-run/runs.jsonl
 ```
 
 A single ad-hoc prompt works without a suite file:
 
 ```bash
-bench --model MiniCPM5-1B --prompt "用一句话说明什么是航空母舰" --show-cot
+$bench --model MiniCPM5-1B --prompt "用一句话说明什么是航空母舰" --show-cot
 ```
 
 ### Suite format
@@ -281,7 +338,7 @@ data from a previous run log:
 
 ```bash
 # no network, no API key needed
-bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
+$bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
 ```
 
 Useful for re-rendering after changing the report, or for re-scoring later
@@ -524,11 +581,11 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | suite | covers |
 | --- | --- |
 | `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
-| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock |
+| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 
-Three of these exist because the obvious version would pass on a broken
+Four of these exist because the obvious version would pass on a broken
 implementation:
 
 - **Incremental delivery.** The mock sleeps between fragments, and the test
@@ -541,6 +598,13 @@ implementation:
   with eight distinct ids. A single-request test passes even while the id
   allocation is a read-modify-write counter — it only breaks when two requests
   arrive together, which is exactly what a hand-run test never does.
+- **Retry and truncation counters.** The mock can turn a 429 off after the
+  first request (`RATE_LIMIT_ONCE`), which is the only shape in which a
+  *successful* retry is observable: the test asserts `attempts: 2` and
+  `retried: 1` in the same run. A client that never actually retried fails
+  outright instead. And a reply whose `finish_reason` is `length` has to land
+  in the truncation counter — counting it as a plain success would quietly
+  average a cut-off answer into the speed numbers.
 
 `scripts/web-e2e.sh` drives Chromium over the DevTools protocol and waits in
 real time. It deliberately does **not** use `--virtual-time-budget`: virtual

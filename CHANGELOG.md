@@ -102,6 +102,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `scripts/smoke.sh` now proves the retry and truncation counters are wired up
+  rather than decorative. The mock endpoint grew two switches to make that
+  observable: a prompt containing `RATE_LIMIT_ONCE` is 429'd exactly once and
+  then served — the only shape in which a *successful* retry can be asserted, so
+  the test looks for `attempts: 2` in the run log and `retried 1` in the
+  summary — and `TRUNCATE` produces a normal reply whose `finish_reason` is
+  `length`, which has to land in the truncation counter instead of passing as an
+  ordinary success. A third case pins `--retry n` to exactly n extra HTTP
+  attempts, and asserts that a run which only ever saw 429s is counted as both
+  retried and failed.
+
 - **The web page is a workbench now.** Model ids can be typed instead of only
   picked from the server's menu, the gateway address and API key can be
   overridden for a single run, the run's live failure/retry/truncation counts and
