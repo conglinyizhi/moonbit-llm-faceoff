@@ -102,6 +102,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Test runs clean up after themselves.** `web-e2e.sh` builds a temp directory
+  per run and was leaving one behind every time (31 of them had piled up in the
+  repository root, each holding a browser profile). Two causes: `[ -n "$pid" ] &&
+  kill "$pid"` returns non-zero when the pid is empty, and under `set -e` that
+  aborted the cleanup function before its `rm -rf` — and `kill` only *signals*
+  the browser, which recreates its profile directory on the way out, so removing
+  it first left a shell behind. The directory now lives in the system temp area,
+  the whole process tree is waited for before removal, and `E2E_KEEP_TMP=1` keeps
+  the scene when you need it. `smoke.mbtx` and `server-api.mbtx` delete their
+  temp directory once everything passes (a failing run keeps it, logs and all).
+
 - **The request is now visible from the result.** Each case carries a 请求上下文
   button that opens a neumorphic dialog with the parameters and the `system` /
   `user` messages as the model received them, including the case's effective

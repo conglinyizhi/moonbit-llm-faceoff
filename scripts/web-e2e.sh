@@ -35,7 +35,13 @@ CHROME_FLAGS=(--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage
 
 fail() {
   echo "FAIL: $1" >&2
-  [ -n "${2:-}" ] && { echo "--- 输出片段 ---" >&2; head -c 2000 "$2" >&2; echo >&2; }
+  # 用 if 而不是 `[ -n ] && ...`：脚本开头是 set -e，测试不成立时那一句返回
+  # 非零，会把函数就地打断（这里恰好是「不打印片段」，换成别处就是静默不执行）
+  if [ -n "${2:-}" ]; then
+    echo "--- 输出片段 ---" >&2
+    head -c 2000 "$2" >&2
+    echo >&2
+  fi
   exit 1
 }
 
@@ -44,13 +50,70 @@ moon build cmd/bench --target native >/dev/null
 moon run --target native scripts/build-web.mbtx >/dev/null
 (cd web && moon build cmd/server --target native >/dev/null)
 
-tmp=$(mktemp -d -p .)
+# 临时目录放系统临时区，不放仓库根目录。
+#
+# 以前是 `mktemp -d -p .`，跑一次就在仓库里留一个 tmp.XXXX（浏览器 profile 十几
+# MB 起步），只能靠 .gitignore 遮着。E2E_TMP_DIR 指定时用它——想把现场留在手边
+# 就设它。
+tmp=$(mktemp -d "${E2E_TMP_DIR:-${TMPDIR:-/tmp}}/faceoff-e2e.XXXXXXXX") ||
+  {
+    echo "e2e: 建不了临时目录" >&2
+    exit 1
+  }
 tmp=$(cd "$tmp" && pwd)
+
+# 收尾：先让进程真的退出，再删目录。
+#
+# 两处坑，都踩过：
+#   1. 顺序反了会留下空壳：kill 只是发信号，浏览器还在退出流程里，而它收尾时会
+#      重建自己的 profile 目录（mkdir -p 会把父目录一并建回来），于是 rm -rf
+#      之后原地又长出一个 tmp.XXXX
+#   2. `[ -n "$pid" ] && kill "$pid"` 在 pid 为空时返回非零，而脚本开头是
+#      `set -e`——这一句会让 cleanup 自己中断，后面的 rm 一次都不执行
+#      （表现就是仓库根目录下越堆越多的 tmp.XXXX）
 cleanup() {
-  kill "${webkit_pid:-}" "${chrome_pid:-}" "${web_pid:-}" "${web2_pid:-}" \
-    "${mock_pid:-}" 2>/dev/null || true
+  local pid
+  local pids=(
+    "${webkit_pid:-}" "${chrome_pid:-}" "${web_pid:-}" "${web2_pid:-}"
+    "${mock_pid:-}"
+  )
+  for pid in "${pids[@]}"; do
+    if [ -n "$pid" ]; then
+      kill_tree "$pid"
+    fi
+  done
+  # wait 收尸：僵尸进程还在时 kill -0 依然为真，会让「退出了没有」判断失真
+  wait 2>/dev/null || true
+
+  if [ "${E2E_KEEP_TMP:-}" = "1" ]; then
+    echo "e2e: 现场保留在 $tmp（E2E_KEEP_TMP=1）"
+    return 0
+  fi
   rm -rf "$tmp" 2>/dev/null || true
+  # 极短的竞态：某个孙进程可能刚写完最后一个文件。再补一次，不留空壳。
+  sleep 0.2
+  rm -rf "$tmp" 2>/dev/null || true
+  return 0
 }
+
+# 连子孙一起收：浏览器起的是进程树（zygote / renderer / gpu），只 kill 顶层
+# 会留下一堆认不出主人的进程，它们还会继续往临时目录里写东西。
+kill_tree() {
+  local pid="$1" child
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+      kill_tree "$child"
+    done
+  fi
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.05
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  return 0
+}
+
 trap cleanup EXIT
 
 build_mbtx scripts/mock_openai.mbtx "$MOCK_BIN" || fail "mock 编译失败"
@@ -106,7 +169,9 @@ start_browser() {
   for _ in $(seq 1 200); do
     if [ -s "$port_file" ]; then
       DEBUG_PORT=$(head -1 "$port_file" | tr -d '\r\n')
-      [ -n "$DEBUG_PORT" ] && return 0
+      if [ -n "$DEBUG_PORT" ]; then
+        return 0
+      fi
     fi
     sleep 0.1
   done

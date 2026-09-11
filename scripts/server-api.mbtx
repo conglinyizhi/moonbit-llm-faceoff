@@ -1042,7 +1042,14 @@ async fn main {
   println("")
   println("server api：\{results.length() - failures} 项通过，\{failures} 项失败")
   if failures > 0 {
+    // 失败时留着现场：日志、运行目录、假端点的输出都在里面
+    println("（现场保留在 \{tmp}）")
     c_exit(1)
+  }
+  // 全过就把临时目录删掉。跑一次留一个，跑一百次就在 /tmp 里堆一百个——
+  // 没人会去清理它们，而它们没有任何价值。
+  @fs.rmdir(tmp, recursive=true) catch {
+    _ => ()
   }
 }
 
