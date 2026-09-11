@@ -1416,6 +1416,8 @@ fn header(model : AppModel) -> @html.Html {
     el("div", "wrap site-header-inner", [
       el("div", "site-logo", [txt("faceoff")]),
       el("div", "site-meta", [txt(meta_line)]),
+      // 试跑台是另一页：这边管「管理测试」，那边管「随手试一下」
+      @html.a(href="playground.html", class="link-btn", [txt("试跑台 →")]),
     ]),
   ])
 }

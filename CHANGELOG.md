@@ -102,6 +102,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A playground page: one fixed system prompt, a list of user prompts, the models
+  side by side** (`/playground.html`, linked from the workbench header). It is a
+  separate bundle and a separate shell, so the workbench's own page is untouched.
+
+  The result view is a grid of **uniform cells** — same width, same height, answer
+  clipped — because the question it answers is "what did each model say to *this*
+  prompt", and that is a comparison you scan rather than read. Press 对比 on a row
+  and it opens underneath: the models side by side with the whole answer and the
+  folded chain of thought, or a **character-level diff** against the first model
+  (common prefix and suffix stripped first, then an LCS on what is left; the LLM
+  answers that share an opening are the ones where this is worth reading). A single
+  prompt may override the shared system prompt, and 存成用例集 writes the current
+  system + prompts into `web/cases/` so a prompt that turned out to be interesting
+  becomes a repeatable test.
+
 - **`POST /api/runs` can take the cases inline.** `inlineCases` is an array of case
   objects (`{prompt, id?, system?, max_tokens?, temperature?}`) written straight
   into that run's `cases.jsonl`, and `system` sets the system prompt for the whole

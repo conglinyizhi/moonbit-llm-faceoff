@@ -1,0 +1,13 @@
+import {
+  "conglinyizhi/moonbit-llm-faceoff-web/shared",
+  "moonbit-community/rabbita",
+  "moonbit-community/rabbita/cmd",
+  "moonbit-community/rabbita/html",
+  "moonbit-community/rabbita/http",
+  "moonbitlang/core/json",
+  "moonbitlang/core/string",
+}
+
+supported_targets = "js"
+
+pkgtype(kind: "executable")
