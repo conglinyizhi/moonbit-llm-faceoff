@@ -542,7 +542,7 @@ web/runs/<id>/
   runs.jsonl       bench's raw output, grows as it runs — progress is its line count
   stdout.log       bench's stdout (the rendered report)
   stderr.log       bench's progress log
-  exit_code        written last by the wrapper shell; its presence means "finished"
+  exit_code        written when the bench process is reaped; its presence means "finished"
   data.json        the final page-data document
 ```
 
@@ -659,14 +659,16 @@ subprocess boundary and the JSON hand-off would become unnecessary. That is a
 separate change and has not been made.
 
 **Run state lives in files, not in server memory.**
-The server keeps no per-run state in memory: the bench process is spawned
-through `/bin/sh`, which appends its exit code to a file when it finishes; that
-file's presence is the completion signal, and counting lines in `runs.jsonl`
-gives progress. Run ids are handed out by *creating* the directory — `mkdir`
-fails when the directory already exists, and that failure is the test-and-set —
-so two simultaneous requests cannot pick the same id. The one lock in the server
-is a semaphore serializing `stderr` writes, because `@stdio.stderr` is a single
-global handle and concurrent writes to it abort the process.
+The server keeps no per-run state in memory: the bench process is spawned directly
+(no shell, so nothing POSIX-specific and nothing to quote), and a task attached to
+the server's own lifetime waits for it to be reaped and writes its exit code to a
+file. That file's presence is the completion signal, and counting lines in
+`runs.jsonl` gives progress. Run ids are handed out by *creating* the directory —
+`mkdir` fails when the directory already exists, and that failure is the
+test-and-set — so two simultaneous requests cannot pick the same id. The one lock
+in the server is a semaphore serializing `stderr` writes, because
+`@stdio.stderr` is a single global handle and concurrent writes to it abort the
+process.
 
 ---
 
