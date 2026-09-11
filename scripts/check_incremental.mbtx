@@ -36,7 +36,11 @@ async fn main {
   let raw_binary = args[args.length() - 2]
   let base_url = args[args.length() - 1]
   // spawn 用绝对路径更稳：调用方可能传相对的 ./_build/...
-  let binary = if raw_binary.has_prefix("/") {
+  //
+  // 「绝对」在 Windows 上是 `D:\...`，不是 `/...`——只认 `/` 开头的话，调用方
+  // 传进来的绝对路径会被再拼一次当前目录（真的踩过，报的错是一个 D:\a\... 拼两遍
+  // 的路径）。带冒号也当绝对。
+  let binary = if raw_binary.has_prefix("/") || raw_binary.contains(":") {
     raw_binary
   } else {
     match @env.current_dir() {

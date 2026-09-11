@@ -47,3 +47,87 @@ jobs:
       # timing hiccup will start failing unrelated pull requests.
       - name: make ci
         run: make ci
+
+  # The same scripts on Windows. This job exists because "the scripts are
+  # MoonBit now, so they are cross-platform" is a claim, and a claim without a
+  # runner is a guess: everything here goes through @process, @fs and @http
+  # rather than grep/sed/curl, and the server spawns bench directly instead of
+  # through /bin/sh. If this job passes, that is evidence; if it fails, that is a
+  # finding.
+  #
+  # Not run here: `make ci`. It needs make plus a POSIX shell, and the point of
+  # this job is precisely that the checks no longer need either.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache the MoonBit toolchain
+        uses: actions/cache@v5
+        with:
+          path: ~/.moon
+          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod', 'web/moon.mod') }}
+
+      - name: Install MoonBit
+        shell: pwsh
+        run: |
+          irm https://cli.moonbitlang.com/install/powershell.ps1 | iex
+          "$HOME/.moon/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      # Native builds need a C compiler and linker on PATH.
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Versions
+        shell: pwsh
+        run: |
+          moon version --all
+          Get-Command cl.exe | Select-Object -ExpandProperty Source
+
+      # `make ci` starts with `make deps`; skipping it here failed the first run
+      # with "module was not found in the registry" — a fresh checkout has the
+      # bundled index, not the downloaded one.
+      - name: Fetch dependencies
+        shell: pwsh
+        run: |
+          moon update
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location web
+          moon update
+          exit $LASTEXITCODE
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          moon test --target native
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location web
+          moon test --target native
+          exit $LASTEXITCODE
+
+      # The two end-to-end suites: no shell, no curl, no grep.
+      #
+      # Built, copied, then run — not `moon run`. Every .mbtx compiles to the same
+      # output path (`_build/.../single/single.exe`), and Windows refuses to
+      # overwrite an executable that is currently running (LNK1168). A .mbtx that
+      # is itself running therefore cannot build another one, which is exactly
+      # what these two do when they build the mock endpoint. Running a *copy*
+      # frees that path again. On Linux the same thing is only a "text file busy"
+      # hazard for `cp`, so `make smoke` gets away with `moon run`.
+      - name: smoke end to end
+        shell: pwsh
+        run: |
+          moon build --target native scripts/smoke.mbtx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/smoke.exe -Force
+          scripts/_build/smoke.exe
+          exit $LASTEXITCODE
+
+      - name: server HTTP contract
+        shell: pwsh
+        run: |
+          moon build --target native scripts/server-api.mbtx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/server-api.exe -Force
+          scripts/_build/server-api.exe
+          exit $LASTEXITCODE

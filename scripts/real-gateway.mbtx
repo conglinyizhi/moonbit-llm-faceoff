@@ -169,23 +169,44 @@ async fn bin_path(path_without_suffix : String) -> String {
 }
 
 ///|
-async fn build_mbtx(src : String, out : String) -> Bool {
+/// 失败时补一句：Windows 上最常见的失败原因不是代码，而是「正在运行的 .mbtx
+/// 占着 `_build/.../single/single.exe`」——那个路径是所有 .mbtx 的公共输出，
+/// 而 Windows 不允许改写正在运行的 .exe（LNK1168）。绕法：先 build，复制成
+/// 别的名字，再运行那个副本；CI 的 windows job 就是这么做的。
+let windows_hint : String =
+  "  提示：若在 Windows 上看到 LNK1168 / cannot open ... single.exe for writing，\n" +
+  "  那是因为当前脚本（也是一个 .mbtx）正占着 _build/.../single/single.exe。\n" +
+  "  先 build、复制成别的名字，再运行副本：见 .github/workflows/ci.yml 的 windows job。\n"
+
+///|
+/// 编译一个 .mbtx 并复制成独立文件，返回**实际可执行的路径**。
+///
+/// 返回路径而不是 Bool：Windows 上可执行文件必须带 .exe，而复制过来的副本
+/// 名字是我们起的——不带后缀的话 spawn 会找不到它（真的这么踩过）。
+async fn build_mbtx(src : String, out_base : String) -> String? {
   let built = run("moon", ["build", "--target", "native", src], {})
   if built.code != 0 {
     @stdio.stderr.write(built.err + "\n") catch { _ => () }
-    return false
+    @stdio.stderr.write(windows_hint) catch { _ => () }
+    return None
   }
-  let single = "scripts/_build/native/debug/build/single/single.exe"
-  let single = if (@fs.exists(single) catch { _ => false }) {
-    single
+  let single_exe = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single_exe) catch { _ => false }) {
+    single_exe
   } else {
     "scripts/_build/native/debug/build/single/single"
   }
-  if !copy_file(single, out) {
-    return false
+  // 平台怎么命名构建产物，副本就怎么命名：Windows 上必须是 .exe
+  let target = if single.has_suffix(".exe") {
+    out_base + ".exe"
+  } else {
+    out_base
   }
-  @fs.chmod(out, 0o755) catch { _ => () }
-  true
+  if !copy_file(single, target) {
+    return None
+  }
+  @fs.chmod(target, 0o755) catch { _ => () }
+  Some(target)
 }
 
 // ---------------------------------------------------------------- 时间
@@ -389,9 +410,12 @@ async fn main {
     return
   }
   @fs.mkdir(tmp, recursive=true) catch { _ => () }
-  if !build_mbtx("scripts/check_stream.mbtx", tmp + "/check-stream") {
-    bail("check_stream.mbtx 编译失败", 1)
-    return
+  let stream_check = match build_mbtx("scripts/check_stream.mbtx", tmp + "/check-stream") {
+    Some(path) => path
+    None => {
+      bail("check_stream.mbtx 编译失败", 1)
+      return
+    }
   }
   let faceoff = bin_path("_build/native/debug/build/cmd/faceoff/faceoff")
   let bench = bin_path("_build/native/debug/build/cmd/bench/bench")
@@ -456,10 +480,10 @@ async fn main {
   stream_env["STREAM_MAX_TOKENS"] = stream_tokens
   ev.section(
     "2. streaming",
-    "STREAM_MAX_TOKENS=\{stream_tokens} \{tmp}/check-stream \{faceoff} \"\{prompt_stream}\"",
+    "STREAM_MAX_TOKENS=\{stream_tokens} \{stream_check} \{faceoff} \"\{prompt_stream}\"",
   )
   let stream = run(
-    tmp + "/check-stream",
+    stream_check,
     [faceoff, prompt_stream],
     stream_env,
   )
