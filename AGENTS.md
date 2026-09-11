@@ -61,6 +61,21 @@ Breaking any of these produces a confusing failure, not a clean error.
 - **The export routes match a fixed allowlist of names** rather than joining
   user input onto a path. Do not turn `send_run_file` into a general file
   server.
+- **A `.mbtx` cannot build another `.mbtx` while it is running — on Windows.**
+  Every `.mbtx` links to the same `_build/.../single/single.exe`, and Windows refuses
+  to overwrite a running executable (`LNK1168: cannot open ... for writing`). The
+  smoke and API suites build the mock endpoint as a child `.mbtx`, so on Windows run
+  them from a copy: `moon build … && cp single.exe scripts/_build/smoke && scripts/_build/smoke`.
+  `.github/workflows/ci.yml` does exactly that. On Linux `moon run` is fine; the
+  failure mode is `text file busy` at worst.
+- **A copied wrapper needs the platform's executable suffix.** `@process.spawn`
+  finds `scripts/_build/mock-endpoint` on Linux; on Windows `CreateProcess` will not
+  append `.exe` and reports "cannot find the file specified". `build_mbtx` therefore
+  derives the suffix from what the build produced (`single.exe` vs `single`).
+- **Executable paths must be absolute even when `cwd` is passed.** On POSIX a
+  relative path is resolved after the child `chdir`s, so `"./_build/.../ssg.exe"` with
+  `cwd=web` works. `CreateProcess` does not do that — it fails with "The system cannot
+  find the file specified". Four such call sites were found by the Windows job.
 - **Never commit a key,** and read `SECURITY.md` before writing anything that
   persists response bodies — an upstream error can echo the key back.
 

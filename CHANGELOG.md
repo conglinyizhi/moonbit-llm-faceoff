@@ -102,6 +102,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **CI runs the suites on Windows too.** "The scripts are MoonBit now, so they are
+  cross-platform" was a claim; a `windows-latest` job now backs it with a runner:
+  `moon test --target native` in both modules, then `smoke.mbtx` (16 checks) and
+  `server-api.mbtx` (42 checks) — which exercise process spawning, the mock endpoint,
+  the CLI binaries, `@http`, `@fs` and the server's own child-process handling.
+
+  Getting it green took five runs and each failure was a real platform difference,
+  documented in `AGENTS.md` because they are the kind that look like environment
+  noise:
+
+  - `moon update` first: a fresh checkout has the bundled index, not the downloaded
+    one, and without it dependency resolution fails with "module was not found in
+    the registry".
+  - A running `.mbtx` holds `_build/.../single/single.exe`, and Windows will not
+    overwrite a running executable (`LNK1168`) — so a suite that builds the mock
+    endpoint cannot itself be started with `moon run`; build, copy, run the copy.
+  - A copied wrapper needs `.exe`: `CreateProcess` does not append it, so the mock
+    endpoint "could not be started" until `build_mbtx` started deriving the suffix
+    from the build output.
+  - Executable paths must be absolute even with `cwd` set — POSIX resolves a relative
+    path after the child `chdir`s, `CreateProcess` does not.
+  - `D:\...` is an absolute path: two checkers only recognised `/`, and re-prefixed
+    the caller's path with the working directory, producing a doubled path.
+
 - **`demo.sh` and `web/build.sh` are `scripts/demo.mbtx` and
   `scripts/build-web.mbtx`.** With those two gone, the POSIX surface of the repo
   is down to `scripts/web-e2e.sh` and the `scripts/lib.sh` it sources — plus
