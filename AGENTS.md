@@ -18,7 +18,7 @@ moon run --target native scripts/real-gateway.mbtx   # the same probes against a
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 moon run --target native scripts/smoke.mbtx   # the CLIs end to end against a local mock endpoint
-bash scripts/demo.sh          # zero-API-key demo
+moon run --target native scripts/demo.mbtx   # zero-API-key demo
 ```
 
 Every one of those scripts starts its own mock endpoint — except

@@ -57,10 +57,10 @@ rather than this table — this is a copy, that is the source.
 
 ```bash
 git clone <this repo> && cd moonbit-llm-faceoff
-bash scripts/demo.sh
+moon run --target native scripts/demo.mbtx
 ```
 
-`scripts/demo.sh` builds everything, starts a **local fake OpenAI-compatible
+`scripts/demo.mbtx` builds everything, starts a **local fake OpenAI-compatible
 endpoint**, and walks the three main paths: one-shot, streaming, and a two-model
 comparison. Entirely offline.
 
@@ -88,7 +88,7 @@ make serve          # builds the page, then starts the server from web/
 Or by hand, the same two steps:
 
 ```bash
-bash web/build.sh
+moon run --target native scripts/build-web.mbtx
 cd web
 ./_build/native/debug/build/cmd/server/server.exe
 ```
@@ -161,7 +161,7 @@ $bench \
   --json my-run/runs.jsonl
 
 # 5. render it as a self-contained page — no server, no key
-bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+moon run --target native scripts/build-web.mbtx my-run/runs.jsonl        # → web/out/report.html
 
 # 6. the same loop again, with assertions and a written record
 moon run --target native scripts/real-gateway.mbtx   # → docs/real-gateway-run.md
@@ -433,7 +433,7 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 ## 3. The web page
 
 ```bash
-bash web/build.sh          # from the repository root
+moon run --target native scripts/build-web.mbtx   # from the repository root
 
 cd web                     # the server resolves out/, runs/ and the case file
                            # relative to its working directory — run it here,
@@ -568,7 +568,7 @@ web/runs/<id>/
 no JavaScript, no server, chain of thought included:
 
 ```bash
-bash web/build.sh path/to/other-runs.jsonl   # → web/out/report.html
+moon run --target native scripts/build-web.mbtx path/to/other-runs.jsonl   # → web/out/report.html
 ```
 
 ### Styling
@@ -797,10 +797,10 @@ web/cases/          your case sets (one <name>.jsonl each) — gitignored
 web/presets.json    your model + parameter combinations — gitignored
 web/runs/           one directory per run — gitignored
   shell/            index.html shell for the interactive page
-  build.sh          one-command build
+  build-web.mbtx    one-command build (run from the repository root)
 
 scripts/
-  demo.sh               offline, no-API-key demo of all three paths
+  demo.mbtx             offline, no-API-key demo of all three paths
   mock_openai.mbtx      offline OpenAI-compatible endpoint, as a MoonBit script
   check_incremental.mbtx  measures that --stream really streams
   smoke.mbtx            CLI end-to-end

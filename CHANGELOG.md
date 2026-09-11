@@ -102,6 +102,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`demo.sh` and `web/build.sh` are `scripts/demo.mbtx` and
+  `scripts/build-web.mbtx`.** With those two gone, the POSIX surface of the repo
+  is down to `scripts/web-e2e.sh` and the `scripts/lib.sh` it sources — plus
+  `cdp-dump.mjs`. `make demo`, `make web` and `make serve` all run the `.mbtx`
+  versions now.
+
+  Two small things the port surfaced: `println` is block-buffered when stdout is
+  redirected, so a script that both prints its own lines and forwards child output
+  has to put both through `@stdio.stdout.write` or the ordering comes out scrambled
+  (the demo's first run printed the model output above its own "==> building"
+  header); and `0.20.1`'s `@fs` has no `file_size`, so the build's product summary
+  lists names rather than sizes instead of reading each file back to measure it.
+
 - **`real-gateway.sh` is now `real-gateway.mbtx`** — the same four probes against
   a real endpoint, the same evidence file, and the same key handling: read from
   the environment only, never on a command line, and if the key turns up in the

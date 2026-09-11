@@ -41,7 +41,7 @@ fail() {
 
 echo "==> 构建"
 moon build cmd/bench --target native >/dev/null
-bash web/build.sh >/dev/null
+moon run --target native scripts/build-web.mbtx >/dev/null
 (cd web && moon build cmd/server --target native >/dev/null)
 
 tmp=$(mktemp -d -p .)

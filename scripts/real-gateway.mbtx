@@ -7,7 +7,7 @@
 ///
 /// 这是 scripts/real-gateway.sh 的 .mbtx 版：报告、断言、留证位置一一对应。
 ///
-/// 为什么单独一个：仓库里其他测试全部跑在离线假端点上（demo.sh / smoke.mbtx /
+/// 为什么单独一个：仓库里其他测试全部跑在离线假端点上（demo.mbtx / smoke.mbtx /
 /// server-api.mbtx / web-e2e.sh），它们证明不了对真实网关的适配。离线全绿和
 /// 「真实 API 能跑」是两件事，这个脚本就是那条缺掉的证据。
 ///
