@@ -284,6 +284,47 @@ echo "$probe" | grep -qE '"deltaCells":[1-9]' ||
   fail "指标表里没有 Δ 列：$probe"
 echo "ok: 勾两次运行能进对比视图（参数差异 / 指标差值 / 逐用例答案）"
 
+echo "==> 试跑台（单独的页面）"
+# 固定 system + 一组 prompt × 两个模型：跑完看矩阵、点开看对比与差异。
+dump_page "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground.html"
+grep -q 'id="system"' "$tmp/playground.html" || fail "试跑台没有 system 输入框" "$tmp/playground.html"
+grep -q 'id="prompt-0"' "$tmp/playground.html" || fail "试跑台没有 prompt 行" "$tmp/playground.html"
+grep -q '开始试跑' "$tmp/playground.html" || fail "试跑台没有开始按钮" "$tmp/playground.html"
+grep -q 'playground.html' "$tmp/form.html" || fail "工作台里没有去试跑台的入口" "$tmp/form.html"
+
+playground_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const boxes = Array.from(document.querySelectorAll(".picker-items input[type=checkbox]"));
+  out.modelBoxes = boxes.length;
+  out.checked = boxes.filter((b) => b.checked).length;
+  if (out.checked < 2) { return out; }
+  byText("开始试跑").click();
+  await new Promise((r) => setTimeout(r, 8000));
+  out.rows = document.querySelectorAll(".matrix-row").length;
+  out.cells = document.querySelectorAll(".cell").length;
+  const heights = Array.from(document.querySelectorAll(".cell")).map((c) => Math.round(c.getBoundingClientRect().height));
+  out.uniformHeights = heights.length > 1 && Math.min.apply(null, heights) === Math.max.apply(null, heights);
+  const row = document.querySelector(".matrix-row");
+  row.querySelector(".matrix-row-head button").click();
+  await new Promise((r) => setTimeout(r, 400));
+  out.expandedCols = document.querySelectorAll(".matrix-row.expanded .compare-col").length;
+  out.cotFolded = document.querySelectorAll(".matrix-row.expanded details.cot").length;
+  byText("差异视图").click();
+  await new Promise((r) => setTimeout(r, 400));
+  out.diffBlocks = document.querySelectorAll(".diff-block").length;
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground-run.html" "$playground_probe" 2000
+probe=$(grep -o 'SCRIPT .*' "$tmp/playground-run.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -qE '"checked":2' || fail "试跑台默认没勾上两个模型：$probe"
+echo "$probe" | grep -qE '"rows":2' || fail "试跑台没渲染出两行（两条 prompt）：$probe"
+echo "$probe" | grep -qE '"cells":4' || fail "试跑台没渲染出 2×2 个单元格：$probe"
+echo "$probe" | grep -q '"uniformHeights":true' || fail "单元格高度不一致：$probe"
+echo "$probe" | grep -qE '"expandedCols":2' || fail "点开对比没出现左右两列：$probe"
+echo "$probe" | grep -qE '"diffBlocks":[1-9]' || fail "差异视图没有内容：$probe"
+echo "ok: 试跑台（矩阵等高等宽、点开左右对比、差异视图）"
+
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
 # 这样拿到的正是应用要写进剪贴板的内容，且不依赖无头浏览器是否允许读剪贴板。

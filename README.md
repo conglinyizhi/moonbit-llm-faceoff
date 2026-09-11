@@ -486,6 +486,31 @@ never handed to the browser. Either way, if an upstream error echoes the key
 back the body is masked before it reaches the page or the disk — see
 [`SECURITY.md`](SECURITY.md).
 
+### The playground page — a fixed system prompt, one prompt suite, side by side
+
+`/playground.html` is the page for trying things out, as opposed to the workbench
+above, which is for managing tests. One system prompt at the top, a list of user
+prompts below it, tick the models you want, press the button:
+
+```
+┌─ #1  用一句话说明什么是甲板风。 ─────────────── 对比 ─┐
+│ mock-a   101ms · 9 tok │ mock-b   100ms · 9 tok      │   ← 等高等宽
+│ 甲板风是指…（截断）     │ 甲板风是风吹过甲板…（截断）  │
+└──────────────────────────────────────────────────────┘
+```
+
+Every cell is the same width and height regardless of how long the answer is —
+that is what makes a screenful scannable. Press 对比 on a row and that row opens
+underneath: the models side by side with the full answer and the folded chain of
+thought, or 差异视图, a character-level diff between the first model and each of
+the others (green = only on the right, red = only on the left). A single prompt can
+override the shared system prompt; leaving it empty means "use the shared one".
+
+It talks to the same `POST /api/runs` as the workbench (with `inlineCases` +
+`system`), so these runs also land in the run history and can be rerun from there.
+`存成用例集` writes the current system + prompts into `web/cases/`, which is how a
+prompt that turned out to be interesting graduates into a repeatable test.
+
 ### The URL is the configuration
 
 Query parameters override the defaults, so a link can carry a whole comparison —

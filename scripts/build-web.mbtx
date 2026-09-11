@@ -3,7 +3,8 @@
 ///   moon run --target native scripts/build-web.mbtx [path/to/results.jsonl]
 ///
 ///   web/styles/site.scss   → precss        → web/out/site.css
-///   web/cmd/app  (js)      → moon build    → web/out/app.js     交互页
+///   web/cmd/app  (js)      → moon build    → web/out/app.js     交互页（工作台）
+///   web/cmd/playground (js) → moon build   → web/out/playground.js  试跑台
 ///   web/shell/index.html   → 复制          → web/out/index.html 交互页外壳
 ///   web/cmd/ssg  (native)  → Rabbita SSR   → web/out/report.html 静态报告
 ///
@@ -186,16 +187,44 @@ async fn main {
     return
   }
 
-  say("==> 交互页外壳")
-  if !copy_file(web + "/shell/index.html", web + "/out/index.html") {
-    note("拷贝 index.html 失败")
+  say("==> 试跑台（playground）")
+  let (pg_code, _, pg_err) = run(
+    "moon",
+    ["build", "cmd/playground", "--target", "js"],
+    web,
+  )
+  if pg_code != 0 {
+    note(pg_err)
+    c_exit(1)
+    return
+  }
+  if !copy_file(
+    web + "/_build/js/debug/build/cmd/playground/playground.js",
+    web + "/out/playground.js",
+  ) {
+    note("拷贝 playground.js 失败")
+    c_exit(1)
+    return
+  }
+
+  say("==> 外壳")
+  if !copy_file(web + "/shell/index.html", web + "/out/index.html") ||
+    !copy_file(web + "/shell/playground.html", web + "/out/playground.html") {
+    note("拷贝外壳失败")
     c_exit(1)
     return
   }
 
   say("")
   say("产物（在 web/out/ 下）：")
-  for name in ["app.js", "index.html", "report.html", "site.css"] {
+  for name in [
+    "app.js",
+    "index.html",
+    "playground.js",
+    "playground.html",
+    "report.html",
+    "site.css",
+  ] {
     // 0.20.1 的 @fs 没有 file_size，这里就不报大小了：只是给人看一眼，
     // 为此把 app.js 整个读一遍不值当。
     if exists(web + "/out/" + name) {
