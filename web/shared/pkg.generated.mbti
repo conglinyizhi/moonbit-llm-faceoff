@@ -2,19 +2,23 @@
 package "conglinyizhi/moonbit-llm-faceoff-web/shared"
 
 import {
+  "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",
+  "moonbitlang/core/json",
 }
 
 // Values
-pub fn answer_block(Answer) -> @html.Html
+pub fn annotation_editor(Annotation?, String, @cmd.Cmd, @cmd.Cmd, @cmd.Cmd, @cmd.Cmd, @cmd.Emit[String], @cmd.Cmd) -> @html.Html
 
-pub fn answers(PageData) -> @html.Html
+pub fn answer_block(String, Answer, editor? : (String, String) -> @html.Html) -> @html.Html
+
+pub fn answers(PageData, editor? : (String, String) -> @html.Html) -> @html.Html
 
 pub fn array_field(Map[String, Json], String) -> Array[Json]
 
 pub fn as_object(Json) -> Map[String, Json]
 
-pub fn case_block(CaseBlock) -> @html.Html
+pub fn case_block(CaseBlock, editor? : (String, String) -> @html.Html) -> @html.Html
 
 pub fn comparison(PageData) -> @html.Html
 
@@ -44,7 +48,7 @@ pub fn plain(String, Array[@html.Html]) -> @html.Html
 
 pub fn results_markdown(PageData) -> String
 
-pub fn results_section(PageData) -> @html.Html
+pub fn results_section(PageData, editor? : (String, String) -> @html.Html) -> @html.Html
 
 pub fn stat(String, MetricStats?, String) -> @html.Html
 
@@ -60,9 +64,27 @@ pub fn verdict_badge(Answer) -> @html.Html
 
 pub fn verdict_label(String) -> String
 
+pub fn with_annotations(PageData, Array[Annotation]) -> PageData
+
 // Errors
 
 // Types and methods
+pub(all) struct Annotation {
+  case_id : String
+  model : String
+  verdict : String
+  note : String
+} derive(Eq, @json.FromJson)
+pub fn Annotation::equal(Self, Self) -> Bool
+pub fn Annotation::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Annotation::not_equal(Self, Self) -> Bool
+
+pub(all) struct AnnotationResponse {
+  id : String
+  annotations : Array[Annotation]
+} derive(@json.FromJson)
+pub fn AnnotationResponse::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
 pub(all) struct Answer {
   model : String
   ok : Bool

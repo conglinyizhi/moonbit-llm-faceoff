@@ -140,7 +140,10 @@ pub fn comparison(data : PageData) -> @html.Html {
 }
 
 ///|
-pub fn answers(data : PageData) -> @html.Html {
+pub fn answers(
+  data : PageData,
+  editor? : (String, String) -> @html.Html,
+) -> @html.Html {
   if data.cases.length() == 0 {
     return @html.fragment([])
   }
@@ -149,20 +152,31 @@ pub fn answers(data : PageData) -> @html.Html {
       txt("用例输出"),
       el("span", "", [txt("每个模型一条")]),
     ]),
-    el("div", "cases", data.cases.map(case_block)),
+    el("div", "cases", data.cases.map(fn(block) { case_block(block, editor?) })),
   ])
 }
 
 ///|
-pub fn case_block(block : CaseBlock) -> @html.Html {
+pub fn case_block(
+  block : CaseBlock,
+  editor? : (String, String) -> @html.Html,
+) -> @html.Html {
   el("article", "case", [
     el("div", "case-head", [@html.h3([txt(block.id)])]),
-    el("div", "", block.answers.map(answer_block)),
+    el(
+      "div",
+      "",
+      block.answers.map(fn(answer) { answer_block(block.id, answer, editor?) }),
+    ),
   ])
 }
 
 ///|
-pub fn answer_block(answer : Answer) -> @html.Html {
+pub fn answer_block(
+  case_id : String,
+  answer : Answer,
+  editor? : (String, String) -> @html.Html,
+) -> @html.Html {
   let head = if answer.ok {
     "\{answer.model} · \{format_value(Some(answer.total_ms), "ms")} · \{answer.completion_tokens} token（推理 \{answer.reasoning_tokens}）"
   } else {
@@ -180,9 +194,14 @@ pub fn answer_block(answer : Answer) -> @html.Html {
   let parts : Array[@html.Html] = [
     el("div", "answer-head", [txt(head)]),
     body,
-    // 人工判定跟着答案走：以后翻回来看时，当时的结论就在旁边
+    // 人工判定跟着答案走：以后翻回来时，当时的结论就在旁边
     verdict_badge(answer),
   ]
+  // 可编辑的地方才长编辑器：静态报告只读，没有 editor 钩子
+  match editor {
+    Some(build) => parts.push(build(case_id, answer.model))
+    None => ()
+  }
   // 失败的那些没有思考可看
   if answer.ok && answer.reasoning.length() > 0 {
     parts.push(cot_block(answer))
@@ -232,6 +251,61 @@ fn cot_block(answer : Answer) -> @html.Html {
 
 ///|
 /// 结果区整体（卡片 + 对比 + 用例），供两个前端共用。
-pub fn results_section(data : PageData) -> @html.Html {
-  @html.fragment([model_cards(data), comparison(data), answers(data)])
+pub fn results_section(
+  data : PageData,
+  editor? : (String, String) -> @html.Html,
+) -> @html.Html {
+  @html.fragment([model_cards(data), comparison(data), answers(data, editor?)])
+}
+
+///|
+/// 一条答案的标注编辑器：三档按钮 + 备注。
+///
+/// 两个页面共用；回调由调用方给（shared 不知道各页面的 Msg 类型）。
+/// 「再点一次同一个判定」= 清除，不用额外做一个「撤销」按钮。
+pub fn annotation_editor(
+  annotation : Annotation?,
+  note : String,
+  // 按钮收 Cmd（和 @html.button 的 on_click 一致），文本框收 Emit[String]
+  on_pass : @cmd.Cmd,
+  on_fail : @cmd.Cmd,
+  on_unsure : @cmd.Cmd,
+  on_clear : @cmd.Cmd,
+  on_note : @cmd.Emit[String],
+  on_save : @cmd.Cmd,
+) -> @html.Html {
+  let current = match annotation {
+    Some(entry) => entry.verdict
+    None => ""
+  }
+  let button = fn(verdict : String, label : String, handler : @cmd.Cmd) {
+    let class_ = if current == verdict {
+      "verdict-btn active"
+    } else {
+      "verdict-btn"
+    }
+    @html.button(class=class_, on_click=handler, [txt(label)])
+  }
+  el("div", "annotate", [
+    el("div", "annotate-row", [
+      button("pass", "✅ 通过", on_pass),
+      button("fail", "❌ 不行", on_fail),
+      button("unsure", "🤔 拿不准", on_unsure),
+      if current == "" {
+        @html.fragment([])
+      } else {
+        @html.button(class="link-btn", on_click=on_clear, [txt("清除")])
+      },
+    ]),
+    el("div", "annotate-note", [
+      @html.input(
+        input_type=@html.InputType::Text,
+        class="note-input",
+        value=note,
+        placeholder="备注：这里出现了什么问题？",
+        on_input=on_note,
+      ),
+      @html.button(class="ghost", on_click=on_save, [txt("存备注")]),
+    ]),
+  ])
 }

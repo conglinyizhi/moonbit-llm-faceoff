@@ -102,6 +102,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The verdicts are editable in the page, and they are on both pages.** Under every
+  answer in the workbench: ✅ 通过 / ❌ 不行 / 🤔 拿不准 and a note box. The verdict
+  saves on click (clicking the same one again clears it — no separate undo), the note
+  saves on 存备注, and the answer shows the badge and the note next to it afterwards.
+  The playground shows the verdict as a mark in the cell (`🤔 拿不准`) and the same
+  editor in the expanded comparison.
+
+  Writing the browser test for this found two real bugs, both about *which* data the
+  screen is showing: the Markdown copy read the current run's data even while a
+  historical run was on screen ("还没有结果可复制" for a run whose results were right
+  there), and opening a historical run did not load its annotations, so an annotated
+  run looked unannotated until you reloaded. The export row already followed the
+  viewed run; the copy button and the annotation fetch now do too.
+
 - **Human verdicts on results.** Every answer — one run × one case × one model — can
   carry a verdict (`pass` / `fail` / `unsure`, `✅ 通过` / `❌ 不行` / `🤔 拿不准` on
   screen) and a free-text note saying what was wrong. They live in

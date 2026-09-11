@@ -1243,3 +1243,50 @@ button.ghost {
     word-break: break-word;
   }
 }
+
+// 标注编辑器（工作台与试跑台共用）
+.annotate {
+  margin-top: 0.5rem;
+  border-top: 1px dashed $border;
+  padding-top: 0.4rem;
+
+  .annotate-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .verdict-btn {
+    background: none;
+    border: 1px solid $border;
+    border-radius: 999px;
+    color: $muted;
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.55rem;
+
+    &.active {
+      color: $title;
+      border-color: $accent;
+      background: rgba(88, 166, 255, 0.12);
+    }
+  }
+
+  .annotate-note {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.35rem;
+  }
+
+  .note-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 0.35rem;
+    color: $text;
+    padding: 0.25rem 0.45rem;
+    font-size: 0.8rem;
+  }
+}

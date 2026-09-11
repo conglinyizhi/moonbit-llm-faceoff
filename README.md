@@ -476,6 +476,10 @@ From the page you can:
   thought underneath, folded into a `<details>` (`思考过程 · N token · M 字`).
   Comparing two reasoning models means comparing that text, and a token count
   cannot stand in for it;
+- **judge an answer by hand**: ✅ 通过 / ❌ 不行 / 🤔 拿不准 plus a note saying what
+  was wrong. The verdict is saved the moment you click it, the note when you press
+  存备注, and both live in that run's directory — so they show up in the Markdown
+  copy and the static report too, and deleting a run takes its verdicts with it;
 - export the result — copy the report as Markdown, copy a shareable URL, or
   download `runs.jsonl`, `data.json`, or a self-contained `report.html`.
 
@@ -505,6 +509,9 @@ underneath: the models side by side with the full answer and the folded chain of
 thought, or 差异视图, a character-level diff between the first model and each of
 the others (green = only on the right, red = only on the left). A single prompt can
 override the shared system prompt; leaving it empty means "use the shared one".
+
+Cells carry the verdict as a small mark (`🤔 拿不准`) when a run has been
+annotated, and the same editor appears in the expanded comparison.
 
 It talks to the same `POST /api/runs` as the workbench (with `inlineCases` +
 `system`), so these runs also land in the run history and can be rerun from there.

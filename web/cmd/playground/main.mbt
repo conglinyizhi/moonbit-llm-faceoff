@@ -91,6 +91,11 @@ struct AppModel {
   expanded : Int?
   /// 展开的那一行用差异视图，而不是左右并排。
   diff_mode : Bool
+  /// 这条运行的人工标注。
+  annotations : Array[@shared.Annotation]
+  /// 正在编辑哪条答案的备注（"case\u0000model"）与草稿。
+  note_key : String?
+  note_draft : String
   /// 「存成用例集」那一行的名字与反馈。
   save_name : String
   save_note : String?
@@ -119,6 +124,9 @@ fn initial_model() -> AppModel {
     error: None,
     expanded: None,
     diff_mode: false,
+    annotations: [],
+    note_key: None,
+    note_draft: "",
     save_name: "",
     save_note: None,
     save_error: None,
@@ -144,6 +152,12 @@ enum Msg {
   RunProgress(Result[RunStatus, Error])
   ToggleRow(Int)
   ToggleDiffMode
+  // 人工标注
+  AnnotationsLoaded(String, Result[@shared.AnnotationResponse, Error])
+  SetVerdict(String, String, String)
+  NoteChanged(String, String, String)
+  SaveNote(String)
+  AnnotationsSaved(Result[Json, Error])
   SaveNameChanged(String)
   SaveCases
   CasesSaved(Result[Json, Error])
@@ -189,6 +203,93 @@ fn start_run(payload : Json, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.post("/api/runs")
   .with_json(payload)
   .expect_json(emit.map(fn(result) { RunStarted(result) }))
+}
+
+///|
+fn fetch_annotations(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.get("/api/runs/" + id + "/annotations").expect_json(
+    emit.map(fn(result) { AnnotationsLoaded(id, result) }),
+  )
+}
+
+///|
+fn save_annotations(
+  id : String,
+  annotations : Array[@shared.Annotation],
+  emit : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  @http.put("/api/runs/" + id + "/annotations")
+  .with_json(annotations_json(annotations))
+  .expect_json(emit.map(fn(result) { AnnotationsSaved(result) }))
+}
+
+///|
+fn annotations_json(annotations : Array[@shared.Annotation]) -> Json {
+  Json::object({
+    "annotations": Json::array(
+      annotations.map(fn(entry) {
+        Json::object({
+          "case_id": Json::string(entry.case_id),
+          "model": Json::string(entry.model),
+          "verdict": Json::string(entry.verdict),
+          "note": Json::string(entry.note),
+        })
+      }),
+    ),
+  })
+}
+
+///|
+/// 改一条标注：verdict / note 传 None 表示保持原样；两条都空就删掉这条。
+fn set_annotation(
+  annotations : Array[@shared.Annotation],
+  case_id : String,
+  answer_model : String,
+  verdict : String,
+  note : String?,
+) -> Array[@shared.Annotation] {
+  let out : Array[@shared.Annotation] = []
+  let mut found = false
+  for entry in annotations {
+    if entry.case_id == case_id && entry.model == answer_model {
+      found = true
+      let next_verdict = if verdict != "" { verdict } else { entry.verdict }
+      let next_note = match note {
+        Some(text) => text
+        None => entry.note
+      }
+      if next_verdict != "" || next_note != "" {
+        out.push({ ..entry, verdict: next_verdict, note: next_note, })
+      }
+    } else {
+      out.push(entry)
+    }
+  }
+  if !found {
+    let next_note = match note {
+      Some(text) => text
+      None => ""
+    }
+    if verdict != "" || next_note != "" {
+      out.push({ case_id, model: answer_model, verdict, note: next_note, })
+    }
+  }
+  out
+}
+
+///|
+fn annotation_of(
+  annotations : Array[@shared.Annotation],
+  case_id : String,
+  answer_model : String,
+) -> @shared.Annotation? {
+  match
+    annotations.filter(fn(entry) {
+      entry.case_id == case_id && entry.model == answer_model
+    }) {
+    [first, ..] => Some(first)
+    [] => None
+  }
 }
 
 ///|
@@ -519,7 +620,8 @@ fn update(
           if status.status == "running" {
             (next, @rabbita.delay(poll_run(status.id, emit), 700))
           } else {
-            (next, @cmd.none)
+            // 跑完把这次运行的标注拿进来（重跑同一条时可能已经有标注）
+            (next, fetch_annotations(status.id, emit))
           }
         }
         Err(error) =>
@@ -541,6 +643,61 @@ fn update(
         @cmd.none,
       )
     ToggleDiffMode => ({ ..model, diff_mode: !model.diff_mode, }, @cmd.none)
+    AnnotationsLoaded(_id, result) =>
+      match result {
+        Ok(response) =>
+          ({ ..model, annotations: response.annotations, }, @cmd.none)
+        Err(_) => (model, @cmd.none)
+      }
+    SetVerdict(case_id, answer_model, verdict) => {
+      let next = set_annotation(
+        model.annotations,
+        case_id,
+        answer_model,
+        verdict,
+        None,
+      )
+      match model.run_id {
+        None => ({ ..model, annotations: next, }, @cmd.none)
+        Some(id) =>
+          ({ ..model, annotations: next, }, save_annotations(id, next, emit))
+      }
+    }
+    NoteChanged(case_id, answer_model, text) =>
+      (
+        {
+          ..model,
+          note_key: Some(case_id + "\u0000" + answer_model),
+          note_draft: text,
+        },
+        @cmd.none,
+      )
+    SaveNote(case_id) => {
+      let answer_model = match model.note_key {
+        Some(key) =>
+          match key.find("\u0000") {
+            Some(index) => key[index + 1:].to_owned()
+            None => ""
+          }
+        None => ""
+      }
+      let next = set_annotation(
+        model.annotations,
+        case_id,
+        answer_model,
+        "",
+        Some(model.note_draft),
+      )
+      match model.run_id {
+        None => ({ ..model, annotations: next, note_key: None, }, @cmd.none)
+        Some(id) =>
+          (
+            { ..model, annotations: next, note_key: None, },
+            save_annotations(id, next, emit),
+          )
+      }
+    }
+    AnnotationsSaved(_result) => (model, @cmd.none)
     SaveNameChanged(text) => ({ ..model, save_name: text, }, @cmd.none)
     SaveCases => {
       let name = model.save_name.trim(chars=" \t\r\n").to_owned()
@@ -971,26 +1128,39 @@ fn status_label(status : String) -> String {
 fn matrix(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   match model.data {
     None => @html.fragment([])
-    Some(data) =>
-      if data.cases.length() == 0 {
-        @html.fragment([])
-      } else {
-        el(
-          "section",
-          "matrix",
-          [
-            el("div", "matrix-head", [
-              @html.h2([txt("各模型输出")]),
-              el("span", "hint", [
-                txt(
-                  "点某一行的「对比」展开全文与差异；同一行的列宽高一致",
-                ),
-              ]),
-            ]),
-            ..rows_view(data, model, emit),
-          ],
-        )
-      }
+    // 标注贴回数据再渲染：答案块上的判定徽章读的是 answer.verdict，
+    // 编辑器读的是标注表——两处都得有，否则「判过了但徽章不出现」
+    Some(data) => {
+      let data = @shared.with_annotations(data, model.annotations)
+      matrix_body(data, model, emit)
+    }
+  }
+}
+
+///|
+fn matrix_body(
+  data : @shared.PageData,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  if data.cases.length() == 0 {
+    @html.fragment([])
+  } else {
+    el(
+      "section",
+      "matrix",
+      [
+        el("div", "matrix-head", [
+          @html.h2([txt("各模型输出")]),
+          el("span", "hint", [
+            txt(
+              "点某一行的「对比」展开全文与差异；同一行的列宽高一致",
+            ),
+          ]),
+        ]),
+        ..rows_view(data, model, emit),
+      ],
+    )
   }
 }
 
@@ -1026,7 +1196,7 @@ fn case_row(
   let cells = el(
     "div",
     "matrix-cells",
-    block.answers.map(fn(answer) { cell(answer) }),
+    block.answers.map(fn(answer) { cell(block.id, answer, model.annotations) }),
   )
   if expanded {
     el("article", "matrix-row expanded", [
@@ -1054,13 +1224,22 @@ fn prompt_of(model : AppModel, index : Int) -> String {
 
 ///|
 /// 一个单元格：等高等宽，正文截断，带 token 与耗时。要读全文就点这一行的「对比」。
-fn cell(answer : @shared.Answer) -> @html.Html {
+fn cell(
+  case_id : String,
+  answer : @shared.Answer,
+  annotations : Array[@shared.Annotation],
+) -> @html.Html {
+  // 判定直接在格子上显示成一个小角标：矩阵是用来扫的，扫得出「哪些判过」很重要
+  let mark = match annotation_of(annotations, case_id, answer.model) {
+    Some(entry) => " " + @shared.verdict_label(entry.verdict)
+    None => ""
+  }
   let head = el("div", "cell-head", [
     el("span", "cell-model", [txt(answer.model)]),
     el("span", "cell-stats", [
       txt(
         if answer.ok {
-          "\{format_ms(answer.total_ms)} · \{answer.completion_tokens} tok"
+          "\{format_ms(answer.total_ms)} · \{answer.completion_tokens} tok\{mark}"
         } else {
           "失败"
         },
@@ -1132,13 +1311,18 @@ fn compare_view(
   let body = if model.diff_mode {
     diff_view(block)
   } else {
-    side_by_side(block)
+    side_by_side(block.id, block, model, emit)
   }
   el("div", "compare", [toggle, body])
 }
 
 ///|
-fn side_by_side(block : @shared.CaseBlock) -> @html.Html {
+fn side_by_side(
+  case_id : String,
+  block : @shared.CaseBlock,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
   el(
     "div",
     "compare-cols",
@@ -1149,7 +1333,9 @@ fn side_by_side(block : @shared.CaseBlock) -> @html.Html {
             "\{answer.model} · \{format_ms(answer.total_ms)} · \{answer.completion_tokens} token（推理 \{answer.reasoning_tokens}）",
           ),
         ]),
-        @shared.answer_block(answer),
+        @shared.answer_block(case_id, answer, editor=fn(_case, answer_model) {
+          playground_editor(model, case_id, answer_model, emit)
+        }),
       ])
     }),
   )
@@ -1204,6 +1390,36 @@ fn summary_of(answer : @shared.Answer) -> String {
   }
   let text = answer.content.trim(chars=" \t\r\n").to_owned()
   "\{text.length()} 字 / \{answer.completion_tokens} token"
+}
+
+///|
+/// 一条答案的标注编辑器（和工作台那边同一套组件，回调映射成这页的 Msg）。
+fn playground_editor(
+  model : AppModel,
+  case_id : String,
+  answer_model : String,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  let entry = annotation_of(model.annotations, case_id, answer_model)
+  let key = case_id + "\u0000" + answer_model
+  let note = if model.note_key == Some(key) {
+    model.note_draft
+  } else {
+    match entry {
+      Some(entry) => entry.note
+      None => ""
+    }
+  }
+  @shared.annotation_editor(
+    entry,
+    note,
+    emit(SetVerdict(case_id, answer_model, "pass")),
+    emit(SetVerdict(case_id, answer_model, "fail")),
+    emit(SetVerdict(case_id, answer_model, "unsure")),
+    emit(SetVerdict(case_id, answer_model, "")),
+    emit.map(fn(text) { NoteChanged(case_id, answer_model, text) }),
+    emit(SaveNote(case_id)),
+  )
 }
 
 // ---------------------------------------------------------------- 存成用例集

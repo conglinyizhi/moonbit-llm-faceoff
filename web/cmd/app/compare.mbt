@@ -291,14 +291,18 @@ fn case_ids_union(
 
 ///|
 /// 一列答案：某次运行在某道题上的全部模型输出。
-fn answer_column(title : String, block : @shared.CaseBlock?) -> @html.Html {
+fn answer_column(
+  title : String,
+  case_id : String,
+  block : @shared.CaseBlock?,
+) -> @html.Html {
   let body = match block {
     None => [el("p", "muted", [txt("这次没有这道题")])]
     Some(block) =>
       if block.answers.length() == 0 {
         [el("p", "muted", [txt("没有答案")])]
       } else {
-        block.answers.map(fn(answer) { @shared.answer_block(answer) })
+        block.answers.map(fn(answer) { @shared.answer_block(case_id, answer) })
       }
   }
   el("div", "compare-col", [el("div", "compare-col-head", [txt(title)])] + body)
@@ -317,8 +321,8 @@ fn cases_compare(state : CompareState) -> @html.Html {
       el("article", "compare-case", [
         el("h3", "", [txt(id)]),
         el("div", "compare-cols", [
-          answer_column(state.a, case_of(state.data_a, id)),
-          answer_column(state.b, case_of(state.data_b, id)),
+          answer_column(state.a, id, case_of(state.data_a, id)),
+          answer_column(state.b, id, case_of(state.data_b, id)),
         ]),
       ])
     }),
