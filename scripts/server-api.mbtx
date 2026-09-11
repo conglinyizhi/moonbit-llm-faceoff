@@ -269,6 +269,17 @@ fn header(reply : Reply, name : String) -> String {
 ///|
 /// 从一个 JSON 对象里取字符串字段（拿 run id、状态这类）。
 ///|
+/// 从状态响应顶层取一个数字字段。
+fn json_number(text : String, key : String) -> Double {
+  let parsed = @json.parse(text) catch { _ => return -1.0 }
+  guard parsed is Object(obj) else { return -1.0 }
+  match obj.get(key) {
+    Some(Number(value, ..)) => value
+    _ => -1.0
+  }
+}
+
+///|
 /// 从状态响应里取 `live` 对象的一个字段（都是字符串字段）。
 fn json_live_field(text : String, key : String) -> String {
   let parsed = @json.parse(text) catch { _ => return "" }
@@ -984,6 +995,9 @@ async fn main {
     let mut live_case = ""
     let mut saw_rate = false
     let mut saw_age = false
+    let mut saw_partial_done = false
+    let mut done_series = ""
+    let mut finished_done = -1.0
     let mut slow_tail = ""
     for attempt = 0; attempt < 80; attempt = attempt + 1 {
       let probe = get(base + "/api/runs/" + slow_id)
@@ -1003,6 +1017,15 @@ async fn main {
       if model != "" {
         live_model = model
       }
+      if probe.body.contains("\"status\":\"running\"") {
+        let done = json_number(probe.body, "done")
+        if done >= 0.0 {
+          done_series = done_series + done.to_string() + " "
+          if done > 0.0 && done < 3.0 {
+            saw_partial_done = true
+          }
+        }
+      }
       let rate = json_live_field(probe.body, "tokPerS")
       if rate != "" && rate != "0" {
         saw_rate = true
@@ -1021,12 +1044,26 @@ async fn main {
       "运行中的状态带 live（哪条、多快）与 liveAgeMs（多久没输出）",
       "event=\{live_event} model=\{live_model} case=\{live_case} age=\{saw_age} rate=\{saw_rate} body=\{slow_tail}",
     )
+    // done 必须在运行期间就往前走。它一度是从 runs.jsonl 数的，而那个文件是
+    // bench 跑完一次性写的——于是整次运行的进度条都停在 0，结束那一刻才跳到
+    // 100%。这条断言就是钉住那个 bug 的。
+    expect(
+      saw_partial_done,
+      "运行期间 done 会增长（不是结束才从 0 跳到满）",
+      "done 序列=\{done_series}",
+    )
     // 跑完之后那一行不该继续冒充「现在」：旧运行的 live 只能是过去的残留
     let after = await_finished(base, slow_id)
     expect(
       after.contains("\"status\":\"done\""),
       "慢速运行能正常跑完（live 不挡路）",
       after,
+    )
+    finished_done = json_number(after, "done")
+    expect(
+      finished_done == 3.0,
+      "跑完时 done == total",
+      "done=\{finished_done} body=\{after}",
     )
     let _ = delete(base + "/api/runs/" + slow_id)
     slow.cancel()

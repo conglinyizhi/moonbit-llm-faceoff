@@ -83,7 +83,46 @@ await call("Emulation.setDeviceMetricsOverride", {
   mobile: false,
 })
 await call("Page.navigate", { url })
-await new Promise((resolve) => setTimeout(resolve, waitMs))
+
+const evaluate = async (expression) => {
+  const outcome = await call("Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+  })
+  return outcome.result?.result?.value
+}
+
+// 等条件满足，而不是死等。
+//
+// waitMs 从「必须等这么久」变成「最多等这么久」：页面本地渲染 + 三个本地 fetch
+// 通常几百毫秒就绪，而 e2e 里有近二十次转储，每次都硬等 6–8 秒，加起来就是全部
+// 时间的绝大部分。等不到就照旧往下走（让上层断言去报错，而不是在这里假装成功），
+// 所以最坏情况与改动前一样。
+if (flags["wait-for"]) {
+  const started = Date.now()
+  const deadline = started + waitMs
+  let satisfied = false
+  for (;;) {
+    if (await evaluate(String(flags["wait-for"]))) {
+      satisfied = true
+      break
+    }
+    if (Date.now() >= deadline) {
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  }
+  // 等到了多久、还是等满了上限，都记一笔：前者是这次提速的依据，后者说明
+  // 条件写错了或者页面真的没进那个状态（后面的断言多半会跟着报错）
+  notes.push(
+    (satisfied ? "WAIT-FOR ok " : "WAIT-FOR timeout ") +
+      (Date.now() - started) +
+      "ms " +
+      flags["wait-for"],
+  )
+} else {
+  await new Promise((resolve) => setTimeout(resolve, waitMs))
+}
 
 // 剪贴板读取要显式授权，否则 navigator.clipboard.readText() 直接抛。
 if (flags.script) {
@@ -107,7 +146,29 @@ if (flags.script) {
   if (value !== undefined) {
     notes.push("SCRIPT " + JSON.stringify(value))
   }
-  await new Promise((resolve) => setTimeout(resolve, scriptWait))
+  // 脚本之后的等待同样改成「等 DOM 稳定」：脚本自己 await 过的那部分已经过去了，
+  // 这里只需要等它引发的重渲染落地。最少 200ms，最多 scriptWait。
+  const drainDeadline = Date.now() + scriptWait
+  let previous = ""
+  let stableSince = 0
+  for (;;) {
+    const now = Date.now()
+    const current = await evaluate("document.documentElement.outerHTML")
+    if (current === previous) {
+      if (stableSince === 0) {
+        stableSince = now
+      } else if (now - stableSince >= 200) {
+        break
+      }
+    } else {
+      previous = current
+      stableSince = 0
+    }
+    if (now >= drainDeadline) {
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80))
+  }
 }
 
 const result = await call("Runtime.evaluate", {

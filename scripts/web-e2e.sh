@@ -179,19 +179,43 @@ start_browser() {
 }
 
 # CDP + 真实等待：虚拟时间会和页面里的 fetch 抢时钟，不可靠
+# 第二个参数是**上限**，不是「必须等这么久」：第 4 个参数给了就绪条件时，
+# 条件一满足就往下走。没给条件 = 保留原来的固定等待——每个段落在等的条件都不一样
+# （等表单、等跑完、等历史出现），一刀切会把「采样运行中」这类断言等坏。
+#
+# 页面本地渲染 + 几个本地 fetch 通常几百毫秒就绪，而这里有近二十次转储：
+# 每次硬等 6–8 秒，加起来就是全部时间的绝大部分。
+DUMP_READY_FORM='document.querySelector("#case-math-short") !== null'
+DUMP_READY_HISTORY='document.querySelector(".history-item") !== null'
+# 「这次跑完了」还不够：跑完的那一下页面才去刷历史列表，而下面几段都要点开
+# 历史里的某一条。所以要等两件事都有。
+DUMP_READY_RUN_DONE='/已完成|失败/.test((document.querySelector(".progress-head") || {}).textContent || "") && document.querySelector(".history-item") !== null'
+DUMP_READY_PLAYGROUND='document.querySelector("#prompt-0") !== null'
+
+# 条件里通常带空格，所以要按数组传：写成 $ready 会被 shell 拆成多个参数，
+# 条件本身只剩前半截（语法错 → 每次求值都失败 → 每次都等满上限，白等还不报错）
 dump_page() {
-  node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" 2>"$3.err" || true
+  local args=()
+  if [ -n "${4:-}" ]; then
+    args=(--wait-for "$4")
+  fi
+  node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" "${args[@]}" \
+    2>"$3.err" || true
 }
 
 # 转储前先跑一段 JS（cdp-dump.mjs 的 --script）。脚本的返回值与异常都打到
 # $3.err，调用方 grep SCRIPT 那一行就能拿到结果。
 dump_page_script() {
-  node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" \
+  local args=()
+  if [ -n "${6:-}" ]; then
+    args=(--wait-for "$6")
+  fi
+  node scripts/cdp-dump.mjs "$DEBUG_PORT" "$1" "$2" "$3" "${args[@]}" \
     --script "$4" --script-wait "${5:-1500}" 2>"$3.err" || true
 }
 
 start_browser
-dump_page "http://127.0.0.1:$PORT/" 6000 "$tmp/form.html"
+dump_page "http://127.0.0.1:$PORT/" 6000 "$tmp/form.html" "$DUMP_READY_FORM"
 
 grep -q 'id="model-mock-a"' "$tmp/form.html" || fail "表单里没有模型选项" "$tmp/form.html"
 grep -q 'id="model-mock-b"' "$tmp/form.html" || fail "表单里没有第二个模型" "$tmp/form.html"
@@ -207,7 +231,7 @@ echo "ok: 浏览器里表单渲染出来了（含手输模型 / 网关 / 密钥�
 
 echo "==> 浏览器触发一次评测（?autorun）"
 run_url="http://127.0.0.1:$PORT/?autorun=1&models=mock-a,mock-b&cases=math-short&repeats=1&maxTokens=64&paceMs=0&retry=0"
-dump_page "$run_url" 30000 "$tmp/run.html"
+dump_page "$run_url" 30000 "$tmp/run.html" "$DUMP_READY_RUN_DONE"
 
 grep -q '已完成' "$tmp/run.html" || fail "页面没有进入已完成状态" "$tmp/run.html"
 grep -q 'mock-a' "$tmp/run.html" || fail "结果里没有模型" "$tmp/run.html"
@@ -244,7 +268,7 @@ history_probe='(async () => {
   return { label: label, banner: banner && banner.textContent,
            answers: document.querySelectorAll(".answer").length };
 })()'
-dump_page_script "$run_url" 8000 "$tmp/history.html" "$history_probe" 2500
+dump_page_script "$run_url" 8000 "$tmp/history.html" "$history_probe" 2500 "$DUMP_READY_RUN_DONE"
 probe=$(grep -o 'SCRIPT .*' "$tmp/history.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '正在看历史运行' ||
   fail "点「打开」没切到历史视图：$probe"
@@ -302,7 +326,7 @@ manage_probe='(async () => {
   out.presets = Array.from(document.querySelectorAll(".preset-name")).map((e) => e.textContent);
   return out;
 })()'
-dump_page_script "$run_url" 8000 "$tmp/manage.html" "$manage_probe" 2500
+dump_page_script "$run_url" 8000 "$tmp/manage.html" "$manage_probe" 2500 "$DUMP_READY_RUN_DONE"
 probe=$(grep -o 'SCRIPT .*' "$tmp/manage.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '"hasSetSelect":true' ||
   fail "用例集的下拉没渲染出来：$probe"
@@ -349,7 +373,7 @@ compare_probe='(async () => {
   out.deltaCells = document.querySelectorAll(".diff-delta").length;
   return out;
 })()'
-dump_page_script "$run_url" 8000 "$tmp/compare.html" "$compare_probe" 2500
+dump_page_script "$run_url" 8000 "$tmp/compare.html" "$compare_probe" 2500 "$DUMP_READY_RUN_DONE"
 probe=$(grep -o 'SCRIPT .*' "$tmp/compare.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '"picked":2' ||
   fail "勾两次运行没有把两条都选上：$probe"
@@ -395,7 +419,7 @@ views_probe='(async () => {
   out.backToStacked = document.querySelectorAll(".answer-col").length;
   return out;
 })()'
-dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/views.html" "$views_probe" 2500
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/views.html" "$views_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/views.html.err" | sed 's/^SCRIPT //')
 # 选择器同时匹配到分位按钮（P10…P99）与视图按钮，所以按包含关系断言
 echo "$probe" | grep -q '"每个模型一条","并排对比","差异"' ||
@@ -447,7 +471,7 @@ context_probe='(async () => {
   out.closed = document.querySelector(".modal") === null;
   return out;
 })()'
-dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/context.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -qE '"buttons":[1-9]' ||
   fail "用例行上没有「请求上下文」按钮：$probe"
@@ -502,7 +526,7 @@ annotate_probe='(async () => {
   out.markdownHasNote = captured ? captured.includes("e2e 备注") : null;
   return out;
 })()'
-dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate.html" "$annotate_probe" 2500
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate.html" "$annotate_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/annotate.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -qE '"editors":[1-9]' || fail "答案下面没有标注编辑器：$probe"
 echo "$probe" | grep -q '不行' || fail "打了判定但徽章没出现：$probe"
@@ -522,7 +546,7 @@ reload_probe='(async () => {
     notes: Array.from(document.querySelectorAll(".verdict-note")).map((b) => b.textContent),
   };
 })()'
-dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate2.html" "$reload_probe" 1500
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate2.html" "$reload_probe" 1500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/annotate2.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '不行' || fail "重新打开后判定丢了：$probe"
 echo "$probe" | grep -q 'e2e 备注' || fail "重新打开后备注丢了：$probe"
@@ -530,7 +554,7 @@ echo "ok: 标注（判定 + 备注落盘、重开还在、导出带着走）"
 
 echo "==> 试跑台（单独的页面）"
 # 固定 system + 一组 prompt × 两个模型：跑完看矩阵、点开看对比与差异。
-dump_page "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground.html"
+dump_page "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground.html" "$DUMP_READY_PLAYGROUND"
 grep -q 'id="system"' "$tmp/playground.html" || fail "试跑台没有 system 输入框" "$tmp/playground.html"
 grep -q 'id="prompt-0"' "$tmp/playground.html" || fail "试跑台没有 prompt 行" "$tmp/playground.html"
 grep -q '开始试跑' "$tmp/playground.html" || fail "试跑台没有开始按钮" "$tmp/playground.html"
@@ -576,6 +600,14 @@ playground_probe='(async () => {
     const head = document.querySelector(".progress-head")?.textContent || "";
     if (/已完成|失败/.test(head)) { break; }
   }
+  // 完成之后：进度条到 100%，实时行消失且动画停掉。
+  // 这两条都真出过：done 一度是从 runs.jsonl 数的（bench 跑完才写），于是整次
+  // 运行进度条停在 0；实时行则因为轮询停了、liveAgeMs 冻住，动画一直放下去。
+  out.afterHead = (document.querySelector(".progress-head")?.textContent || "").replace(/\s+/g, " ");
+  out.afterWidth = document.querySelector(".progress-card .progress-fill")?.style.width || "";
+  out.afterLive = !!document.querySelector(".progress-card .live-row");
+  await new Promise((r) => setTimeout(r, 1200));
+  out.afterLiveStillGone = !document.querySelector(".progress-card .live-row");
   await new Promise((r) => setTimeout(r, 1500));
   out.rows = document.querySelectorAll(".matrix-row").length;
   out.cells = document.querySelectorAll(".cell").length;
@@ -591,7 +623,7 @@ playground_probe='(async () => {
   out.diffBlocks = document.querySelectorAll(".diff-block").length;
   return out;
 })()'
-dump_page_script "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground-run.html" "$playground_probe" 2000
+dump_page_script "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground-run.html" "$playground_probe" 2000 "$DUMP_READY_PLAYGROUND"
 probe=$(grep -o 'SCRIPT .*' "$tmp/playground-run.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -qE '"checked":2' || fail "试跑台默认没勾上两个模型：$probe"
 echo "$probe" | grep -q '"hasImportBox":true' || fail "试跑台没有按行导入的输入框：$probe"
@@ -605,6 +637,14 @@ echo "$probe" | grep -q '"liveBar":true' ||
   fail "实时行里没有会动的 token 进度条：$probe"
 echo "$probe" | grep -q '"pulse":"live-pulse"' ||
   fail "实时行里的脉冲点没有动画（两次轮询之间页面就是死的）：$probe"
+echo "$probe" | grep -qE '"afterHead":"已完成[^"]*100%' ||
+  fail "跑完之后进度头不是 100%：$probe"
+echo "$probe" | grep -qE '"afterWidth":"100%"' ||
+  fail "跑完之后进度条没有到 100%：$probe"
+echo "$probe" | grep -q '"afterLive":false' ||
+  fail "跑完之后实时行还在（数字是旧的、动画还在跑）：$probe"
+echo "$probe" | grep -q '"afterLiveStillGone":true' ||
+  fail "跑完之后实时行又冒出来了：$probe"
 echo "$probe" | grep -qE '"rows":3' || fail "试跑台没渲染出三行（三条 prompt）：$probe"
 echo "$probe" | grep -qE '"cells":6' || fail "试跑台没渲染出 3×2 个单元格：$probe"
 echo "$probe" | grep -q '"uniformHeights":true' || fail "单元格高度不一致：$probe"
@@ -644,7 +684,7 @@ export_probe='(async () => {
     share: grabs.share,
   };
 })()'
-dump_page_script "$run_url" 30000 "$tmp/export.html" "$export_probe" 2000
+dump_page_script "$run_url" 30000 "$tmp/export.html" "$export_probe" 2000 "$DUMP_READY_RUN_DONE"
 
 probe=$(grep -o 'SCRIPT {.*' "$tmp/export.html.err" | head -1)
 [ -n "$probe" ] || fail "导出探针没返回结果" "$tmp/export.html.err"
@@ -685,7 +725,7 @@ for _ in $(seq 1 200); do [ -s "$tmp/web2.port" ] && break; sleep 0.05; done
 PORT2=$(tr -d '\n' <"$tmp/web2.port" 2>/dev/null)
 [ -n "$PORT2" ] || fail "第二个服务端（无 key）没起来"
 
-dump_page "http://127.0.0.1:$PORT2/?autorun=1&models=mock-a&cases=math-short&repeats=1&maxTokens=32&paceMs=0&retry=0" 8000 "$tmp/nokey.html"
+dump_page "http://127.0.0.1:$PORT2/?autorun=1&models=mock-a&cases=math-short&repeats=1&maxTokens=32&paceMs=0&retry=0" 8000 "$tmp/nokey.html" 'document.body.textContent.includes("没有自动开跑")'
 
 grep -q '没有自动开跑' "$tmp/nokey.html" ||
   fail "无 key 时 autorun 被拦下了，但页面没说明原因" "$tmp/nokey.html"
@@ -703,7 +743,10 @@ echo "==> 运行中就要能读到状态"
 # 因为那时候 exitCode 已经是真字符串了。
 # 这里让一次运行持续几秒（3 次 x 700ms 间隔），在 1.2 秒时采样。
 mid_url="http://127.0.0.1:$PORT/?autorun=1&models=mock-a&cases=math-short&repeats=3&maxTokens=32&paceMs=700&retry=0"
-dump_page "$mid_url" 1200 "$tmp/mid.html"
+# 条件要同时覆盖这一段断言的两件事：「运行中」状态，以及已经收到的日志尾。
+# 只等「运行中」会太快——那一刻 bench 的第一行 stderr 可能还没写出来。
+dump_page "$mid_url" 8000 "$tmp/mid.html" \
+  'document.body.textContent.includes("实时日志尾部") && /运行中/.test((document.querySelector(".progress-head") || {}).textContent || "")'
 
 grep -q 'JsonDecodeError' "$tmp/mid.html" &&
   fail "运行中响应解析失败了（页面会把运行误判成失败）" "$tmp/mid.html"
@@ -764,7 +807,7 @@ delete_probe='(async () => {
   await new Promise((r) => setTimeout(r, 1500));
   return { before: before, after: document.querySelectorAll(".history-item").length };
 })()'
-dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/delete.html" "$delete_probe" 2000
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/delete.html" "$delete_probe" 2000 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/delete.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '"after":' || fail "删除探针没跑起来：$probe"
 before=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')

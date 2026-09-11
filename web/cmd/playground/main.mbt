@@ -1089,7 +1089,7 @@ fn progress(model : AppModel) -> @html.Html {
         ([] : Array[@html.Html]),
       ),
     ]),
-    @shared.live_row(model.live),
+    @shared.live_row(if model.status == "running" { model.live } else { None }),
     match model.error {
       Some(error) => @html.pre([txt(error)])
       None => @html.fragment([])
