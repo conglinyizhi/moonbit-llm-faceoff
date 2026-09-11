@@ -137,6 +137,9 @@ $bench \
 
 # 5. 渲染成单文件页面——不需要服务器，也不需要 key
 bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+
+# 6. 同一个闭环，但带断言、带留证
+bash scripts/real-gateway.sh               # → docs/real-gateway-run.md
 ```
 
 两件第一次就该做对的事：
@@ -151,6 +154,21 @@ bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
 网关限流的话，`--pace-ms` 拉开尝试间隔，`--retry` 对 429/5xx 指数退避重试，
 见[限流](#限流)。密钥只在环境变量里（或者一次运行内待在页面内存里），
 不会写进运行目录，也不会进提交，见 [`SECURITY.md`](SECURITY.md)。
+
+`scripts/real-gateway.sh`（上面的第 6 步，也就是 `make real-gateway`）是这个
+仓库里**唯一**打真实端点的脚本。它跑四个探针，并把看到的东西写下来：
+
+| 探针 | 回答的问题 |
+| --- | --- |
+| one-shot | 这个端点到底能不能出真结果 |
+| streaming | 分片是不是真的增量到达——量首字节 vs 进程退出，和离线测试同一个量 |
+| 错 key | 鉴权失败会不会被报成 4xx，密钥会不会被回显出来 |
+| 截断 | 被 `--max-tokens` 截断的回复，进的是截断计数还是当成功混过去了 |
+
+四个探针各自出结论，哪一条挂了就说明网关对哪一段契约不买账。密钥只从环境变量
+读，不上命令行；万一它出现在留证里，脚本会把留证删掉，不给你留个坑。
+加上 `--compare` 和 `REAL_MODEL_B=<第二个模型>`，它会把第 4 步的双模型对比也
+跑一遍并留下 `docs/real-gateway-runs.jsonl`——整个闭环，带证据。
 
 ### 没接触过 MoonBit？
 
@@ -501,6 +519,7 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 | `scripts/smoke.sh` | 环境变量与命令行两种方式的一次性请求、流式、stdin、**增量投递**、非 ASCII 错误体解码、鉴权失败、鉴权失败时不得回显密钥，以及 bench 打同一个假端点：**会清掉的 429 是真的重试**（`attempts: 2`）、`--retry n` 确实等于额外 n 次 HTTP 尝试、`finish_reason: length` 会落进截断计数而不是当成功混过去 |
 | `scripts/server-api.sh` | 请求体里的 `baseUrl`/`apiKey` 与服务端自己那套（故意设坏）相反能否生效、菜单外的模型 id、实时计数、三种导出，**密钥绝不落进运行目录或响应**，以及路径穿越被拒 |
 | `scripts/web-e2e.sh` | 真实无头浏览器：表单能从 `/api/meta` 渲染出来（含模型 / 网关 / 密钥输入框），`?autorun` 链接确实能跑完一次评测并渲染结果，八个并发 `POST /api/runs` 拿到八个不同 id，跑完之后开始按钮回到可用状态，且导出区产出的 Markdown 与分享链接内容正确（分享链接不含密钥） |
+| `scripts/real-gateway.sh` | **唯一不离线、也不进 CI 的那一套。** 对着真实端点跑四个探针：one-shot、流式是否增量到达、错 key 会不会被报成 4xx 且不回显、被 `--max-tokens` 截断的回复会不会计进截断数。留证写到 `docs/real-gateway-run.md`。需要 export `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` |
 
 其中四条是刻意写成这样的——**用「显而易见的写法」会在实现坏了的情况下照样通过**：
 
@@ -511,7 +530,10 @@ bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
 
 `scripts/web-e2e.sh` 通过 DevTools 协议驱动 Chromium，按真实时间等待。它**刻意不用** `--virtual-time-budget`：虚拟时间会和页面自己的 `fetch` 抢时钟，转储出半加载的页面。用 `CHROME=/path/to/chrome` 可以换别的浏览器。
 
-它也是 CI **唯一不跑**的那一套。驱动真浏览器、按真实时间等待，注定了它是这里最不稳的东西；让一次时序抖动去挂掉无关的 PR，比它带来的覆盖更亏。改页面之前用 `make e2e` 在本地跑一遍。
+它也是 CI **唯一不跑**的那一套浏览器测试。驱动真浏览器、按真实时间等待，注定了它是这里最不稳的东西；让一次时序抖动去挂掉无关的 PR，比它带来的覆盖更亏。改页面之前用 `make e2e` 在本地跑一遍。
+
+CI 不跑的还有 `scripts/real-gateway.sh`，理由不同：它要密钥、要花钱。想要「客
+户端对着真实端点能跑」这条证据的时候手动跑，跑完把它写出来的留证提交上去。
 
 ---
 

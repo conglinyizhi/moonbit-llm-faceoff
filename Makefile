@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web real-gateway fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -42,6 +42,9 @@ api:  ## the server HTTP contract: overrides, exports, traversal guards
 
 e2e:  ## browser end to end; needs chromium, and it is slow
 	bash scripts/web-e2e.sh
+
+real-gateway:  ## against a real gateway; needs MOONLLM_BASE_URL / MOONLLM_API_KEY, not in CI
+	bash scripts/real-gateway.sh
 
 demo:  ## zero-API-key demo of all three paths
 	bash scripts/demo.sh

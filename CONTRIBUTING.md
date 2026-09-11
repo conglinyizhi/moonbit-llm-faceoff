@@ -36,8 +36,13 @@ bash web/build.sh
 ```
 
 The first four each start their own mock endpoint, so none of them need a key or
-network access. Against a real endpoint the knobs are `MOONLLM_BASE_URL`,
-`MOONLLM_MODEL` and `MOONLLM_API_KEY`; the README has the details.
+network access.
+
+`scripts/real-gateway.sh` is the exception, and it is the one you do not run by
+reflex: it talks to a **real** endpoint, needs `MOONLLM_BASE_URL`,
+`MOONLLM_MODEL` and `MOONLLM_API_KEY` exported, and writes what it observed to
+`docs/real-gateway-run.md`. Use it to prove the client works against a real
+gateway, not to check a change.
 
 ## House rules
 

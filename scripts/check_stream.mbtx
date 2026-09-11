@@ -1,0 +1,150 @@
+///| 验证 `--stream` 对**任意**网关都是增量投递——真实端点或离线假端点都行。
+///
+///   export MOONLLM_BASE_URL=... MOONLLM_API_KEY=... MOONLLM_MODEL=...
+///   moon run --target native scripts/check_stream.mbtx -- <binary> "<prompt>"
+///
+/// 必须显式 --target native：不指定时默认后端是 wasm，
+/// 而 @process 的进程/管道 API 只有 native 才有。
+///
+/// 与 scripts/check_incremental.mbtx 的区别有两个，都是为了能对着真实网关跑：
+///   - 端点 / 模型 / 密钥一律从**环境变量**读，不走命令行（命令行会出现在 ps 里），
+///     子进程 inherit_env=true，看到的就是这里看到的
+///   - 不比对回复文本：真实网关返回什么没法预知，也不能写死
+///
+/// 量与 check_incremental.mbtx 同一个量：**首字节到达时刻相对于进程退出时刻**。
+/// 只比对最终文本区分不出「流式」和「攒完再吐」——缓冲式实现的首字节会贴着
+/// 退出时刻。真实网关没法像假端点那样在分片之间 sleep，所以这里要求调用方给一个
+/// 足够长的 prompt；回复太短时这个量本身就不成立，STREAM_MIN_GAP_MS 可以调低，
+/// 但调低之前先确认是回复短、而不是客户端在缓冲。
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/string" @string,
+}
+
+///| 首字节必须比退出时刻早这么多毫秒，才算真的在流式。
+let default_min_gap_ms : UInt64 = 300
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+///|
+async fn main {
+  let args = @env.args().filter(fn(arg) { arg != "--" })
+  if args.length() < 2 {
+    fail(
+      "用法：moon run scripts/check_stream.mbtx -- <binary> \"<prompt>\"（端点和密钥走环境变量）",
+    )
+  }
+  let raw_binary = args[args.length() - 2]
+  let prompt = args[args.length() - 1]
+  // 只检查「在不在」，不打印值：这个脚本的输出会被写进留证文件。
+  require_env("MOONLLM_BASE_URL")
+  require_env("MOONLLM_API_KEY")
+  // spawn 用绝对路径更稳：调用方可能传相对的 ./_build/...
+  let binary = if raw_binary.has_prefix("/") {
+    raw_binary
+  } else {
+    match @env.current_dir() {
+      Some(dir) => dir + "/" + raw_binary
+      None => raw_binary
+    }
+  }
+  // 只有 --stream 和 prompt 走命令行。端点、模型、密钥都靠继承来的环境变量，
+  // 所以它们不会出现在 ps 的输出里。
+  let child_args : Array[String] = ["--stream", "--max-tokens", "256", prompt]
+  let (reader, sink) = @process.read_from_process() catch {
+    _ => {
+      fail("无法创建读取管道")
+      return
+    }
+  }
+  let start = @env.now()
+  let pid = @process.spawn_orphan(
+    binary,
+    child_args,
+    inherit_env=true,
+    stdout=sink,
+    stderr=@stdio.stderr,
+  ) catch {
+    _ => {
+      fail("无法启动 " + binary)
+      return
+    }
+  }
+  // 逐字节读，只为了记下第一个字节到达的时刻和总字节数——
+  // 回复内容这里不解析，所以不需要 UTF-8 解码。
+  let mut first_ms : UInt64 = 0
+  let mut bytes_total : Int = 0
+  while true {
+    let chunk = reader.read_some(max_len=1) catch { _ => None }
+    match chunk {
+      None => break
+      Some(bytes) =>
+        if bytes.length() > 0 {
+          if first_ms == 0 {
+            first_ms = @env.now() - start
+          }
+          bytes_total = bytes_total + bytes.length()
+        }
+    }
+  }
+  let code = @process.wait_pid(pid) catch { _ => -1 }
+  let total_ms = @env.now() - start
+  if code != 0 {
+    fail(
+      "子进程退出码 \{code}——对着这个端点的一次流式请求没跑通，先修这个再看流式",
+    )
+  }
+  if first_ms == 0 || bytes_total == 0 {
+    fail("完全没有输出")
+  }
+  let gap_ms = total_ms - first_ms
+  let min_gap_ms = min_gap()
+  if gap_ms < min_gap_ms {
+    fail(
+      "首字节 \{first_ms}ms，进程 \{total_ms}ms 就结束了（间隔 \{gap_ms}ms < \{min_gap_ms}ms）——要么输出被缓冲了，要么这次回复本来就短到测不出流式。换个更长的 prompt，或把 STREAM_MIN_GAP_MS 调低",
+    )
+  }
+  println(
+    "ok: 首字节 \{first_ms}ms，结束 \{total_ms}ms，共 \{bytes_total} 字节（首字节比退出早 \{gap_ms}ms）",
+  )
+}
+
+///|
+async fn fail(message : String) -> Unit {
+  @stdio.stderr.write("FAIL: " + message + "\n") catch { _ => () }
+  c_exit(1)
+}
+
+///|
+async fn require_env(name : String) -> Unit {
+  match @env.get_env_var(name) {
+    Some(value) => if value == "" { fail_or_exit(name + " 是空的") }
+    None => fail_or_exit("缺少环境变量 " + name + "（子进程要从环境里读它）")
+  }
+}
+
+///|
+async fn fail_or_exit(message : String) -> Unit {
+  @stdio.stderr.write("FAIL: " + message + "\n") catch { _ => () }
+  c_exit(1)
+}
+
+///|
+fn min_gap() -> UInt64 {
+  match @env.get_env_var("STREAM_MIN_GAP_MS") {
+    Some(text) => {
+      let value = @string.parse_int(text) catch { _ => 0 }
+      if value > 0 {
+        value.to_uint64()
+      } else {
+        default_min_gap_ms
+      }
+    }
+    None => default_min_gap_ms
+  }
+}

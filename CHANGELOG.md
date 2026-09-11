@@ -102,6 +102,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `scripts/real-gateway.sh` — the first thing in this repo that talks to a
+  **real** endpoint, and the one that was missing: everything else runs against
+  the bundled mock, which cannot tell you whether the client fits a real
+  gateway. Four probes, each with its own verdict, and the whole run is written
+  to `docs/real-gateway-run.md`: a real one-shot reply; whether fragments
+  actually arrive incrementally (`scripts/check_stream.mbtx`, which measures the
+  first byte against process exit the same way the offline test does, but takes
+  the endpoint and the key from the environment instead of hardcoding them);
+  that a bad key comes back as 4xx with the key kept out of the error; and that a
+  reply cut off by `--max-tokens` lands in the truncation counter rather than
+  passing as a success. `--compare` with `REAL_MODEL_B=<model>` also produces the
+  two-model report. Not in CI — it needs a key and it costs money — and the key
+  is read from the environment only: the script refuses to leave a file behind
+  if the key turns up in it.
+- The mock endpoint got faithful enough for that script to be tried locally
+  first: it honours `max_tokens` now (a budget smaller than the reply it is
+  about to send comes back as `finish_reason: length`, the same way a real
+  gateway reports it), and `MOCK_ALLOW_ANY_KEY=1` makes it stop checking
+  `Authorization` — that is what exercises the "this endpoint does not require a
+  key" branch instead of leaving it as untested code.
+
 - `scripts/smoke.sh` now proves the retry and truncation counters are wired up
   rather than decorative. The mock endpoint grew two switches to make that
   observable: a prompt containing `RATE_LIMIT_ONCE` is 429'd exactly once and
