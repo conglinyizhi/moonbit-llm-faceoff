@@ -132,6 +132,9 @@ struct AppModel {
   cases_saved : String?
   /// 「另存为新集」的输入框。
   new_set_name : String
+  /// 「按行导入」的文本框与反馈。
+  import_text : String
+  import_note : String?
   /// 预设。None = 还没拉到。
   presets : Array[Preset]?
   presets_error : String?
@@ -193,6 +196,8 @@ fn initial_model() -> AppModel {
     cases_error: None,
     cases_saved: None,
     new_set_name: "",
+    import_text: "",
+    import_note: None,
     presets: None,
     presets_error: None,
     preset_name: "",
@@ -354,6 +359,8 @@ enum Msg {
   SelectNoCases
   AddDraft
   RemoveDraft(Int)
+  ImportTextChanged(String)
+  ImportLines(Bool)
   DraftFieldChanged(Int, DraftField, String)
   SaveCases
   CaseSetSaved(String, Result[Json, Error])
@@ -833,6 +840,61 @@ fn update(
       let drafts = model.drafts.copy()
       drafts.push(blank_draft())
       ({ ..model, editing_cases: true, drafts, cases_saved: None, }, @cmd.none)
+    }
+    ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
+    ImportLines(replace) => {
+      // 上限按「已有 + 新导入」算：用例集那边也有 500 的上限
+      let existing = if replace {
+        0
+      } else {
+        model.drafts
+        .filter(fn(draft) { draft.prompt.trim(chars=" \t\r\n") != "" })
+        .length()
+      }
+      let room = max_cases_per_set - existing
+      let (imported, skipped) = drafts_from_lines(model.import_text, room)
+      if imported.length() == 0 {
+        (
+          {
+            ..model,
+            import_note: Some(
+              if skipped > 0 {
+                "已经有 \{model.drafts.length()} 条，到上限了"
+              } else {
+                "没有可导入的行（空行与 # 注释会跳过）"
+              },
+            ),
+          },
+          @cmd.none,
+        )
+      } else {
+        let drafts = if replace {
+          []
+        } else {
+          model.drafts.filter(fn(draft) {
+            draft.prompt.trim(chars=" \t\r\n") != ""
+          })
+        }
+        for draft in imported {
+          drafts.push(draft)
+        }
+        let note = if skipped > 0 {
+          "导入了 \{imported.length()} 条（另有 \{skipped} 行超出上限被丢掉）"
+        } else {
+          "导入了 \{imported.length()} 条"
+        }
+        (
+          {
+            ..model,
+            editing_cases: true,
+            drafts,
+            import_text: "",
+            import_note: Some(note),
+            cases_saved: None,
+          },
+          @cmd.none,
+        )
+      }
     }
     RemoveDraft(index) => {
       let kept : Array[CaseDraft] = []

@@ -5,6 +5,10 @@
 /// 去测」和「我怎么老是重填同一组参数」，各自独立。
 
 ///|
+/// 一次能有几条用例（导入、保存都按它卡）。和服务端的上限一致。
+let max_cases_per_set : Int = 500
+
+///|
 /// 一条用例的编辑态。
 ///
 /// `raw` 是原始对象，保存时把编辑框覆盖过的键合并回去：页面没展示的字段
@@ -305,6 +309,66 @@ fn browse_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 }
 
 ///|
+/// 按行导入：一行一条用例。给「手上已经有一堆 prompt」的人一个入口——
+/// 在页面上一条条手敲是最不必要的劳动。
+fn import_box(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  el("div", "import-box", [
+    @html.textarea(
+      class="prompt-input",
+      id="import-lines",
+      value=model.import_text,
+      rows=4,
+      on_input=emit.map(fn(text) { ImportTextChanged(text) }),
+      ([] : Array[@html.Html]),
+    ),
+    el("div", "editor-actions", [
+      @html.button(class="ghost", on_click=emit(Msg::ImportLines(false)), [
+        txt("追加导入"),
+      ]),
+      @html.button(class="ghost", on_click=emit(Msg::ImportLines(true)), [
+        txt("替换为这些行"),
+      ]),
+      el("span", "hint", [
+        txt(
+          "一行一条；空行与 # 开头的行跳过，追加到当前用例后面",
+        ),
+      ]),
+      match model.import_note {
+        Some(note) => el("span", "hint copied", [txt(note)])
+        None => @html.fragment([])
+      },
+    ]),
+  ])
+}
+
+///|
+/// 把多行文本变成用例草稿：去空白、丢空行与 `#` 注释行，最多留 `limit` 条。
+/// 返回 (草稿, 因为超限被丢掉的条数)。
+fn drafts_from_lines(text : String, limit : Int) -> (Array[CaseDraft], Int) {
+  let out : Array[CaseDraft] = []
+  let mut skipped = 0
+  for raw in text.split("\n") {
+    let line = raw.trim(chars=" \t\r").to_owned()
+    if line == "" || line.has_prefix("#") {
+      continue
+    }
+    if out.length() >= limit {
+      skipped = skipped + 1
+      continue
+    }
+    out.push({
+      raw: Json::object({}),
+      id: "",
+      prompt: line,
+      system: "",
+      max_tokens: "",
+      temperature: "",
+    })
+  }
+  (out, skipped)
+}
+
+///|
 /// 编辑态：每条一行，prompt 是主输入，其余字段收在「更多」里。
 fn editor_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let rows = []
@@ -328,6 +392,7 @@ fn editor_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           None => txt("")
         },
       ]),
+      import_box(model, emit),
     ],
   )
 }

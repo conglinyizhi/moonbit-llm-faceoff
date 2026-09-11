@@ -217,6 +217,18 @@ manage_probe='(async () => {
   await new Promise((r) => setTimeout(r, 1800));
   out.saved = document.querySelector(".editor-actions .copied")
     ? document.querySelector(".editor-actions .copied").textContent : null;
+  // 按行导入也接在用例编辑里
+  const importBox = document.querySelector("#import-lines");
+  out.hasImport = !!importBox;
+  if (importBox) {
+    const before = document.querySelectorAll(".draft").length;
+    importBox.value = "导入的用例甲\n导入的用例乙\n";
+    importBox.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+    Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "追加导入").click();
+    await new Promise((r) => setTimeout(r, 600));
+    out.draftsAfterImport = document.querySelectorAll(".draft").length - before;
+  }
   out.presetNameFilled = setValue("#preset-name", "e2e-preset");
   await new Promise((r) => setTimeout(r, 400));
   const savePreset = byText("button", "保存当前配置");
@@ -235,6 +247,10 @@ echo "$probe" | grep -q '已保存' ||
   fail "保存用例集没有成功反馈：$probe"
 echo "$probe" | grep -q 'e2e-preset' ||
   fail "预设没有出现在列表里：$probe"
+echo "$probe" | grep -q '"hasImport":true' ||
+  fail "用例编辑里没有按行导入：$probe"
+echo "$probe" | grep -qE '"draftsAfterImport":2' ||
+  fail "按行导入没加进用例草稿：$probe"
 grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
   fail "页面说保存了，但磁盘上的用例没变"
 grep -q 'e2e-preset' "$tmp/presets.json" ||
@@ -360,6 +376,21 @@ playground_probe='(async () => {
   out.modelBoxes = boxes.length;
   out.checked = boxes.filter((b) => b.checked).length;
   if (out.checked < 2) { return out; }
+  // 按行导入：一行一条，空行与 # 注释跳过，先替换再追加
+  const box = document.querySelector("#import-lines");
+  out.hasImportBox = !!box;
+  box.value = "导入之一\n\n# 注释行\n导入之二\n";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 300));
+  byText("替换为这些行").click();
+  await new Promise((r) => setTimeout(r, 600));
+  out.rowsAfterReplace = document.querySelectorAll(".prompt-row").length;
+  box.value = "导入之三\n";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 300));
+  byText("追加导入").click();
+  await new Promise((r) => setTimeout(r, 600));
+  out.rowsAfterAppend = document.querySelectorAll(".prompt-row").length;
   byText("开始试跑").click();
   await new Promise((r) => setTimeout(r, 8000));
   out.rows = document.querySelectorAll(".matrix-row").length;
@@ -379,8 +410,11 @@ playground_probe='(async () => {
 dump_page_script "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground-run.html" "$playground_probe" 2000
 probe=$(grep -o 'SCRIPT .*' "$tmp/playground-run.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -qE '"checked":2' || fail "试跑台默认没勾上两个模型：$probe"
-echo "$probe" | grep -qE '"rows":2' || fail "试跑台没渲染出两行（两条 prompt）：$probe"
-echo "$probe" | grep -qE '"cells":4' || fail "试跑台没渲染出 2×2 个单元格：$probe"
+echo "$probe" | grep -q '"hasImportBox":true' || fail "试跑台没有按行导入的输入框：$probe"
+echo "$probe" | grep -qE '"rowsAfterReplace":2' || fail "按行导入（替换）没得到 2 条：$probe"
+echo "$probe" | grep -qE '"rowsAfterAppend":3' || fail "按行导入（追加）没加到 3 条：$probe"
+echo "$probe" | grep -qE '"rows":3' || fail "试跑台没渲染出三行（三条 prompt）：$probe"
+echo "$probe" | grep -qE '"cells":6' || fail "试跑台没渲染出 3×2 个单元格：$probe"
 echo "$probe" | grep -q '"uniformHeights":true' || fail "单元格高度不一致：$probe"
 echo "$probe" | grep -qE '"expandedCols":2' || fail "点开对比没出现左右两列：$probe"
 echo "$probe" | grep -qE '"diffBlocks":[1-9]' || fail "差异视图没有内容：$probe"

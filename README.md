@@ -458,6 +458,10 @@ From the page you can:
 - **go back to any earlier run**: the left column lists every run with its time,
   models, scale and counters. Open one to read its results (read-only, exports
   follow it), rerun it with exactly the parameters it ran with, or delete it;
+- **paste text in a line at a time**: every prompt list (the playground's, and the
+  workbench's case editor) has an import box — one line becomes one case, blank
+  lines and `#` comments are skipped, and 追加导入 / 替换为这些行 decide whether the
+  new lines follow the old ones or replace them;
 - **keep your suites in the page**: the case panel switches between case sets
   (`web/cases/<name>.jsonl`), ticks the cases to run, and edits them in place —
   prompt, id, and per-case `system` / `max_tokens` / `temperature` under a folded
