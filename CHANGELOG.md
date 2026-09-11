@@ -102,6 +102,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Two runs, side by side.** Tick two entries in the history rail and the main
+  area becomes a comparison in three parts: which parameters actually differ
+  (models, case set, repeats, `max_tokens`, pacing, the gateway — so "I only
+  changed one thing" is something you can check rather than remember); every
+  metric's median from both runs with a Δ column; and the two runs' answers for
+  the same case next to each other, chain of thought included.
+
+  Two decisions worth naming. The Δ column is **not** coloured: the same sign is
+  good for throughput and bad for latency, and this layer has no per-metric
+  polarity, so colouring would be the UI making a judgement it cannot support.
+  And ticking a third run drops the oldest pick instead of ignoring the click —
+  a click that does nothing is worse than one that visibly replaces something.
+
+  A run that failed has no `data.json` to compare, so the view says so instead of
+  waiting forever on "loading"; the parameter diff still shows, because that part
+  comes from `request.json`, which every run has.
+
 - **Case sets and presets are editable in the page.** The case panel lists the
   sets under `web/cases/`, ticks the cases a run will use, and edits them in
   place: `prompt` as the main text area, `id` beside it, and the per-case
