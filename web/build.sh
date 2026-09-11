@@ -35,6 +35,12 @@ if [ ! -f web/data.json ] || [ "$results" -nt web/data.json ]; then
   moon build cmd/bench --target native >/dev/null
   ./_build/native/debug/build/cmd/bench/bench.exe \
     --from-json "$results" --no-key --web-data web/data.json
+else
+  # 静默用旧数据会让人以为「我明明传了这个文件，怎么报告还是上一轮的」——
+  # 所以这里必须出声。
+  echo "==> web/data.json 比 $results 新，跳过导出"
+  echo "    报告用的是 web/data.json 里的数据。要强制从 $results 重建："
+  echo "      rm web/data.json && bash web/build.sh $results"
 fi
 
 cd web
