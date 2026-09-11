@@ -17,3 +17,7 @@ scripts/_build/
 
 # 本地工作清单，只留本地（赛事冲刺计划）
 todo.md
+
+# 页面工作台的用户数据：用例集与预设（可能含私有 prompt，别跟着提交）
+web/cases/
+web/presets.json

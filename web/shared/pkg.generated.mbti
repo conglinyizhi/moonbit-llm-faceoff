@@ -64,6 +64,7 @@ pub(all) struct Answer {
   completion_tokens : Int
   reasoning_tokens : Int
   content : String
+  reasoning : String
   error : String?
 } derive(Eq)
 pub fn Answer::equal(Self, Self) -> Bool

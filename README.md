@@ -478,12 +478,29 @@ and waits for you to fill the key in and press **开始评测**.
 
 | endpoint | purpose |
 | --- | --- |
-| `GET /api/meta` | `{models, cases, defaults, hasKey, baseUrl}` |
-| `POST /api/runs` | start a run → `{id, total}` |
+| `GET /api/meta` | `{models, caseSets, defaultCaseSet, cases, defaults, hasKey, baseUrl}`. `cases` is the default set's list, kept because the URL-config path reads it |
+| `GET /api/runs` | the run history, newest first: `{runs: [{id, startedAt, status, exitCode, request, total, done, failures, retried, truncated}]}` |
+| `POST /api/runs` | start a run → `{id, total}`. `caseSet` names the case set the `cases` ids are read from |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
+| `DELETE /api/runs/<id>` | remove that run's directory |
 | `GET /api/runs/<id>/runs.jsonl` | the raw per-attempt log, as a download |
 | `GET /api/runs/<id>/data.json` | the page-data document, as a download |
 | `GET /api/runs/<id>/report.html` | a self-contained static report, generated on first request |
+| `GET /api/cases` | `{sets: [{name, count}]}` |
+| `GET /api/cases/<name>` | `{name, cases: [...]}` — the raw case records, all fields |
+| `PUT /api/cases/<name>` | whole-set write (`{cases: [...]}`); an unknown name creates the set |
+| `DELETE /api/cases/<name>` | remove a set |
+| `GET /api/presets` | `{presets: [...]}` |
+| `PUT /api/presets` | whole-list write (`{presets: [...]}`) |
+
+A **case set** is one `<name>.jsonl` under `LLM_WEB_CASES_DIR`; names are
+`[A-Za-z0-9._-]` and nothing else, because the name is a path segment. A
+**preset** is a name plus a model list and the run parameters, so a combination
+you keep going back to is one click instead of a retyped form. Both live in
+files the server reads and writes directly — `web/cases/` and
+`web/presets.json`, both gitignored, because they are your data and prompts can
+be private. `LLM_WEB_CASES` is only a seed: the first time the server starts
+with an empty case-set directory it copies that file to `cases/default.jsonl`.
 
 `data` is the same document the static report consumes. A run is a
 **subprocess** (`bench --json … --web-data …`), and its whole state lives in
@@ -507,7 +524,9 @@ web/runs/<id>/
 | `LLM_WEB_PORT` | `8137` |
 | `LLM_WEB_STATIC` | `out` |
 | `LLM_WEB_WORK` | `runs` |
-| `LLM_WEB_CASES` | `../bench/cases.example.jsonl` |
+| `LLM_WEB_CASES_DIR` | `cases` — one `<name>.jsonl` per case set |
+| `LLM_WEB_CASES` | `../bench/cases.example.jsonl` — only a seed for `cases/default.jsonl` |
+| `LLM_WEB_PRESETS` | `presets.json` |
 | `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` — the default menu; a run may name any model |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
 | `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |

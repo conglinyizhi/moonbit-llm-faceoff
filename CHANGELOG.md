@@ -102,6 +102,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The server side of a test workbench: run history, named case sets, presets.**
+  Until now the page could start a run and show that run; the things that made a
+  test *manageable* were all file work by hand. The API grew:
+  `GET /api/runs` (every past run, newest first, each carrying the `request.json`
+  it ran with, so it can be replayed), `DELETE /api/runs/<id>`,
+  `GET|PUT|DELETE /api/cases/<name>`, `GET|PUT /api/presets`. `POST /api/runs`
+  takes a `caseSet` and the resolved name is written back into `request.json`, so
+  history replays the suite that actually ran rather than whatever is the default
+  later.
+
+  Storage stays files, because that is the only thing that survives a restart:
+  `web/cases/<name>.jsonl` per case set and `web/presets.json` for the model +
+  parameter combinations. Both are gitignored — prompts can be private, and the
+  contract test now points them (and `runs/`) at a temp directory so running it
+  cannot delete your data. `LLM_WEB_CASES` became a seed: an empty case-set
+  directory gets `cases/default.jsonl` copied from it, so existing setups keep
+  working.
+
+  Two validations are worth calling out because they turn silent wrongness into a
+  400: a case without an `id` is given one on save (the bench side filters cases
+  by id, so an id-less case could be ticked in the UI and silently not run), and a
+  run whose selected ids match nothing in the set is refused instead of running
+  zero cases. Case-set and preset names are restricted to `[A-Za-z0-9._-]` since
+  they become path segments.
+
+  `scripts/server-api.sh` covers all of it: 17 → 42 assertions, including the
+  traversal and duplicate-id refusals.
+
 - **The chain of thought is on the page now**, folded under every answer
   (`思考过程 · N token · M 字`, closed by default). The page data used to carry
   `reasoning_tokens` and not the reasoning text, so the side-by-side answer view

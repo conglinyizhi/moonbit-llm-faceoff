@@ -6,8 +6,6 @@ package "conglinyizhi/moonbit-llm-faceoff-web/cmd/server"
 // Errors
 
 // Types and methods
-type CaseEntry
-
 type RunRequest
 
 type ServerConfig
