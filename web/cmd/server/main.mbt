@@ -711,6 +711,11 @@ struct RunRequest {
   /// 解析后的用例集名字（不是请求里那个可选的字符串）。
   case_set : String
   case_ids : Array[String]
+  /// 请求里内联带过来的用例（playground 那一页用）。非空时优先于 `case_ids`：
+  /// 它们不进用例集文件，直接写进这次运行目录的 cases.jsonl。
+  inline_cases : Array[Json]
+  /// 这次运行的全局 system prompt。每条用例自己的 system 仍然可以覆盖它。
+  system : String?
   prompt : String?
   repeats : Int
   max_tokens : Int
@@ -725,6 +730,8 @@ struct RunRequest {
 fn RunRequest::total(self : RunRequest) -> Int {
   let case_count = if self.prompt is Some(_) {
     1
+  } else if self.inline_cases.length() > 0 {
+    self.inline_cases.length()
   } else {
     self.case_ids.length()
   }
@@ -778,7 +785,12 @@ async fn parse_run_request(
       }
     _ => None
   }
-  if prompt is None && case_ids.is_empty() {
+  // 内联用例先取出来：下面「至少给一样东西」的判断要把它算进去。
+  let raw_inline = match obj.get("inlineCases") {
+    Some(Array(items)) => items
+    _ => []
+  }
+  if prompt is None && case_ids.is_empty() && raw_inline.length() == 0 {
     return Err("pick at least one case, or type a prompt")
   }
   // 用例集：请求里给了就用它，没给就用默认集。
@@ -790,6 +802,50 @@ async fn parse_run_request(
         return Err("caseSet: " + bad_name_message())
       }
     None => default_case_set(config)
+  }
+  // 内联用例（playground 那一页）：跟用例集 / 单条 prompt 三者互斥，
+  // 同时给两个只会让人不确定到底跑了什么。
+  if raw_inline.length() > 0 {
+    if prompt is Some(_) || !case_ids.is_empty() {
+      return Err(
+        "inlineCases: pass either inline cases, or case ids, or a prompt",
+      )
+    }
+    if raw_inline.length() > max_cases_per_set {
+      return Err("inlineCases: at most \{max_cases_per_set} cases")
+    }
+    let normalized : Array[Json] = []
+    let seen : Array[String] = []
+    for i = 0; i < raw_inline.length(); i = i + 1 {
+      let id = match case_id_of(raw_inline[i], i) {
+        Ok(id) => id
+        Err(message) => return Err("inlineCases: " + message)
+      }
+      if seen.contains(id) {
+        return Err("inlineCases: duplicate case id: " + id)
+      }
+      seen.push(id)
+      // 缺 id 的补上：bench 侧按 id 过滤，缺 id 的会被静默丢掉
+      normalized.push(with_id(raw_inline[i], id))
+    }
+    let system = match optional_string(obj, "system") {
+      Some(text) => {
+        if text.length() > max_prompt_chars {
+          return Err("system is too long")
+        }
+        Some(text)
+      }
+      None => None
+    }
+    return finish_run_request(
+      obj,
+      models,
+      case_set,
+      [],
+      normalized,
+      None,
+      system,
+    )
   }
   let set_path = case_set_path(config.cases_dir, case_set)
   if prompt is None && !(@fs.exists(set_path) catch { _ => false }) {
@@ -812,6 +868,30 @@ async fn parse_run_request(
       "cases: none of the selected ids are in case set '" + case_set + "'",
     )
   }
+  let system = match optional_string(obj, "system") {
+    Some(text) => {
+      if text.length() > max_prompt_chars {
+        return Err("system is too long")
+      }
+      Some(text)
+    }
+    None => None
+  }
+  finish_run_request(obj, models, case_set, case_ids, [], prompt, system)
+}
+
+///|
+/// 请求的公共部分（数值范围、网关覆盖）只写一遍：内联用例与用例集两条路径
+/// 走同一套校验，不然它们会慢慢长歪。
+fn finish_run_request(
+  obj : Map[String, Json],
+  models : Array[String],
+  case_set : String,
+  case_ids : Array[String],
+  inline_cases : Array[Json],
+  prompt : String?,
+  system : String?,
+) -> Result[RunRequest, String] {
   let repeats = int_of(obj, "repeats", 3)
   let max_tokens = int_of(obj, "maxTokens", 2048)
   let pace_ms = int_of(obj, "paceMs", 0)
@@ -838,7 +918,9 @@ async fn parse_run_request(
     models,
     case_set,
     case_ids,
+    inline_cases,
     prompt,
+    system,
     repeats,
     max_tokens,
     temperature,
@@ -906,15 +988,35 @@ async fn build_argv(
       argv.push(prompt)
     }
     None => {
-      let filtered = filter_cases(
-        case_set_path(config.cases_dir, request.case_set),
-        request.case_ids,
-      )
       let path = dir + "/cases.jsonl"
-      write_text(path, filtered)
+      if request.inline_cases.length() > 0 {
+        // playground 带过来的用例：不进用例集文件，直接落进这次运行目录。
+        // bench 侧只认文件，所以这里就是把它们写成文件。
+        let lines = StringBuilder()
+        for entry in request.inline_cases {
+          lines.write_string(entry.stringify())
+          lines.write_char('\n')
+        }
+        write_text(path, lines.to_string())
+      } else {
+        let filtered = filter_cases(
+          case_set_path(config.cases_dir, request.case_set),
+          request.case_ids,
+        )
+        write_text(path, filtered)
+      }
       argv.push("--cases")
       argv.push(path)
     }
+  }
+  // 全局 system：空的不发——bench 那边空值会覆盖成空串，而缺省才是它自己的默认值
+  match request.system {
+    Some(system) =>
+      if system.trim(chars=" \t\r\n") != "" {
+        argv.push("--system")
+        argv.push(system)
+      }
+    None => ()
   }
   if request.pace_ms > 0 {
     argv.push("--pace-ms")
@@ -1223,6 +1325,11 @@ async fn total_of(request_path : String) -> Int {
 
 ///|
 fn case_count(obj : Map[String, Json]) -> Int {
+  // playground 那种「一组临时 prompt」走 inlineCases，没有 cases 字段
+  match obj.get("inlineCases") {
+    Some(Array(items)) => if items.length() > 0 { return items.length() }
+    _ => ()
+  }
   match obj.get("cases") {
     Some(Array(items)) => items.length()
     _ => 0

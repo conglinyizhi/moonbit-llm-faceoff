@@ -306,6 +306,14 @@ let body_unknown_set : String =
   #|{"models":["mock-a"],"caseSet":"nope","cases":["deck"]}
 
 ///|
+let body_inline_conflict : String =
+  #|{"models":["mock-a"],"inlineCases":[{"prompt":"x"}],"cases":["math-short"]}
+
+///|
+let body_inline_no_prompt : String =
+  #|{"models":["mock-a"],"inlineCases":[{"id":"x"}]}
+
+///|
 let body_preset_ok : String =
   #|{"presets":[{"name":"quick","models":["mock-a","mock-b"],"repeats":1,"maxTokens":256,"caseSet":"default"}]}
 
@@ -652,6 +660,65 @@ async fn main {
       deleted_set.body,
     )
 
+    // ---- 内联用例（playground 那一页走的路径）
+    println("==> 内联用例 + 全局 system")
+    let inline_started = post(base + "/api/runs", inline_run_body(base, mock_port))
+    let inline_id = json_string(inline_started.body, "id")
+    if inline_id == "" {
+      bad("内联用例：没拿到 run id", inline_started.body)
+    } else {
+      let inline_status = await_finished(base, inline_id)
+      let inline_dir = tmp + "/runs/" + inline_id
+      expect(
+        inline_status.contains("\"total\":4"),
+        "内联用例：2 模型 × 2 题 = 4 次，计数正确",
+        inline_status,
+      )
+      expect(
+        trim(read_text(inline_dir + "/exit_code")) == "0",
+        "内联用例：整轮跑成功",
+        read_text(inline_dir + "/stderr.log"),
+      )
+      let inline_cases = read_text(inline_dir + "/cases.jsonl")
+      expect(
+        inline_cases.contains("甲板风是什么？") &&
+        inline_cases.contains("侧风是什么？"),
+        "内联用例：两条 prompt 都写进了 runs 的 cases.jsonl",
+        inline_cases,
+      )
+      expect(
+        inline_cases.contains("\"id\":\"case-2\""),
+        "内联用例：缺 id 的被补上（bench 侧按 id 过滤，缺了会静默丢掉）",
+        inline_cases,
+      )
+      expect(
+        inline_cases.contains("只用五个字回答。"),
+        "内联用例：每条自己的 system 原样传下去",
+        inline_cases,
+      )
+      expect(
+        read_text(inline_dir + "/request.json").contains("只说一个词的助手"),
+        "内联用例：全局 system 记在 request.json 里（留证 / 重跑要用）",
+        read_text(inline_dir + "/request.json"),
+      )
+      expect(
+        get(base + "/api/runs").body.contains("\"total\":4"),
+        "内联用例：历史里的规模也算对了",
+        "",
+      )
+      let _ = delete(base + "/api/runs/" + inline_id)
+    }
+    expect(
+      post(base + "/api/runs", body_inline_conflict).code == 400,
+      "内联用例与 use-case ids 同时给 → 400（不然不知道到底跑了什么）",
+      "",
+    )
+    expect(
+      post(base + "/api/runs", body_inline_no_prompt).code == 400,
+      "内联用例缺 prompt → 400",
+      "",
+    )
+
     // ---- 预设
     println("==> 预设")
     expect(
@@ -747,6 +814,14 @@ async fn main {
   if failures > 0 {
     c_exit(1)
   }
+}
+
+///|
+/// playground 那个请求体要把假端点的地址填进去，写法跟别处一致：拼字符串。
+fn inline_run_body(base_url : String, mock_port : String) -> String {
+  let prefix =
+    #|{"models":["mock-a","mock-b"],"system":"你是一个只说一个词的助手。","inlineCases":[{"id":"q1","prompt":"甲板风是什么？"},{"prompt":"侧风是什么？","system":"只用五个字回答。"}],"repeats":1,"maxTokens":32,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
+  prefix + mock_port + "/v1\",\"apiKey\":\"test-key\"}"
 }
 
 ///|

@@ -102,6 +102,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`POST /api/runs` can take the cases inline.** `inlineCases` is an array of case
+  objects (`{prompt, id?, system?, max_tokens?, temperature?}`) written straight
+  into that run's `cases.jsonl`, and `system` sets the system prompt for the whole
+  run — each case may still override it. That is what the playground page needs: a
+  fixed system prompt plus a handful of ad-hoc prompts should not require saving a
+  case set first. The three ways to describe a run (`caseSet` + `cases` ids, a
+  single `prompt`, `inlineCases`) are mutually exclusive, and a request that mixes
+  them is a 400 rather than a guess. Counting was updated with it, so the live
+  status and the history rail report "2 models × 2 cases" for these runs instead of
+  zero, and the global `system` is recorded in `request.json` so a rerun replays
+  the same thing.
+
 - **CI runs the suites on Windows too.** "The scripts are MoonBit now, so they are
   cross-platform" was a claim; a `windows-latest` job now backs it with a runner:
   `moon test --target native` in both modules, then `smoke.mbtx` (16 checks) and

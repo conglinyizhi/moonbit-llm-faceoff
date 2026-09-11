@@ -441,7 +441,7 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 | --- | --- |
 | `GET /api/meta` | `{models, caseSets, defaultCaseSet, cases, defaults, hasKey, baseUrl}`。`cases` 是默认集的列表，留着因为「URL 即配置」那条路要读它 |
 | `GET /api/runs` | 运行历史，新的在前：`{runs: [{id, startedAt, status, exitCode, request, total, done, failures, retried, truncated}]}` |
-| `POST /api/runs` | 建一次运行 → `{id, total}`。`caseSet` 指定 `cases` 里的 id 从哪套用例里读 |
+| `POST /api/runs` | 建一次运行 → `{id, total}`。要跑什么有三种互斥的写法：`caseSet` + `cases`（磁盘上某套用例的 id）、单条 `prompt`、或 `inlineCases`（一组用例对象，直接写进这次运行的 `cases.jsonl`）。`system` 是整轮的 system prompt，单条用例可以自己覆盖 |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
 | `DELETE /api/runs/<id>` | 删掉那次运行的目录 |
 | `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |
