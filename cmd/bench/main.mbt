@@ -80,7 +80,7 @@ async fn main {
         retry_backoff_ms: cli.retry_backoff_ms,
         pace_ms: cli.pace_ms,
       }
-      let cot : CotLine = { open: false }
+      let cot : CotLine = { open: false, }
       note(
         "\{models.length()} model(s) x \{cases.length()} case(s) x \{cli.repeats} repeat(s)",
       )

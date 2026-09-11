@@ -33,6 +33,7 @@ fn sample_data() -> PageData {
             completion_tokens: 9,
             reasoning_tokens: 4,
             content: "Hello from the mock server.",
+            reasoning: "weighing the question",
             error: None,
           },
           {
@@ -42,6 +43,7 @@ fn sample_data() -> PageData {
             completion_tokens: 0,
             reasoning_tokens: 0,
             content: "",
+            reasoning: "",
             error: Some("http 500: upstream exploded"),
           },
         ],

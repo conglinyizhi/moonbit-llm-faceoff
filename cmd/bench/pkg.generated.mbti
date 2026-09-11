@@ -6,6 +6,7 @@ package "conglinyizhi/moonbit-llm-faceoff/cmd/bench"
 // Errors
 
 // Types and methods
+type CotLine
 
 // Type aliases
 
