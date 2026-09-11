@@ -68,15 +68,15 @@ uninstall:  ## remove the CLIs from $BIN_DIR
 	@echo "已从 $(BIN_DIR) 移除 faceoff、bench"
 
 demo:  ## zero-API-key demo of all three paths
-	bash scripts/demo.sh
+	$(MOON) run --target native scripts/demo.mbtx
 
 web:  ## build the page and the static report
-	bash web/build.sh
+	$(MOON) run --target native scripts/build-web.mbtx
 
 # 服务端必须从 web/ 启动：out/、runs/、cases/、presets.json 都是按工作目录解析的，
 # 从仓库根起会「/api 通、页面全 404」。这个目标把 cd 做掉，省得每次记。
 serve:  ## build the page, then start the server from web/ (Ctrl-C to stop)
-	bash web/build.sh
+	$(MOON) run --target native scripts/build-web.mbtx
 	@echo
 	@echo "打开 http://127.0.0.1:$${LLM_WEB_PORT:-8137}/  （Ctrl-C 停）"
 	cd web && ./_build/native/debug/build/cmd/server/server.exe

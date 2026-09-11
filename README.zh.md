@@ -53,10 +53,10 @@ moon version
 
 ```bash
 git clone <本仓库> && cd moonbit-llm-faceoff
-bash scripts/demo.sh
+moon run --target native scripts/demo.mbtx
 ```
 
-`scripts/demo.sh` 会把所有东西编译好，起一个**本地的假 OpenAI 兼容端点**，然后把三条主要路径各走一遍：单次问答、流式输出、两个「模型」的对比。全程离线。
+`scripts/demo.mbtx` 会把所有东西编译好，起一个**本地的假 OpenAI 兼容端点**，然后把三条主要路径各走一遍：单次问答、流式输出、两个「模型」的对比。全程离线。
 
 ```
 ==> 1/3 单次问答
@@ -82,7 +82,7 @@ make serve          # 构建页面，然后从 web/ 起服务端
 也可以按两步走：
 
 ```bash
-bash web/build.sh
+moon run --target native scripts/build-web.mbtx
 cd web
 ./_build/native/debug/build/cmd/server/server.exe
 ```
@@ -143,7 +143,7 @@ $bench \
   --json my-run/runs.jsonl
 
 # 5. 渲染成单文件页面——不需要服务器，也不需要 key
-bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+moon run --target native scripts/build-web.mbtx my-run/runs.jsonl        # → web/out/report.html
 
 # 6. 同一个闭环，但带断言、带留证
 moon run --target native scripts/real-gateway.mbtx   # → docs/real-gateway-run.md
@@ -387,7 +387,7 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 ## 3. 网页版
 
 ```bash
-bash web/build.sh    # 在仓库根目录执行
+moon run --target native scripts/build-web.mbtx    # 在仓库根目录执行
 
 cd web               # 服务端的 out/、runs/ 和用例文件都按当前工作目录解析，
                      # 所以要从这里启动，而不是在仓库根目录
@@ -495,7 +495,7 @@ web/runs/<id>/
 `web/cmd/ssg` 把同一套结果组件渲染成一个自包含页面——没有 JavaScript，不需要服务端，思考过程也一并带上：
 
 ```bash
-bash web/build.sh path/to/other-runs.jsonl   # → web/out/report.html
+moon run --target native scripts/build-web.mbtx path/to/other-runs.jsonl   # → web/out/report.html
 ```
 
 ### 样式
@@ -667,7 +667,7 @@ web/runs/           一次运行一个目录——在 gitignore 里
   build.sh          一条命令构建
 
 scripts/
-  demo.sh               离线、免 API key 的三路径演示
+  demo.mbtx             离线、免 API key 的三路径演示
   mock_openai.mbtx      离线 OpenAI 兼容端点，MoonBit 脚本
   check_incremental.mbtx  量 --stream 是否真的在流式
   smoke.mbtx            命令行端到端

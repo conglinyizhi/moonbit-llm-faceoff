@@ -32,7 +32,7 @@ moon check --target native
 moon test --target native
 moon run --target native scripts/smoke.mbtx
 bash scripts/web-e2e.sh
-bash web/build.sh
+moon run --target native scripts/build-web.mbtx
 ```
 
 The first four each start their own mock endpoint, so none of them need a key or

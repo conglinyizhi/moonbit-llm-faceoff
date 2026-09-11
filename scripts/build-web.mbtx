@@ -1,0 +1,206 @@
+///| 构建前端。
+///
+///   moon run --target native scripts/build-web.mbtx [path/to/results.jsonl]
+///
+///   web/styles/site.scss   → precss        → web/out/site.css
+///   web/cmd/app  (js)      → moon build    → web/out/app.js     交互页
+///   web/shell/index.html   → 复制          → web/out/index.html 交互页外壳
+///   web/cmd/ssg  (native)  → Rabbita SSR   → web/out/report.html 静态报告
+///
+/// 不带参数就用 bench/results-example.jsonl。只重新导出页面数据时不需要真的调用
+/// 模型：bench --from-json 走 replay 路径。
+///
+/// 这是 web/build.sh 的 .mbtx 版，逻辑一一对应；放在 scripts/ 而不是 web/ 里，
+/// 是因为它属于根模块（web/ 自己的模块钉的是另一套 async 版本）。
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/fs" @fs,
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env",
+}
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+///|
+fn text_of(data : &@io.Data) -> String {
+  data.text() catch { _ => "" }
+}
+
+///|
+async fn say(message : String) -> Unit {
+  @stdio.stdout.write(message + "\n") catch { _ => () }
+}
+
+///|
+async fn note(message : String) -> Unit {
+  @stdio.stderr.write(message + "\n") catch { _ => () }
+}
+
+
+///|
+async fn copy_file(from : String, to : String) -> Bool {
+  let content = @fs.read_file(from) catch { _ => return false }
+  @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+///|
+async fn exists(path : String) -> Bool {
+  @fs.exists(path) catch { _ => false }
+}
+
+///|
+/// 文件 A 是不是比 B 新（B 不存在也算「A 更新」）。
+async fn newer_than(a : String, b : String) -> Bool {
+  if !exists(b) {
+    return true
+  }
+  let left = @fs.mtime(a) catch { _ => return false }
+  let right = @fs.mtime(b) catch { _ => return true }
+  left.0 > right.0 || (left.0 == right.0 && left.1 > right.1)
+}
+
+///|
+async fn run(
+  bin : String,
+  args : Array[String],
+  cwd : String,
+) -> (Int, String, String) {
+  let (code, out, err) = @process.collect_output(
+    bin,
+    args,
+    inherit_env=true,
+    cwd=cwd,
+  ) catch {
+    err => return (-1, "", err.to_string())
+  }
+  (code, text_of(out), text_of(err))
+}
+
+///|
+async fn main {
+  let args = @env.args().filter(fn(arg) { arg != "--" })
+  let root = match @env.current_dir() {
+    Some(dir) => dir
+    None => {
+      note("build-web: 拿不到当前目录")
+      c_exit(1)
+      return
+    }
+  }
+  let results = if args.length() > 1 {
+    args[args.length() - 1]
+  } else {
+    "bench/results-example.jsonl"
+  }
+  if !exists(results) {
+    note("error: no results log at " + results)
+    c_exit(1)
+    return
+  }
+
+  // 只重新导出页面数据时不必真的调模型：bench --from-json 走 replay。
+  let data_path = "web/data.json"
+  if newer_than(results, data_path) {
+    say("==> 从 " + results + " 导出 " + data_path)
+    let (build_code, _, build_err) = run(
+      "moon",
+      ["build", "cmd/bench", "--target", "native"],
+      root,
+    )
+    if build_code != 0 {
+      note(build_err)
+      c_exit(1)
+      return
+    }
+    let (code, _, err) = run(
+      "./_build/native/debug/build/cmd/bench/bench.exe",
+      ["--from-json", results, "--no-key", "--web-data", data_path],
+      root,
+    )
+    if code != 0 {
+      note(err)
+      c_exit(1)
+      return
+    }
+  } else {
+    // 静默用旧数据会让人以为「我明明传了这个文件，怎么报告还是上一轮的」——
+    // 所以这里必须出声。
+    say("==> web/data.json 比 " + results + " 新，跳过导出")
+    say("    报告用的是 web/data.json 里的数据。要强制从 " + results + " 重建：")
+    say("      rm web/data.json && moon run --target native scripts/build-web.mbtx " + results)
+  }
+
+  let web = root + "/web"
+  let (update_code, _, update_err) = run("moon", ["update"], web)
+  if update_code != 0 {
+    note(update_err)
+  }
+  @fs.mkdir(web + "/out", recursive=true) catch { _ => () }
+
+  say("==> 编译样式（precss）与页面")
+  let (ssg_code, _, ssg_err) = run(
+    "moon",
+    ["build", "cmd/ssg", "--target", "native"],
+    web,
+  )
+  if ssg_code != 0 {
+    note(ssg_err)
+    c_exit(1)
+    return
+  }
+  let (report_code, report_out, report_err) = run(
+    "./_build/native/debug/build/cmd/ssg/ssg.exe",
+    [],
+    web,
+  )
+  if report_code != 0 {
+    note(report_err)
+    c_exit(1)
+    return
+  }
+  @stdio.stdout.write(report_out) catch { _ => () }
+
+  say("==> 编译交互页（js）")
+  let (app_code, _, app_err) = run("moon", ["build", "cmd/app", "--target", "js"], web)
+  if app_code != 0 {
+    note(app_err)
+    c_exit(1)
+    return
+  }
+  if !copy_file(
+    web + "/_build/js/debug/build/cmd/app/app.js",
+    web + "/out/app.js",
+  ) {
+    note("拷贝 app.js 失败")
+    c_exit(1)
+    return
+  }
+
+  say("==> 交互页外壳")
+  if !copy_file(web + "/shell/index.html", web + "/out/index.html") {
+    note("拷贝 index.html 失败")
+    c_exit(1)
+    return
+  }
+
+  say("")
+  say("产物（在 web/out/ 下）：")
+  for name in ["app.js", "index.html", "report.html", "site.css"] {
+    // 0.20.1 的 @fs 没有 file_size，这里就不报大小了：只是给人看一眼，
+    // 为此把 app.js 整个读一遍不值当。
+    if exists(web + "/out/" + name) {
+      say("  " + name)
+    }
+  }
+  say("")
+  say("启动：")
+  say("  make serve        # 构建页面 + 从 web/ 起服务端")
+  say("  或者手动：cd web && ./_build/native/debug/build/cmd/server/server.exe")
+  say("  然后打开 http://127.0.0.1:8137/")
+}
