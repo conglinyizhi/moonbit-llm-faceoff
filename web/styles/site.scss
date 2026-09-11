@@ -1477,147 +1477,6 @@ button.ghost {
   border-bottom: 1px solid $border;
 }
 
-// ---------------------------------------------------------------- 试跑台
-
-.playground {
-  padding-top: 1.5rem;
-  padding-bottom: 2.5rem;
-}
-
-.prompt-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.prompt-row {
-  border: 1px solid $border;
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-
-  .prompt-row-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 0.35rem;
-  }
-}
-
-// 等高等宽的单元格矩阵：行 = 一道题，列 = 一个模型。
-// 高度固定、正文裁掉溢出——这样一屏能扫很多题；要看全文点这一行的「对比」。
-.matrix {
-  margin-top: 1.2rem;
-
-  .matrix-head {
-    display: flex;
-    align-items: baseline;
-    gap: 0.8rem;
-    margin-bottom: 0.7rem;
-
-    h2 {
-      margin: 0;
-      color: $title;
-      font-size: 1.05rem;
-    }
-  }
-}
-
-.matrix-row {
-  @include card(0.8rem 0.9rem);
-  margin-bottom: 0.8rem;
-
-  &.expanded {
-    border-color: $accent;
-  }
-
-  .matrix-row-head {
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
-    margin-bottom: 0.6rem;
-  }
-
-  .matrix-prompt {
-    flex: 1 1 auto;
-    min-width: 0;
-    color: $title;
-    font-size: 0.9rem;
-    // 题干本身也不铺满整行：一行高度，长了省略
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.matrix-cells {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 0.7rem;
-}
-
-.cell {
-  display: flex;
-  flex-direction: column;
-  height: 11rem;
-  background: $bg;
-  border: 1px solid $border;
-  border-radius: 0.4rem;
-  padding: 0.55rem 0.65rem;
-  overflow: hidden;
-
-  .cell-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding-bottom: 0.3rem;
-    border-bottom: 1px solid $border;
-    margin-bottom: 0.4rem;
-  }
-
-  .cell-model {
-    color: $title;
-    font-size: 0.82rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .cell-stats {
-    @include value-text;
-    color: $muted;
-    font-size: 0.72rem;
-    white-space: nowrap;
-  }
-
-  .cell-body {
-    flex: 1 1 auto;
-    overflow: hidden;
-    color: $text;
-    font-size: 0.82rem;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-
-  .cell-foot {
-    color: $muted;
-    font-size: 0.72rem;
-    padding-top: 0.25rem;
-  }
-}
-
-.compare {
-  margin-top: 0.8rem;
-  border-top: 1px solid $border;
-  padding-top: 0.7rem;
-
-  .compare-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    margin-bottom: 0.6rem;
-  }
-}
-
 .diffs {
   display: flex;
   flex-direction: column;
@@ -1647,22 +1506,6 @@ button.ghost {
 
 // 差异配色：绿 = 右边多了，红 = 左边多了。同一个模型对同一个问题，
 // 「多了/少了」没有好坏之分，所以这两个颜色只表示方向。
-.diff-same {
-  color: $muted;
-}
-
-.diff-del {
-  background: rgba(248, 81, 73, 0.18);
-  color: #ffb4ae;
-  text-decoration: line-through;
-  text-decoration-color: rgba(248, 81, 73, 0.6);
-}
-
-.diff-ins {
-  background: rgba(63, 185, 80, 0.18);
-  color: #a8e6b0;
-}
-
 // ---------------------------------------------------------------- 人工标注
 
 .verdict {
@@ -1701,7 +1544,7 @@ button.ghost {
   }
 }
 
-// 标注编辑器（工作台与试跑台共用）
+// 标注编辑器（交互页与静态报告共用）
 .annotate {
   margin-top: 0.5rem;
   border-top: 1px dashed $border;

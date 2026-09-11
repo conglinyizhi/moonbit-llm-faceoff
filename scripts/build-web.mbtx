@@ -4,7 +4,6 @@
 ///
 ///   web/styles/site.scss   → precss        → web/out/site.css
 ///   web/cmd/app  (js)      → moon build    → web/out/app.js     交互页（工作台）
-///   web/cmd/playground (js) → moon build   → web/out/playground.js  试跑台
 ///   web/shell/index.html   → 复制          → web/out/index.html 交互页外壳
 ///   web/cmd/ssg  (native)  → Rabbita SSR   → web/out/report.html 静态报告
 ///
@@ -187,29 +186,8 @@ async fn main {
     return
   }
 
-  say("==> 试跑台（playground）")
-  let (pg_code, _, pg_err) = run(
-    "moon",
-    ["build", "cmd/playground", "--target", "js"],
-    web,
-  )
-  if pg_code != 0 {
-    note(pg_err)
-    c_exit(1)
-    return
-  }
-  if !copy_file(
-    web + "/_build/js/debug/build/cmd/playground/playground.js",
-    web + "/out/playground.js",
-  ) {
-    note("拷贝 playground.js 失败")
-    c_exit(1)
-    return
-  }
-
   say("==> 外壳")
-  if !copy_file(web + "/shell/index.html", web + "/out/index.html") ||
-    !copy_file(web + "/shell/playground.html", web + "/out/playground.html") {
+  if !copy_file(web + "/shell/index.html", web + "/out/index.html") {
     note("拷贝外壳失败")
     c_exit(1)
     return
@@ -220,8 +198,6 @@ async fn main {
   for name in [
     "app.js",
     "index.html",
-    "playground.js",
-    "playground.html",
     "report.html",
     "site.css",
   ] {

@@ -290,7 +290,7 @@ async fn scan_runs(work_dir : String) -> Array[Json] {
       Some(_) => 1
       None =>
         match request.get("inlineCases") {
-          // playground 的运行：一组临时 prompt，没有 cases 字段
+          // 内联用例的运行：一组临时 prompt，没有 cases 字段
           Some(Array(items)) => items.length()
           _ => cases.length()
         }

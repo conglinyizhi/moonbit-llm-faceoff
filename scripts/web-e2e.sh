@@ -190,7 +190,6 @@ DUMP_READY_HISTORY='document.querySelector(".history-item") !== null'
 # 「这次跑完了」还不够：跑完的那一下页面才去刷历史列表，而下面几段都要点开
 # 历史里的某一条。所以要等两件事都有。
 DUMP_READY_RUN_DONE='/已完成|失败/.test((document.querySelector(".progress-head") || {}).textContent || "") && document.querySelector(".history-item") !== null'
-DUMP_READY_PLAYGROUND='document.querySelector("#prompt-0") !== null'
 
 # 条件里通常带空格，所以要按数组传：写成 $ready 会被 shell 拆成多个参数，
 # 条件本身只剩前半截（语法错 → 每次求值都失败 → 每次都等满上限，白等还不报错）
@@ -227,6 +226,21 @@ grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模�
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
 grep -q 'id="api-key"' "$tmp/form.html" || fail "表单里没有 API key 输入框" "$tmp/form.html"
 grep -q 'type="password"' "$tmp/form.html" || fail "API key 输入框不是 password 类型" "$tmp/form.html"
+# system prompt 是运行级的：页面打开时预填（服务端 LLM_WEB_SYSTEM），能改
+grep -q 'id="system"' "$tmp/form.html" || fail "工作台没有 system prompt 输入框" "$tmp/form.html"
+# 网关与密钥应当排在「模型」之后、「预设」之前（原来在参数行下面）
+python3 - "$tmp/form.html" <<'ORDER'
+import sys
+html = open(sys.argv[1], encoding="utf-8").read()
+i_model = html.find('id="model-mock-a"')
+i_gateway = html.find('id="base-url"')
+i_key = html.find('id="api-key"')
+i_system = html.find('id="system"')
+i_preset = html.find("预设")
+order = [i_model, i_gateway, i_key, i_system, i_preset]
+sys.exit(0 if all(x >= 0 for x in order) and order == sorted(order) else 1)
+ORDER
+[ $? -eq 0 ] || fail "表单顺序不对（应为 模型 → 网关 → 密钥 → system → 预设）" "$tmp/form.html"
 echo "ok: 浏览器里表单渲染出来了（含手输模型 / 网关 / 密钥，/api/meta 链路通）"
 
 echo "==> 浏览器触发一次评测（?autorun）"
@@ -306,6 +320,29 @@ manage_probe='(async () => {
   await new Promise((r) => setTimeout(r, 1800));
   out.saved = document.querySelector(".editor-actions .copied")
     ? document.querySelector(".editor-actions .copied").textContent : null;
+  // system 也要跟着预设走：填一段 → 存预设 → 改成别的 → 套用回来必须还原
+  const sysBox = document.querySelector("#system");
+  if (sysBox) {
+    const setSystem = (text) => {
+      sysBox.value = text;
+      sysBox.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    setSystem("E2E 预设里的 system。");
+    await new Promise((r) => setTimeout(r, 300));
+    const nameBox = document.querySelector("#preset-name") || document.querySelector("input[placeholder='预设名字']");
+    nameBox.value = "e2e-system-preset";
+    nameBox.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 200));
+    Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "保存当前配置").click();
+    await new Promise((r) => setTimeout(r, 1500));
+    setSystem("改掉了以后不该留下。");
+    await new Promise((r) => setTimeout(r, 300));
+    const card = Array.from(document.querySelectorAll(".preset-list *")).find((el) => el.textContent === "e2e-system-preset");
+    const applyBtn = card ? card.parentElement.querySelector("button") : null;
+    if (applyBtn) { applyBtn.click(); }
+    await new Promise((r) => setTimeout(r, 1200));
+    out.systemAfterApply = document.querySelector("#system").value;
+  }
   // 按行导入也接在用例编辑里
   const importBox = document.querySelector("#import-lines");
   out.hasImport = !!importBox;
@@ -336,6 +373,8 @@ echo "$probe" | grep -q '已保存' ||
   fail "保存用例集没有成功反馈：$probe"
 echo "$probe" | grep -q 'e2e-preset' ||
   fail "预设没有出现在列表里：$probe"
+echo "$probe" | grep -q '"systemAfterApply":"E2E 预设里的 system。"' ||
+  fail "套用预设没有把 system 还原回来：$probe"
 echo "$probe" | grep -q '"hasImport":true' ||
   fail "用例编辑里没有按行导入：$probe"
 echo "$probe" | grep -qE '"draftsAfterImport":2' ||
@@ -444,6 +483,56 @@ echo "$probe" | grep -qE '"backToStacked":0' ||
 echo "ok: 结果区三视图（并排列等宽各自滚动、差异视图、切回去）"
 
 # 请求上下文：问了什么得能就地看见，而不是去翻 cases.jsonl
+echo "==> 工作台的 system prompt（运行级）"
+# 填一段 system、跑一次，再去「请求上下文」里核对：页面填的东西必须真的进了请求
+system_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const box = document.querySelector("#system");
+  box.value = "E2E：把口语文本整理成书面表达。";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  // 一条用例、一个模型、不重复：两次请求就结束
+  // 不用 [id^=...]：属性选择器里的引号会和这层 JS 字符串的引号打架
+  const checkboxes = [...document.querySelectorAll("input[type=checkbox]")];
+  checkboxes.filter((c) => c.id.startsWith("case-")).forEach((c) => {
+    const want = c.id === "case-math-short";
+    if (c.checked !== want) c.click();
+  });
+  checkboxes.filter((c) => c.id.startsWith("model-")).forEach((c, i) => {
+    if (c.checked !== (i === 0)) c.click();
+  });
+  const setField = (id, value) => {
+    const el = document.querySelector("#" + id);
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  setField("repeats", "1");
+  setField("pace-ms", "0");
+  await new Promise((r) => setTimeout(r, 400));
+  byText("开始评测").click();
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const head = document.querySelector(".progress-head")?.textContent || "";
+    if (/已完成|失败/.test(head)) break;
+  }
+  out.head = (document.querySelector(".progress-head")?.textContent || "").replace(/\s+/g, " ");
+  // 打开第一道用例的请求上下文
+  const btn = document.querySelector(".context-btn");
+  btn.click();
+  await new Promise((r) => setTimeout(r, 1500));
+  const modal = document.querySelector(".modal");
+  out.systemInDialog = (modal?.querySelector(".context-message pre")?.textContent || "").slice(0, 40);
+  out.params = [...(modal?.querySelectorAll(".context-params dt") || [])].map((d) => d.textContent);
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/system.html" "$system_probe" 2000 "$DUMP_READY_FORM"
+probe=$(grep -o 'SCRIPT .*' "$tmp/system.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q 'E2E：把口语文本整理成书面表达' ||
+  fail "页面填的 system 没有进到请求里（请求上下文里看不到）：$probe"
+echo "$probe" | grep -q 'system（全局）' ||
+  fail "请求上下文里没有全局 system 那一行：$probe"
+echo "ok: 工作台的 system prompt 进请求、且在请求上下文里可见"
+
 echo "==> 请求上下文对话框"
 context_probe='(async () => {
   const out = {};
@@ -551,106 +640,6 @@ probe=$(grep -o 'SCRIPT .*' "$tmp/annotate2.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '不行' || fail "重新打开后判定丢了：$probe"
 echo "$probe" | grep -q 'e2e 备注' || fail "重新打开后备注丢了：$probe"
 echo "ok: 标注（判定 + 备注落盘、重开还在、导出带着走）"
-
-echo "==> 试跑台（单独的页面）"
-# 固定 system + 一组 prompt × 两个模型：跑完看矩阵、点开看对比与差异。
-dump_page "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground.html" "$DUMP_READY_PLAYGROUND"
-grep -q 'id="system"' "$tmp/playground.html" || fail "试跑台没有 system 输入框" "$tmp/playground.html"
-grep -q 'id="prompt-0"' "$tmp/playground.html" || fail "试跑台没有 prompt 行" "$tmp/playground.html"
-grep -q '开始试跑' "$tmp/playground.html" || fail "试跑台没有开始按钮" "$tmp/playground.html"
-grep -q 'playground.html' "$tmp/form.html" || fail "工作台里没有去试跑台的入口" "$tmp/form.html"
-
-playground_probe='(async () => {
-  const out = {};
-  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
-  const boxes = Array.from(document.querySelectorAll(".picker-items input[type=checkbox]"));
-  out.modelBoxes = boxes.length;
-  out.checked = boxes.filter((b) => b.checked).length;
-  if (out.checked < 2) { return out; }
-  // 按行导入：一行一条，空行与 # 注释跳过，先替换再追加
-  const box = document.querySelector("#import-lines");
-  out.hasImportBox = !!box;
-  box.value = "导入之一\n\n# 注释行\n导入之二\n";
-  box.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 300));
-  byText("替换为这些行").click();
-  await new Promise((r) => setTimeout(r, 600));
-  out.rowsAfterReplace = document.querySelectorAll(".prompt-row").length;
-  box.value = "导入之三\n";
-  box.dispatchEvent(new Event("input", { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 300));
-  byText("追加导入").click();
-  await new Promise((r) => setTimeout(r, 600));
-  out.rowsAfterAppend = document.querySelectorAll(".prompt-row").length;
-  byText("开始试跑").click();
-  // 运行中盯实时行：整个卡片的「活着的证据」都在这一行里
-  out.liveSamples = 0;
-  out.liveStates = [];
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 250));
-    const live = document.querySelector(".progress-card .live-row");
-    if (live) {
-      out.liveSamples += 1;
-      out.liveWho = live.querySelector(".live-who")?.textContent || "";
-      const state = live.querySelector(".live-state")?.textContent || "";
-      if (state && !out.liveStates.includes(state)) { out.liveStates.push(state); }
-      out.liveBar = !!live.querySelector(".live-bar-flow");
-      out.pulse = getComputedStyle(live.querySelector(".pulse")).animationName;
-    }
-    const head = document.querySelector(".progress-head")?.textContent || "";
-    if (/已完成|失败/.test(head)) { break; }
-  }
-  // 完成之后：进度条到 100%，实时行消失且动画停掉。
-  // 这两条都真出过：done 一度是从 runs.jsonl 数的（bench 跑完才写），于是整次
-  // 运行进度条停在 0；实时行则因为轮询停了、liveAgeMs 冻住，动画一直放下去。
-  out.afterHead = (document.querySelector(".progress-head")?.textContent || "").replace(/\s+/g, " ");
-  out.afterWidth = document.querySelector(".progress-card .progress-fill")?.style.width || "";
-  out.afterLive = !!document.querySelector(".progress-card .live-row");
-  await new Promise((r) => setTimeout(r, 1200));
-  out.afterLiveStillGone = !document.querySelector(".progress-card .live-row");
-  await new Promise((r) => setTimeout(r, 1500));
-  out.rows = document.querySelectorAll(".matrix-row").length;
-  out.cells = document.querySelectorAll(".cell").length;
-  const heights = Array.from(document.querySelectorAll(".cell")).map((c) => Math.round(c.getBoundingClientRect().height));
-  out.uniformHeights = heights.length > 1 && Math.min.apply(null, heights) === Math.max.apply(null, heights);
-  const row = document.querySelector(".matrix-row");
-  row.querySelector(".matrix-row-head button").click();
-  await new Promise((r) => setTimeout(r, 400));
-  out.expandedCols = document.querySelectorAll(".matrix-row.expanded .compare-col").length;
-  out.cotFolded = document.querySelectorAll(".matrix-row.expanded details.cot").length;
-  byText("差异视图").click();
-  await new Promise((r) => setTimeout(r, 400));
-  out.diffBlocks = document.querySelectorAll(".diff-block").length;
-  return out;
-})()'
-dump_page_script "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground-run.html" "$playground_probe" 2000 "$DUMP_READY_PLAYGROUND"
-probe=$(grep -o 'SCRIPT .*' "$tmp/playground-run.html.err" | sed 's/^SCRIPT //')
-echo "$probe" | grep -qE '"checked":2' || fail "试跑台默认没勾上两个模型：$probe"
-echo "$probe" | grep -q '"hasImportBox":true' || fail "试跑台没有按行导入的输入框：$probe"
-echo "$probe" | grep -qE '"rowsAfterReplace":2' || fail "按行导入（替换）没得到 2 条：$probe"
-echo "$probe" | grep -qE '"rowsAfterAppend":3' || fail "按行导入（追加）没加到 3 条：$probe"
-echo "$probe" | grep -qE '"liveSamples":([1-9][0-9]*)' ||
-  fail "运行中没看到实时行（live-row）：$probe"
-echo "$probe" | grep -qE '"liveWho":"[^"]+·[^"]+"' ||
-  fail "实时行没说明正在跑哪个模型/哪条用例：$probe"
-echo "$probe" | grep -q '"liveBar":true' ||
-  fail "实时行里没有会动的 token 进度条：$probe"
-echo "$probe" | grep -q '"pulse":"live-pulse"' ||
-  fail "实时行里的脉冲点没有动画（两次轮询之间页面就是死的）：$probe"
-echo "$probe" | grep -qE '"afterHead":"已完成[^"]*100%' ||
-  fail "跑完之后进度头不是 100%：$probe"
-echo "$probe" | grep -qE '"afterWidth":"100%"' ||
-  fail "跑完之后进度条没有到 100%：$probe"
-echo "$probe" | grep -q '"afterLive":false' ||
-  fail "跑完之后实时行还在（数字是旧的、动画还在跑）：$probe"
-echo "$probe" | grep -q '"afterLiveStillGone":true' ||
-  fail "跑完之后实时行又冒出来了：$probe"
-echo "$probe" | grep -qE '"rows":3' || fail "试跑台没渲染出三行（三条 prompt）：$probe"
-echo "$probe" | grep -qE '"cells":6' || fail "试跑台没渲染出 3×2 个单元格：$probe"
-echo "$probe" | grep -q '"uniformHeights":true' || fail "单元格高度不一致：$probe"
-echo "$probe" | grep -qE '"expandedCols":2' || fail "点开对比没出现左右两列：$probe"
-echo "$probe" | grep -qE '"diffBlocks":[1-9]' || fail "差异视图没有内容：$probe"
-echo "ok: 试跑台（矩阵等高等宽、点开左右对比、差异视图）"
 
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。

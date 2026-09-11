@@ -30,6 +30,8 @@ struct Defaults {
   temperature : Double
   paceMs : Int
   retry : Int
+  /// 服务端配置里的默认 system（MOONLLM_SYSTEM）。页面打开时用它预填。
+  system : String?
 } derive(Eq, FromJson)
 
 ///|
@@ -99,6 +101,8 @@ struct AppModel {
   temperature : Double
   pace_ms : Int
   retry : Int
+  /// 本次运行的 system prompt：所有用例共用。用例自带的会覆盖它。
+  system : String
   run_id : String?
   status : String
   done : Int
@@ -195,6 +199,7 @@ fn initial_model() -> AppModel {
     temperature: 0.0,
     pace_ms: 3000,
     retry: 3,
+    system: query.get("system").unwrap_or(""),
     run_id: None,
     status: "idle",
     done: 0,
@@ -351,6 +356,7 @@ enum Msg {
   UsePrompt(Bool)
   PromptChanged(String)
   RepeatsChanged(String)
+  SystemChanged(String)
   MaxTokensChanged(String)
   TemperatureChanged(String)
   PaceChanged(String)
@@ -520,6 +526,16 @@ fn update(
               meta.defaults.temperature,
             ),
             pace_ms: int_param(model.query, "paceMs", meta.defaults.paceMs),
+            // query 里的优先（分享链接），其次服务端的默认（LLM_WEB_SYSTEM），
+            // 都没有就是空——空表示这次运行不带 system。
+            system: match model.query.get("system") {
+              Some(text) => text
+              None =>
+                match meta.defaults.system {
+                  Some(text) => text
+                  None => model.system
+                }
+            },
             retry: int_param(model.query, "retry", meta.defaults.retry),
             prompt: match query_prompt {
               Some(text) => text
@@ -1064,6 +1080,12 @@ fn update(
         } else {
           Some(model.case_set)
         },
+        // system 一起存：它和「模型 + 参数」是同一层的东西，而它最容易忘
+        system: if model.system == "" {
+          None
+        } else {
+          Some(model.system)
+        },
         repeats: Some(model.repeats),
         maxTokens: Some(model.max_tokens),
         temperature: Some(model.temperature),
@@ -1100,6 +1122,7 @@ fn update(
                 ..model,
                 selected_models: selected,
                 extra_models: extra.join(","),
+                system: preset.system.unwrap_or(model.system),
                 repeats: preset.repeats.unwrap_or(model.repeats),
                 max_tokens: preset.maxTokens.unwrap_or(model.max_tokens),
                 temperature: preset.temperature.unwrap_or(model.temperature),
@@ -1310,6 +1333,7 @@ fn update(
           }
       }
     CloseCompare => ({ ..model, compare: None, compare_picks: [], }, @cmd.none)
+    SystemChanged(text) => ({ ..model, system: text, }, @cmd.none)
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
     MaxTokensChanged(text) =>
@@ -1463,6 +1487,8 @@ struct RunPayload {
   models : Array[String]
   cases : Array[String]
   prompt : String
+  /// 运行级 system prompt。空（None）就不发这个字段，服务端那边当作「不带」。
+  system : String?
   /// 这些 case id 从哪套用例里读。空表示用服务端的默认集。
   caseSet : String?
   repeats : Int
@@ -1495,6 +1521,11 @@ fn RunPayload::of(model : AppModel) -> RunPayload {
       Some(model.case_set)
     },
     repeats: model.repeats,
+    system: if model.system == "" {
+      None
+    } else {
+      Some(model.system)
+    },
     maxTokens: model.max_tokens,
     temperature: model.temperature,
     paceMs: model.pace_ms,
@@ -1572,6 +1603,9 @@ fn share_url(model : AppModel) -> String {
     parts.push("prompt=" + percent_encode(model.prompt))
   } else if model.selected_cases.length() > 0 {
     parts.push("cases=" + percent_encode(model.selected_cases.join(",")))
+  }
+  if model.system != "" {
+    parts.push("system=" + percent_encode(model.system))
   }
   parts.push("repeats=" + model.repeats.to_string())
   parts.push("maxTokens=" + model.max_tokens.to_string())
@@ -1700,8 +1734,34 @@ fn header(model : AppModel) -> @html.Html {
     el("div", "wrap site-header-inner", [
       el("div", "site-logo", [txt("faceoff")]),
       el("div", "site-meta", [txt(meta_line)]),
-      // 试跑台是另一页：这边管「管理测试」，那边管「随手试一下」
-      @html.a(href="playground.html", class="link-btn", [txt("试跑台 →")]),
+    ]),
+  ])
+}
+
+///|
+/// 运行级 system prompt：这次运行里所有用例共用。
+///
+/// 放在这里是因为它是「固定下来的那一半」——变的是每条用例的 user prompt。
+/// 用例自己也能带 system（用例编辑器里逐条填），那条会盖掉这里填的；页面上的
+/// 「请求上下文」会标出哪条被盖了。
+fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  el("fieldset", "picker", [
+    el("legend", "", [
+      txt("System prompt（本次运行的所有用例共用）"),
+    ]),
+    @html.textarea(
+      class="prompt-input",
+      id="system",
+      value=model.system,
+      rows=3,
+      placeholder="例如：把下面的语音转写文本整理成通顺的书面表达，保留原意，不要解释。",
+      on_input=emit.map(fn(text) { SystemChanged(text) }),
+      ([] : Array[@html.Html]),
+    ),
+    el("div", "hint", [
+      txt(
+        "留空就是不带 system。用例集里逐条写的 system 优先于这里填的。",
+      ),
     ]),
   ])
 }
@@ -1744,11 +1804,14 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           @html.fragment([])
         },
         model_picker(meta, model, emit),
+        // 网关与密钥紧挨着模型：它们和「跑哪个模型」是同一类设置——本次运行
+        // 对着谁说话。以前在参数行下面，和「重复几次」混在一起。
+        gateway_row(model, emit),
+        system_field(model, emit),
         preset_panel(meta, model, emit),
         case_panel(meta, model, emit),
         prompt_picker(model, emit),
         param_row(model, emit),
-        gateway_row(model, emit),
         action_row(model, emit),
         if model.autorun_held {
           el("p", "notice", [

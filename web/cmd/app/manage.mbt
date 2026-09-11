@@ -34,6 +34,9 @@ struct Preset {
   name : String
   models : Array[String]
   caseSet : String?
+  /// 运行级 system prompt。老预设没有这个字段，读出来是 None——那种情况下
+  /// 套用时保持页面上现有的值不动。
+  system : String?
   repeats : Int?
   maxTokens : Int?
   temperature : Double?
