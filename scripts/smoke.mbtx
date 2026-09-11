@@ -1,0 +1,534 @@
+///| smoke：两个 CLI 对着本地假端点走一遍端到端。
+///
+///   moon run --target native scripts/smoke.mbtx
+///
+/// 这是 scripts/smoke.sh 的 .mbtx 版，断言一一对应。换掉的理由：shell 版靠
+/// grep/sed/curl/seq/mktemp 那一套，Windows 上一个都没有；而这里要的东西
+/// （起进程、抓输出、读写文件、字符串断言）@process 和 @fs 都有，且是跨平台的。
+///
+/// 必须显式 --target native：默认后端是 wasm，没有 @process。
+///
+/// 跑法上的一个坑（lib.sh 里也记着）：不能 `moon run foo.mbtx &` 然后杀 `$!`——
+/// 那是 moon 包装进程，真正的服务是它 spawn 出来的子进程，杀包装带不走服务。
+/// 所以先 build 再复制成独立文件，之后 $! 才是服务本身。
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/fs" @fs,
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/socket" @socket,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/json" @json,
+  "moonbitlang/core/string" @string,
+}
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+// ---------------------------------------------------------------- 断言
+
+///|
+/// 每一项的结果，最后一起报。用数组而不是计数器：`ok` / `bad` 是普通函数，
+/// 不需要可变全局。
+let results : Array[String] = []
+
+///|
+fn ok(name : String) -> Unit {
+  results.push("ok   " + name)
+  println("ok: " + name)
+}
+
+///|
+fn bad(name : String, detail : String) -> Unit {
+  results.push("FAIL " + name)
+  if detail == "" {
+    println("FAIL: " + name)
+  } else {
+    println("FAIL: " + name + "  ← " + one_line(detail))
+  }
+}
+
+///|
+/// 前置条件不满足（缺可执行文件之类）：直接收摊，不假装后面的检查有意义。
+async fn bail(message : String) -> Unit {
+  @stdio.stderr.write("smoke: " + message + "\n") catch { _ => () }
+  c_exit(1)
+}
+
+///|
+/// 断言失败就记一笔。
+fn expect(condition : Bool, name : String, detail : String) -> Unit {
+  if condition {
+    ok(name)
+  } else {
+    bad(name, detail)
+  }
+}
+
+///|
+/// 在参数表后面接几个。MoonBit 没有数组展开语法，就写一个。
+fn arg_append(args : Array[String], extra : Array[String]) -> Array[String] {
+  let out = args.copy()
+  for item in extra {
+    out.push(item)
+  }
+  out
+}
+
+///|
+fn one_line(text : String) -> String {
+  text.replace_all(old="\n", new=" ⏎ ")
+}
+
+// ---------------------------------------------------------------- 进程
+
+///|
+struct Output {
+  code : Int
+  out : String
+  err : String
+}
+
+///|
+/// 跑一个进程并抓走它的输出。起不来就返回 code = -1，并把原因放进 err。
+async fn run(
+  bin : String,
+  args : Array[String],
+  env : Map[String, String],
+) -> Output {
+  let (code, out, err) = @process.collect_output(
+    bin,
+    args,
+    extra_env=env,
+    inherit_env=true,
+  ) catch {
+    err => return { code: -1, out: "", err: err.to_string() }
+  }
+  {
+    code,
+    out: text_of(out),
+    err: text_of(err),
+  }
+}
+
+///|
+fn text_of(data : &@io.Data) -> String {
+  data.text() catch { _ => "" }
+}
+
+///|
+/// 跑一个进程，把它的 stdout 当作「读得到的一行行」：假端点的端口就是这么握手的。
+async fn spawn_reading(
+  group : @async.TaskGroup[Unit],
+  bin : String,
+  args : Array[String],
+  env : Map[String, String],
+  log_path : String,
+) -> (@process.Process, @process.ReadFromProcess)? {
+  let (reader, sink) = @process.read_from_process() catch { _ => return None }
+  let child = @process.spawn(
+    group,
+    bin,
+    args,
+    extra_env=env,
+    inherit_env=true,
+    stdout=sink,
+    stderr=@process.redirect_to_file(
+      log_path,
+      create_mode=@fs.CreateOrTruncate,
+    ),
+    cancel_handler=@process.graceful_cancel(timeout=2000),
+  ) catch {
+    _ => return None
+  }
+  Some((child, reader))
+}
+
+///|
+/// 从读者里读一行（含超时）。假端点第一行就是端口，读不到就说明它没起来。
+async fn read_line(reader : @process.ReadFromProcess, timeout_ms : Int) -> String {
+  let line = @async.with_timeout_opt(timeout_ms, async fn() {
+    reader.read_until("\n")
+  }) catch { _ => None }
+  match line {
+    Some(Some(text)) => text.trim(chars=" \t\r\n").to_owned()
+    _ => ""
+  }
+}
+
+// ---------------------------------------------------------------- 文件
+
+///|
+async fn read_text(path : String) -> String {
+  let data = @fs.read_file(path) catch { _ => return "" }
+  text_of(data)
+}
+
+///|
+async fn write_text(path : String, content : String) -> Bool {
+  @fs.write_file(path, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+///|
+async fn copy_file(from : String, to : String) -> Bool {
+  let content = @fs.read_file(from) catch { _ => return false }
+  @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+
+///|
+/// 构建产物在 POSIX 上没有 .exe，Windows 上有。两个都探一下，别让脚本自己
+/// 变成平台相关的。
+async fn bin_path(path_without_suffix : String) -> String {
+  let exe = path_without_suffix + ".exe"
+  if (@fs.exists(exe) catch { _ => false }) {
+    exe
+  } else {
+    path_without_suffix
+  }
+}
+
+///|
+/// 编译一个 .mbtx 并复制成独立文件（见文件头那段关于 moon 包装进程的说明）。
+async fn build_mbtx(src : String, out : String) -> Bool {
+  let built = run("moon", ["build", "--target", "native", src], {})
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    return false
+  }
+  let single = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single) catch { _ => false }) {
+    single
+  } else {
+    "scripts/_build/native/debug/build/single/single"
+  }
+  if !copy_file(single, out) {
+    return false
+  }
+  @fs.chmod(out, 0o755) catch { _ => () }
+  true
+}
+
+// ---------------------------------------------------------------- 主体
+
+///|
+let expected : String = "Hello from the mock server."
+
+///|
+async fn main {
+  guard @env.current_dir() is Some(root) else {
+    bail("拿不到当前目录")
+    return
+  }
+  @stdio.stdout.write("==> 构建\n") catch { _ => () }
+  let built = run("moon", ["build", "--target", "native"], {})
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    bail("moon build 失败")
+    return
+  }
+  let faceoff = bin_path("_build/native/debug/build/cmd/faceoff/faceoff")
+  let bench = bin_path("_build/native/debug/build/cmd/bench/bench")
+  if !(@fs.exists(faceoff) catch { _ => false }) ||
+    !(@fs.exists(bench) catch { _ => false }) {
+    bail("缺少构建产物：\{faceoff} / \{bench}")
+    return
+  }
+  let tmp = @fs.tmpdir(prefix="smoke") catch { _ => "" }
+  if tmp == "" {
+    bail("建不了临时目录")
+    return
+  }
+  @fs.mkdir(tmp, recursive=true) catch { _ => () }
+  if !build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
+    bail("mock 编译失败")
+    return
+  }
+  if !build_mbtx("scripts/check_incremental.mbtx", tmp + "/check-incremental") {
+    bail("check_incremental 编译失败")
+    return
+  }
+  let mock_bin = tmp + "/mock-endpoint"
+
+  @async.with_task_group(async fn(group) {
+    // 假端点挂在 group 上：脚本退出时它跟着结束，不会漏在后台监听端口。
+    let spawned = spawn_reading(
+      group,
+      mock_bin,
+      [],
+      { "MOCK_STREAM_DELAY": "0.4" },
+      tmp + "/mock.log",
+    )
+    let (mock, reader) = match spawned {
+      Some(pair) => pair
+      None => {
+        bail("起不了假端点")
+        return
+      }
+    }
+    let port = read_line(reader, 10000)
+    if port == "" {
+      bail("假端点没报出端口")
+      return
+    }
+    let base = "http://127.0.0.1:" + port + "/v1"
+    @stdio.stdout.write("mock server on 127.0.0.1:" + port + "\n") catch {
+      _ => ()
+    }
+    let keyed : Map[String, String] = {
+      "MOONLLM_BASE_URL": base,
+      "MOONLLM_API_KEY": "test-key",
+    }
+    let flags : Array[String] = ["--base-url", base, "--api-key", "test-key"]
+
+    // 1. 一次性：设置走环境变量
+    let one = run(faceoff, ["hi there"], keyed)
+    expect(
+      one.code == 0 && trim(one.out) == expected,
+      "一次性请求（环境变量）",
+      "code=\{one.code} out=\{one.out}",
+    )
+
+    // 2. 一次性：设置走命令行
+    let one_flags = run(faceoff, arg_append(flags, ["--model", "mock-a", "hi"]), {})
+    expect(
+      one_flags.code == 0 && trim(one_flags.out) == expected,
+      "一次性请求（命令行参数）",
+      "code=\{one_flags.code} out=\{one_flags.out}",
+    )
+
+    // 3. 流式
+    let streamed = run(faceoff, arg_append(flags, ["--stream", "hi"]), {})
+    expect(
+      streamed.code == 0 && trim(streamed.out) == expected,
+      "流式输出",
+      "code=\{streamed.code} out=\{streamed.out}",
+    )
+
+    // 4. 流式真的是增量投递，不是攒完再吐
+    let incremental = run(
+      tmp + "/check-incremental",
+      [abs_path(root, faceoff), base],
+      {},
+    )
+    expect(
+      incremental.code == 0,
+      "增量投递（首字节 vs 进程退出）",
+      incremental.err + incremental.out,
+    )
+
+    // 5. 从 stdin 读 prompt
+    let stdin_file = tmp + "/prompt.txt"
+    if write_text(stdin_file, "piped question\n") {
+      let out_file = tmp + "/stdin-out.txt"
+      let err_file = tmp + "/stdin-err.txt"
+      let code = @process.run(
+        faceoff,
+        flags,
+        inherit_env=true,
+        stdin=@process.redirect_from_file(stdin_file),
+        stdout=@process.redirect_to_file(
+          out_file,
+          create_mode=@fs.CreateOrTruncate,
+        ),
+        stderr=@process.redirect_to_file(
+          err_file,
+          create_mode=@fs.CreateOrTruncate,
+        ),
+      ) catch {
+        _ => -1
+      }
+      let got = trim(read_text(out_file))
+      expect(
+        code == 0 && got == expected,
+        "从 stdin 读 prompt",
+        "code=\{code} out=\{got} err=\{read_text(err_file)}",
+      )
+    } else {
+      bad("从 stdin 读 prompt", "写不了临时 prompt 文件")
+    }
+
+    // 6. 非 ASCII 错误体按 UTF-8 解码（不是当 UTF-16 重新解释）
+    let rate = run(faceoff, arg_append(flags, ["RATE_LIMIT"]), {})
+    expect(
+      rate.code != 0 && rate.err.contains("请求频率过高"),
+      "非 ASCII 错误体解码正确",
+      "code=\{rate.code} err=\{rate.err}",
+    )
+
+    // 7. 错 key：报 401，且不把 key 回显出来
+    let wrong = run(faceoff, ["--base-url", base, "--api-key", "wrong", "hi"], {})
+    expect(
+      wrong.code != 0 && wrong.err.contains("401"),
+      "错 key 报 401",
+      "code=\{wrong.code} err=\{wrong.err}",
+    )
+    expect(
+      !wrong.err.contains("wrong") && wrong.err.contains("***"),
+      "错 key 不回显密钥（上游回显了也要遮蔽）",
+      wrong.err,
+    )
+
+    // 8. bench 打同一个假端点
+    let runs_jsonl = tmp + "/runs.jsonl"
+    let bench_run = run(
+      bench,
+      [
+        "--base-url", base, "--api-key", "test-key",
+        "--models", "mock-a,mock-b",
+        "--prompt", "hello",
+        "--repeats", "1", "--max-tokens", "64",
+        "--json", runs_jsonl,
+      ],
+      {},
+    )
+    let bench_log = read_text(runs_jsonl)
+    expect(
+      bench_run.code == 0 &&
+      bench_run.out.contains("comparison (median per model)") &&
+      bench_run.out.contains("mock-b") &&
+      bench_log.contains("\"completion_tokens\":9") &&
+      bench_log.contains("\"reasoning_tokens\":4"),
+      "bench 端到端（报告 + 原始记录）",
+      "code=\{bench_run.code}",
+    )
+
+    // 9. 会清掉的 429 是真的重试：不重试的客户端会直接失败
+    let retry_jsonl = tmp + "/retry.jsonl"
+    let retried = run(
+      bench,
+      [
+        "--base-url", base, "--api-key", "test-key",
+        "--models", "mock-a",
+        "--prompt", "RATE_LIMIT_ONCE please try again",
+        "--repeats", "1", "--retry", "1", "--retry-backoff-ms", "50",
+        "--max-tokens", "64", "--json", retry_jsonl,
+      ],
+      {},
+    )
+    let retry_log = read_text(retry_jsonl)
+    expect(
+      retried.code == 0 &&
+      retry_log.contains("\"attempts\":2") &&
+      retry_log.contains("\"ok\":true") &&
+      retried.out.contains("failures 0   truncated 0   retried 1"),
+      "429 清掉之后真的重试，且计入重试",
+      "code=\{retried.code} log=\{retry_log}",
+    )
+
+    // 10. 一直 429：--retry 2 就是额外两次尝试，最后算「重试过且失败」
+    let give_up_jsonl = tmp + "/giveup.jsonl"
+    let gave_up = run(
+      bench,
+      [
+        "--base-url", base, "--api-key", "test-key",
+        "--models", "mock-a",
+        "--prompt", "RATE_LIMIT give up",
+        "--repeats", "1", "--retry", "2", "--retry-backoff-ms", "20",
+        "--max-tokens", "64", "--json", give_up_jsonl,
+      ],
+      {},
+    )
+    let give_up_log = read_text(give_up_jsonl)
+    expect(
+      gave_up.code != 0 &&
+      give_up_log.contains("\"attempts\":3") &&
+      give_up_log.contains("\"ok\":false") &&
+      gave_up.out.contains("failures 1   truncated 0   retried 1"),
+      "--retry n 真的是额外 n 次尝试（且计入失败与重试）",
+      "code=\{gave_up.code} log=\{give_up_log}",
+    )
+
+    // 11. 被预算截断的回复进截断计数，而不是当成功
+    let truncated_jsonl = tmp + "/truncated.jsonl"
+    let truncated = run(
+      bench,
+      [
+        "--base-url", base, "--api-key", "test-key",
+        "--models", "mock-a",
+        "--prompt", "TRUNCATE cut me off",
+        "--repeats", "1", "--max-tokens", "8",
+        "--json", truncated_jsonl,
+      ],
+      {},
+    )
+    let truncated_log = read_text(truncated_jsonl)
+    expect(
+      truncated.code == 0 &&
+      truncated_log.contains("\"finish_reason\":\"length\"") &&
+      truncated.err.contains("[truncated]") &&
+      truncated.out.contains("failures 0   truncated 1   retried 0"),
+      "截断被单独计数（记录 / 进度行 / 摘要三处）",
+      "code=\{truncated.code} log=\{truncated_log}",
+    )
+
+    // 12. 状态行走 stderr，stdout 仍然只有回复本身
+    let status = run(faceoff, ["hi there"], keyed)
+    expect(
+      trim(status.out) == expected &&
+      status.err.contains("-> POST") &&
+      status.err.contains("<- "),
+      "状态行走 stderr，stdout 保持干净",
+      "out=\{status.out}",
+    )
+
+    // 13. --quiet 关掉状态行
+    let quiet = run(faceoff, ["--quiet", "hi there"], keyed)
+    expect(
+      trim(quiet.out) == expected && trim(quiet.err) == "",
+      "--quiet 关掉状态行",
+      "err=\{quiet.err}",
+    )
+
+    // 14. 可见正文为空：告警 + 非零退出，而不是一个空行
+    let empty = run(faceoff, ["--max-tokens", "64", "THINK_ONLY answer me"], keyed)
+    expect(
+      empty.code != 0 &&
+      trim(empty.out) == "" &&
+      empty.err.contains("no visible content") &&
+      empty.err.contains("finish_reason: length"),
+      "空回复被告警并非零退出",
+      "code=\{empty.code} out=\{empty.out}",
+    )
+
+    // 15. --show-cot 把思考走 stderr
+    let cot = run(faceoff, arg_append(flags, ["--stream", "--show-cot", "hi"]), {})
+    expect(
+      trim(cot.out) == expected && cot.err.contains("weighing the question"),
+      "--show-cot 把思考过程送去 stderr",
+      "out=\{cot.out} err=\{cot.err}",
+    )
+
+    mock.cancel()
+    ignore(mock.wait() catch { _ => -1 })
+  })
+
+  let failures = results.filter(fn(line) { line.has_prefix("FAIL") }).length()
+  println("")
+  println("smoke: \{results.length() - failures} 项通过，\{failures} 项失败")
+  if failures > 0 {
+    c_exit(1)
+  }
+}
+
+///|
+fn trim(text : String) -> String {
+  text.trim(chars=" \t\r\n").to_owned()
+}
+
+///|
+/// 子进程收到的是绝对路径更稳：相对路径按它自己的工作目录解析。
+fn abs_path(root : String, path : String) -> String {
+  if path.has_prefix("/") || path.contains(":") {
+    path
+  } else {
+    root + "/" + path
+  }
+}

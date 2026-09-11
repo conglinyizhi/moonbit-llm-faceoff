@@ -69,7 +69,7 @@ def is_palindrome(s):
    `≻牥潲≻笺挢摯≥...`, which is UTF-16LE bytes rendered as UTF-8. The cause was
    `client.read_all().binary().to_unchecked_string()`: `to_unchecked_string`
    reinterprets raw bytes as UTF-16 code units instead of decoding UTF-8. Fixed
-   by using `read_all().text()`. `scripts/smoke.sh` now asserts on a non-ASCII
+   by using `read_all().text()`. `scripts/smoke.mbtx` now asserts on a non-ASCII
    error body so it cannot regress.
 
 3. **`@fs.write_file` does not create files by default.** Omitting `create`

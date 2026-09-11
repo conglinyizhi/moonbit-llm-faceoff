@@ -102,6 +102,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`smoke.sh` is now `smoke.mbtx`** (16 checks, same assertions, and it is what
+  `make ci` runs). The shell version needed `grep`, `sed`, `curl`, `seq`, `mktemp`
+  and a `source`d `lib.sh`; the MoonBit version needs nothing but the language and
+  `moonbitlang/async` — process spawning, output capture, file reads and string
+  assertions all exist there and work off POSIX. Two things it keeps from the
+  shell version on purpose: the mock is built and *copied* to a distinct file
+  before being spawned (spawning `moon run foo.mbtx` and killing it leaves the
+  real server orphaned), and the mock is attached to a task group so the script
+  cannot exit with a listener still running.
+
+  Unlike a `.mbt` file, a `.mbtx` script cannot import anything local — an import
+  of this module's own packages reports "module not found", it only consults the
+  registry — so each converted script carries its own small assertion/process
+  prologue rather than sharing one.
+
 - **The server no longer spawns `bench` through `/bin/sh`.** This is the one that
   actually kept the workbench off Windows: every run went through
   `spawn_orphan("/bin/sh", ["-c", "bench … > …; echo $? > exit_code"])`, and

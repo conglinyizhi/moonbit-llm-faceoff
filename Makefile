@@ -35,7 +35,7 @@ test:  ## unit tests, both modules
 	cd web && $(MOON) test --target native
 
 smoke:  ## the CLIs end to end, against a local mock endpoint
-	bash scripts/smoke.sh
+	$(MOON) run --target native scripts/smoke.mbtx
 
 api:  ## the server HTTP contract: overrides, exports, traversal guards
 	bash scripts/server-api.sh

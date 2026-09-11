@@ -17,7 +17,7 @@ bash scripts/server-api.sh    # server HTTP contract; asserts the key handling
 bash scripts/real-gateway.sh  # the same probes against a real gateway; needs a key (not in CI)
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
-bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
+moon run --target native scripts/smoke.mbtx   # the CLIs end to end against a local mock endpoint
 bash scripts/demo.sh          # zero-API-key demo
 ```
 
