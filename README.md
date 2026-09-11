@@ -485,6 +485,14 @@ From the page you can:
   was wrong. The verdict is saved the moment you click it, the note when you press
   存备注, and both live in that run's directory — so they show up in the Markdown
   copy and the static report too, and deleting a run takes its verdicts with it;
+- **read a distribution, not a single number**: the model cards put P50 next to
+  P10 / P20 / P99 for every metric, and the comparison table has a percentile
+  switch (P10 / P20 / P50 / P99). They answer different questions — P50 is "how
+  fast is it usually", P99 is "does it occasionally hang", P10 is "how fast when
+  things go well" — and a median alone answers only the first. Percentiles
+  interpolate between order statistics, the same rule numpy and R's default use;
+  with few samples the tails sit near the extremes, and the `n` beside them is
+  what says whether to believe it;
 - **read two long answers side by side**: the results section switches between
   one block per model, columns (one per model, equal width, each with its own
   scrollbar and a pinned header), and a diff. Long answers are the case that

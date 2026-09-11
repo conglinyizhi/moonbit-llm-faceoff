@@ -92,11 +92,17 @@ pub fn stat(label : String, stats : MetricStats?, unit : String) -> @html.Html {
   match stats {
     None => values.push(txt("—"))
     Some(stats) => {
-      values.push(txt(format_value(Some(stats.median), unit)))
+      // 主值是 P50，副行把另外三个分位排出来：卡片不跟着对比表的分位切换走，
+      // 一张卡上就能看全「顺的时候多快、通常多快、最差的那次多慢」。
+      // 副行给分位数而不是 min~max：极值被一两次抖动就带跑了，P10–P99 这段
+      // 才是「它平时在哪」。
+      values.push(txt(format_value(Some(stats.p50), unit)))
       if stats.n > 1 {
         values.push(
           el("span", "stat-range", [
-            txt("  \{fmt_number(stats.min)}–\{fmt_number(stats.max)}"),
+            txt(
+              "  P10 \{fmt_number(stats.p10)} · P20 \{fmt_number(stats.p20)} · P99 \{fmt_number(stats.p99)}",
+            ),
           ]),
         )
       }
@@ -112,20 +118,26 @@ pub fn model_cards(data : PageData) -> @html.Html {
 
 ///|
 /// 各模型中位数对比表；不足两个模型时不渲染。
-pub fn comparison(data : PageData) -> @html.Html {
+pub fn comparison(
+  data : PageData,
+  which? : String = "p50",
+  switch? : @html.Html,
+) -> @html.Html {
   if data.summaries.length() < 2 {
     return @html.fragment([])
   }
   let head_cells = [
     @html.th([txt("指标")]),
-    ..data.summaries.map(fn(summary) { @html.th([txt(summary.model)]) }),
+    ..data.summaries.map(fn(summary) {
+      @html.th([txt("\{summary.model}  \{percentile_label(which)}")])
+    }),
   ]
   let rows = metric_rows().map(fn(row) {
     let (label, key, unit) = row
     let cells = [
       @html.td([txt(label)]),
       ..data.summaries.map(fn(summary) {
-        @html.td([txt(format_value(summary.metric(key), unit))])
+        @html.td([txt(format_value(summary.metric_at(key, which), unit))])
       }),
     ]
     @html.tr(cells)
@@ -133,10 +145,26 @@ pub fn comparison(data : PageData) -> @html.Html {
   el("section", "", [
     el("h2", "section-title", [
       txt("对比"),
-      el("span", "", [txt("中位数")]),
+      el("span", "", [txt(percentile_label(which))]),
+      match switch {
+        Some(control) => el("span", "view-switch", [control])
+        None => @html.fragment([])
+      },
     ]),
     @html.table([@html.thead([@html.tr(head_cells)]), @html.tbody(rows)]),
   ])
+}
+
+///|
+/// 分位数的显示名。P50 就是中位数，但表头写「P50」比写「中位数」更能对上那排
+/// 按钮，所以标题行这里统一用 P 名。
+pub fn percentile_label(which : String) -> String {
+  match which {
+    "p10" => "P10"
+    "p20" => "P20"
+    "p99" => "P99"
+    _ => "P50"
+  }
 }
 
 ///|
@@ -494,11 +522,19 @@ pub fn results_section(
   data : PageData,
   mode? : String = "stacked",
   switch? : @html.Html,
+  which? : String = "p50",
+  percentile_switch? : @html.Html,
   editor? : (String, String) -> @html.Html,
 ) -> @html.Html {
+  // 名字对不上的可选参数只能自己拆开：`switch=<别的名字>?` 会把 Option 本身
+  // 当成值传下去，而这里要的是「没有就不渲染任何东西」。
+  let for_comparison = match percentile_switch {
+    Some(control) => control
+    None => @html.fragment([])
+  }
   @html.fragment([
     model_cards(data),
-    comparison(data),
+    comparison(data, which~, switch=for_comparison),
     answers(data, mode~, switch?, editor?),
   ])
 }

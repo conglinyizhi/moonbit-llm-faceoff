@@ -28,7 +28,7 @@ pub fn case_block(CaseBlock, mode? : String, editor? : (String, String) -> @html
 
 pub fn collapse_same(Array[DiffLine], Int) -> Array[DiffLine]
 
-pub fn comparison(PageData) -> @html.Html
+pub fn comparison(PageData, which? : String, switch? : @html.Html) -> @html.Html
 
 pub fn diff_block(Answer, Answer) -> @html.Html
 
@@ -50,7 +50,7 @@ pub fn live_row(LiveProgress?) -> @html.Html
 
 pub fn metric_rows() -> Array[(String, String, String)]
 
-pub fn model_cards(PageData) -> @html.Html
+pub fn model_cards(PageData, which? : String) -> @html.Html
 
 pub fn number_field(Map[String, Json], String, Double) -> Double
 
@@ -62,19 +62,21 @@ pub fn parse_page_data(String) -> Result[PageData, String]
 
 pub fn parse_page_data_json(Json) -> Result[PageData, String]
 
+pub fn percentile_label(String) -> String
+
 pub fn plain(String, Array[@html.Html]) -> @html.Html
 
 pub fn results_markdown(PageData) -> String
 
-pub fn results_section(PageData, mode? : String, switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn results_section(PageData, mode? : String, switch? : @html.Html, which? : String, percentile_switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
 
-pub fn stat(String, MetricStats?, String) -> @html.Html
+pub fn stat(String, MetricStats?, String, which? : String) -> @html.Html
 
-pub fn stat_list(ModelSummary) -> @html.Html
+pub fn stat_list(ModelSummary, which? : String) -> @html.Html
 
 pub fn string_field(Map[String, Json], String, String) -> String
 
-pub fn summary_card(ModelSummary) -> @html.Html
+pub fn summary_card(ModelSummary, which? : String) -> @html.Html
 
 pub fn txt(String) -> @html.Html
 
@@ -163,9 +165,14 @@ pub(all) struct MetricStats {
   median : Double
   min : Double
   max : Double
+  p10 : Double
+  p20 : Double
+  p50 : Double
+  p99 : Double
 } derive(Eq)
 pub fn MetricStats::equal(Self, Self) -> Bool
 pub fn MetricStats::not_equal(Self, Self) -> Bool
+pub fn MetricStats::percentile(Self, String) -> Double
 
 pub(all) struct ModelSummary {
   model : String
@@ -177,6 +184,7 @@ pub(all) struct ModelSummary {
 } derive(Eq)
 pub fn ModelSummary::equal(Self, Self) -> Bool
 pub fn ModelSummary::metric(Self, String) -> Double?
+pub fn ModelSummary::metric_at(Self, String, String) -> Double?
 pub fn ModelSummary::metric_stats(Self, String) -> MetricStats?
 pub fn ModelSummary::not_equal(Self, Self) -> Bool
 

@@ -11,7 +11,18 @@ fn sample_data() -> PageData {
         failures: 0,
         truncated: 0,
         retried: 0,
-        metrics: { "ttft_ms": { n: 2, median: 2.0, min: 2.0, max: 2.0, } },
+        metrics: {
+          "ttft_ms": {
+            n: 2,
+            median: 2.0,
+            min: 2.0,
+            max: 2.0,
+            p10: 2.0,
+            p20: 2.0,
+            p50: 2.0,
+            p99: 2.0,
+          },
+        },
       },
       {
         model: "mock-b",
@@ -19,7 +30,18 @@ fn sample_data() -> PageData {
         failures: 1,
         truncated: 1,
         retried: 3,
-        metrics: { "ttft_ms": { n: 2, median: 0.5, min: 0.0, max: 1.0, } },
+        metrics: {
+          "ttft_ms": {
+            n: 2,
+            median: 0.5,
+            min: 0.0,
+            max: 1.0,
+            p10: 0.1,
+            p20: 0.2,
+            p50: 0.5,
+            p99: 1.0,
+          },
+        },
       },
     ],
     cases: [

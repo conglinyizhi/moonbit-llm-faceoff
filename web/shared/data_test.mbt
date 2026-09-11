@@ -88,3 +88,41 @@ test "live progress tolerates a missing field and a missing payload" {
   assert_eq(parse_live(None, None) is None, true)
   assert_eq(parse_live(Some(Json::object({})), Some(1.0)) is None, true)
 }
+
+///|
+/// 分位数解析：老的结果文件里只有 median（那时还没存分位数），这时四个分位
+/// 都回退到中位数——历史运行不该因为工具升级就打不开。
+test "metric percentiles fall back to the median when absent" {
+  let legacy =
+    #|{"cases":[],"summaries":[{"model":"m","runs":2,"metrics":{"ttft_ms":{"n":2,"median":12.5,"min":10,"max":15}}}]}
+  match parse_page_data(legacy) {
+    Err(message) => fail("parse failed: " + message)
+    Ok(data) => {
+      let stats = data.summaries[0].metrics.get("ttft_ms").unwrap()
+      assert_eq(stats.p10, 12.5)
+      assert_eq(stats.p20, 12.5)
+      assert_eq(stats.p50, 12.5)
+      assert_eq(stats.p99, 12.5)
+      assert_eq(stats.percentile("p99"), 12.5)
+      assert_eq(stats.percentile("没听说过的分位"), 12.5)
+    }
+  }
+}
+
+///|
+test "metric percentiles decode when present" {
+  let fresh =
+    #|{"cases":[],"summaries":[{"model":"m","runs":9,"metrics":{"total_ms":{"n":9,"median":40,"min":38,"max":60,"p10":38.5,"p20":39,"p50":40,"p99":58}}}]}
+  match parse_page_data(fresh) {
+    Err(message) => fail("parse failed: " + message)
+    Ok(data) => {
+      let summary = data.summaries[0]
+      assert_eq(summary.metric_at("total_ms", "p10"), Some(38.5))
+      assert_eq(summary.metric_at("total_ms", "p20"), Some(39.0))
+      assert_eq(summary.metric_at("total_ms", "p50"), Some(40.0))
+      assert_eq(summary.metric_at("total_ms", "p99"), Some(58.0))
+      // 没有的指标仍然是「没有」，不是 0
+      assert_eq(summary.metric_at("ttft_ms", "p99") is None, true)
+    }
+  }
+}

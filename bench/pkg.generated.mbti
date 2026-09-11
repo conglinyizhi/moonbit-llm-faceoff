@@ -141,6 +141,10 @@ pub(all) struct Stats {
   median : Double
   min : Double
   max : Double
+  p10 : Double
+  p20 : Double
+  p50 : Double
+  p99 : Double
 }
 pub fn Stats::of(Array[Double]) -> Self?
 

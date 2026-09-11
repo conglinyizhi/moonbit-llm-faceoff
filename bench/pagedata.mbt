@@ -85,6 +85,10 @@ fn put_stats(metrics : Map[String, Json], key : String, stats : Stats?) -> Unit 
         "mean": Json::number(stats.mean),
         "min": Json::number(stats.min),
         "max": Json::number(stats.max),
+        "p10": Json::number(stats.p10),
+        "p20": Json::number(stats.p20),
+        "p50": Json::number(stats.p50),
+        "p99": Json::number(stats.p99),
       })
   }
 }

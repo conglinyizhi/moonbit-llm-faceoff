@@ -7,6 +7,16 @@ pub(all) struct Stats {
   median : Double
   min : Double
   max : Double
+  /// Percentiles, by linear interpolation between order statistics (the same
+  /// rule numpy and R's default use, so the numbers agree with whatever else
+  /// you plot them in).
+  ///
+  /// `p50` is `median`; both are kept because "median" is what the familiar
+  /// view calls it and "p50" is what the percentile switch calls it.
+  p10 : Double
+  p20 : Double
+  p50 : Double
+  p99 : Double
 }
 
 ///|
@@ -33,7 +43,34 @@ pub fn Stats::of(values : Array[Double]) -> Stats? {
     median,
     min: sorted[0],
     max: sorted[n - 1],
+    p10: percentile(sorted, 0.10),
+    p20: percentile(sorted, 0.20),
+    p50: median,
+    p99: percentile(sorted, 0.99),
   })
+}
+
+///|
+/// The `q`-th quantile of an already sorted array, by linear interpolation.
+///
+/// With few samples the tails are just the extremes (`p99` of 4 runs is the
+/// largest of them) — that is the honest answer, and the `n` next to it is what
+/// says whether to believe the tail.
+fn percentile(sorted : Array[Double], q : Double) -> Double {
+  let n = sorted.length()
+  if n == 0 {
+    return 0.0
+  }
+  if n == 1 {
+    return sorted[0]
+  }
+  let position = q * (n - 1).to_double()
+  let lower = position.to_int()
+  if lower >= n - 1 {
+    return sorted[n - 1]
+  }
+  let fraction = position - lower.to_double()
+  sorted[lower] * (1.0 - fraction) + sorted[lower + 1] * fraction
 }
 
 ///|
