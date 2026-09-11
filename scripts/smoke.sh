@@ -110,4 +110,53 @@ grep -q '"reasoning_tokens":4' "$tmpdir/runs.jsonl" \
 rm -rf "$tmpdir"
 echo "ok: bench harness end to end"
 
+# 9. a 429 that clears: the gateway pushes back once and then serves. A client
+#    that only pretends to retry fails outright here, and one that really does
+#    leaves attempts = 2 in the record. The mock's RATE_LIMIT_ONCE switch is
+#    what makes a *successful* retry observable at all.
+tmpdir=$(mktemp -d)
+"$bench_bin" --base-url "http://127.0.0.1:$port/v1" --api-key test-key \
+  --models mock-a --prompt "RATE_LIMIT_ONCE please try again" --repeats 1 \
+  --retry 1 --retry-backoff-ms 50 --max-tokens 64 \
+  --json "$tmpdir/runs.jsonl" >"$tmpdir/report.txt" 2>"$tmpdir/progress.txt" \
+  || fail "bench did not recover from a single 429"
+grep -q '"attempts":2' "$tmpdir/runs.jsonl" \
+  || fail "the 429 was not retried: $(cat "$tmpdir/runs.jsonl")"
+grep -q '"ok":true' "$tmpdir/runs.jsonl" \
+  || fail "the retry did not produce a result: $(cat "$tmpdir/runs.jsonl")"
+grep -qE 'failures 0   truncated 0   retried 1' "$tmpdir/report.txt" \
+  || fail "the retried run was not counted as retried: $(cat "$tmpdir/report.txt")"
+echo "ok: a 429 is retried, and the retry is counted"
+
+# 10. a 429 that never clears: --retry 2 must mean three HTTP attempts, and the
+#     run must end up counted as both retried and failed.
+"$bench_bin" --base-url "http://127.0.0.1:$port/v1" --api-key test-key \
+  --models mock-a --prompt "RATE_LIMIT give up" --repeats 1 \
+  --retry 2 --retry-backoff-ms 20 --max-tokens 64 \
+  --json "$tmpdir/runs.jsonl" >"$tmpdir/report.txt" 2>/dev/null \
+  && fail "bench should exit non-zero when every attempt is rate limited"
+grep -q '"attempts":3' "$tmpdir/runs.jsonl" \
+  || fail "--retry 2 did not produce 3 attempts: $(cat "$tmpdir/runs.jsonl")"
+grep -q '"ok":false' "$tmpdir/runs.jsonl" \
+  || fail "a rate-limited run was not recorded as a failure"
+grep -qE 'failures 1   truncated 0   retried 1' "$tmpdir/report.txt" \
+  || fail "a failed retry was not counted: $(cat "$tmpdir/report.txt")"
+echo "ok: --retry n really means n extra attempts, counted as retried + failed"
+
+# 11. a reply cut off by the token budget: finish_reason = length has to reach
+#     the record, the progress line, and the summary counter. Counting it as a
+#     plain success would silently compare a truncated answer on speed.
+"$bench_bin" --base-url "http://127.0.0.1:$port/v1" --api-key test-key \
+  --models mock-a --prompt "TRUNCATE cut me off" --repeats 1 --max-tokens 8 \
+  --json "$tmpdir/runs.jsonl" >"$tmpdir/report.txt" 2>"$tmpdir/progress.txt" \
+  || fail "bench exited non-zero on a truncated reply"
+grep -q '"finish_reason":"length"' "$tmpdir/runs.jsonl" \
+  || fail "finish_reason was not recorded: $(cat "$tmpdir/runs.jsonl")"
+grep -q '\[truncated\]' "$tmpdir/progress.txt" \
+  || fail "the progress line did not flag the truncation"
+grep -qE 'failures 0   truncated 1   retried 0' "$tmpdir/report.txt" \
+  || fail "the truncation was not counted: $(cat "$tmpdir/report.txt")"
+rm -rf "$tmpdir"
+echo "ok: a truncated reply is counted separately from a failure"
+
 echo "smoke: all checks passed"

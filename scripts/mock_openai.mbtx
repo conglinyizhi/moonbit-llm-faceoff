@@ -11,6 +11,11 @@
 ///   - 鉴权失败 401
 ///   - 指令里含 RATE_LIMIT → 429，正文是**原始 UTF-8** 中文
 ///     （客户端若把字节当 UTF-16 重新解释就会出乱码，这条专门用来抓那个错）
+///   - 指令里含 RATE_LIMIT_ONCE → **只有第一次** 429，之后正常回复。
+///     用来验证重试真的是重试：不重试的客户端直接失败，重试成功的客户端
+///     会在结果里留下 attempts > 1
+///   - 指令里含 TRUNCATE → 回复正常，但 finish_reason 是 length，
+///     用来验证截断计数不是摆设
 ///   - stream: true → chunked SSE：角色块、思考碎片、正文碎片、finish、
 ///     usage（choices 为空数组）、[DONE]
 ///   - 否则 → 一次性 JSON
@@ -49,6 +54,31 @@ let reasoning_tokens : Int = 4
 /// 而不是被转义成 \uXXXX 的纯 ASCII。测试要验的正是多字节解码。
 let rate_limit_body : String =
   "{\"error\":{\"code\":\"rate_limit_exceeded\",\"message\":\"请求频率过高（已触发每分钟请求数限制），请稍后重试\",\"type\":\"rate_limit_exceeded\"}}"
+
+///|
+/// RATE_LIMIT_ONCE 已经被用掉几次。进程级的，够用：脚本里这个开关只在一条
+/// 用例里出现，而且只出现一次。
+let rate_limit_once_seen : Ref[Int] = Ref(0)
+
+///|
+/// 这个请求是不是该被 429 掉。
+///
+/// 先判 ONCE：`RATE_LIMIT_ONCE` 本身以 `RATE_LIMIT` 开头，顺序反了的话
+/// ONCE 永远走不到。
+fn rate_limited(prompt : String) -> Bool {
+  if prompt.contains("RATE_LIMIT_ONCE") {
+    let seen = rate_limit_once_seen.val
+    rate_limit_once_seen.val = seen + 1
+    return seen == 0
+  }
+  prompt.contains("RATE_LIMIT")
+}
+
+///|
+/// 这个请求是不是要报「被 token 预算截断」。
+fn truncated(prompt : String) -> Bool {
+  prompt.contains("TRUNCATE")
+}
 
 ///|
 async fn main {
@@ -122,14 +152,16 @@ async fn handle(
     send_json_error(conn, 400, "request has no messages")
     return
   }
-  if prompt_text(messages).contains("RATE_LIMIT") {
+  let prompt = prompt_text(messages)
+  if rate_limited(prompt) {
     send_body(conn, 429, "application/json; charset=utf-8", rate_limit_body)
     return
   }
+  let finish = if truncated(prompt) { "length" } else { "stop" }
   if obj.get("stream") is Some(True) {
-    stream_reply(conn, model)
+    stream_reply(conn, model, finish)
   } else {
-    json_reply(conn, model)
+    json_reply(conn, model, finish)
   }
 }
 
@@ -154,7 +186,11 @@ fn prompt_text(messages : Array[Json]) -> String {
 
 ///|
 /// 一次性回复。
-async fn json_reply(conn : @http.ServerConnection, model : String) -> Unit {
+async fn json_reply(
+  conn : @http.ServerConnection,
+  model : String,
+  finish : String,
+) -> Unit {
   let payload = Json::object({
     "id": Json::string("mock-1"),
     "object": Json::string("chat.completion"),
@@ -167,7 +203,7 @@ async fn json_reply(conn : @http.ServerConnection, model : String) -> Unit {
           "role": Json::string("assistant"),
           "content": Json::string(reply),
         }),
-        "finish_reason": Json::string("stop"),
+        "finish_reason": Json::string(finish),
       }),
     ]),
     "usage": usage_object(),
@@ -182,7 +218,11 @@ async fn json_reply(conn : @http.ServerConnection, model : String) -> Unit {
 ///|
 /// 流式回复。send_response 不带 Content-Length，服务端会自动用 chunked 编码，
 /// 所以配合 flush 就是真正的增量投递。
-async fn stream_reply(conn : @http.ServerConnection, model : String) -> Unit {
+async fn stream_reply(
+  conn : @http.ServerConnection,
+  model : String,
+  finish : String,
+) -> Unit {
   conn.send_response(200, "OK", extra_headers={
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -194,7 +234,7 @@ async fn stream_reply(conn : @http.ServerConnection, model : String) -> Unit {
     @async.sleep(delay_ms) catch { _ => () }
     event(conn, chunk(model, content_delta(fragment), None))
   }
-  event(conn, chunk(model, Map([]), Some("stop")))
+  event(conn, chunk(model, Map([]), Some(finish)))
   event(conn, usage_event(model))
   event(conn, "[DONE]")
   conn.end_response()

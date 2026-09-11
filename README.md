@@ -524,11 +524,11 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | suite | covers |
 | --- | --- |
 | `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
-| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock |
+| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 
-Three of these exist because the obvious version would pass on a broken
+Four of these exist because the obvious version would pass on a broken
 implementation:
 
 - **Incremental delivery.** The mock sleeps between fragments, and the test
@@ -541,6 +541,13 @@ implementation:
   with eight distinct ids. A single-request test passes even while the id
   allocation is a read-modify-write counter — it only breaks when two requests
   arrive together, which is exactly what a hand-run test never does.
+- **Retry and truncation counters.** The mock can turn a 429 off after the
+  first request (`RATE_LIMIT_ONCE`), which is the only shape in which a
+  *successful* retry is observable: the test asserts `attempts: 2` and
+  `retried: 1` in the same run. A client that never actually retried fails
+  outright instead. And a reply whose `finish_reason` is `length` has to land
+  in the truncation counter — counting it as a plain success would quietly
+  average a cut-off answer into the speed numbers.
 
 `scripts/web-e2e.sh` drives Chromium over the DevTools protocol and waits in
 real time. It deliberately does **not** use `--virtual-time-budget`: virtual

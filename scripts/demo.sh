@@ -2,7 +2,7 @@
 #
 # 零 API key、零注册的本地演示。
 #
-# 起一个假的 OpenAI 兼容端点（scripts/mock_openai.py），然后把三条主要路径
+# 起一个假的 OpenAI 兼容端点（scripts/mock_openai.mbtx），然后把三条主要路径
 # 各走一遍：单次问答、流式输出、两个"模型"的对比。全程离线。
 #
 # 第一次接触这个项目的话，从这里开始最省事：
