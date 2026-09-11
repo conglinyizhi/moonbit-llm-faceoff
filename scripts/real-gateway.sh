@@ -158,10 +158,13 @@ ev_head() {
     echo
     echo "四个探针各自回答一个问题：真实端点能不能出结果、分片是不是真的增量到达、"
     echo "鉴权失败会不会被吞掉或把 key 吐出来、被 token 预算截断的回复会不会被当成功。"
+    echo ""
+    echo "下面的命令是实际跑的那一条，照抄能跑：二进制就在仓库里（构建产物不在 PATH 上），"
+    echo "端点 / 模型 / 密钥来自上面那三个环境变量。"
   } >"$ev"
 }
 
-# ev_section <标题> <命令形状（不含 key）>
+# ev_section <标题> <实际跑的命令行（不含 key）>
 ev_section() {
   {
     echo
@@ -241,7 +244,7 @@ say
 
 say "==> 1/4 one-shot"
 prompt_one="用一句话说明什么是甲板风。"
-ev_section "1. one-shot" "faceoff --max-tokens 64 \"$prompt_one\"（端点/模型/密钥来自环境变量）"
+ev_section "1. one-shot" "$FACEOFF_BIN --max-tokens 64 \"$prompt_one\""
 "$FACEOFF_BIN" --max-tokens 64 "$prompt_one" >"$tmp/one.out" 2>"$tmp/one.err"
 code=$?
 if [ $code -ne 0 ]; then
@@ -262,7 +265,7 @@ fi
 
 say "==> 2/4 streaming"
 prompt_stream="用大约 150 个字说明为什么流式输出对交互体验重要，不要用列表。"
-ev_section "2. streaming" "check_stream.mbtx <faceoff> \"$prompt_stream\""
+ev_section "2. streaming" "$STREAM_BIN $FACEOFF_BIN \"$prompt_stream\""
 if "$STREAM_BIN" "$FACEOFF_BIN" "$prompt_stream" >"$tmp/stream.out" 2>"$tmp/stream.err"; then
   ev_body "$tmp/stream.out"
   ev_ok
@@ -279,7 +282,7 @@ say "==> 3/4 错 key"
 # 故意无效的 key。这里必须走命令行：要的就是「绕过环境里那把真 key」，
 # 而且它不是任何人的凭证。
 bad_key="sk-invalid-key-for-faceoff-check-0000"
-ev_section "3. 错 key" "faceoff --api-key <故意无效的 key> --max-tokens 16 \"hi\""
+ev_section "3. 错 key" "$FACEOFF_BIN --api-key <故意无效的 key> --max-tokens 16 \"hi\""
 "$FACEOFF_BIN" --api-key "$bad_key" --max-tokens 16 "hi" >"$tmp/bad.out" 2>"$tmp/bad.err"
 code=$?
 ev_body "$tmp/bad.err"
@@ -306,7 +309,7 @@ say "==> 4/4 截断"
 prompt_trunc="写一段大约 200 字的说明。"
 trunc_tokens="${REAL_TRUNCATE_MAX_TOKENS:-8}"
 bench_common=(--models "$model" --repeats 1)
-ev_section "4. 截断" "bench --models $model --prompt \"$prompt_trunc\" --repeats 1 --max-tokens $trunc_tokens"
+ev_section "4. 截断" "$BENCH_BIN --models $model --prompt \"$prompt_trunc\" --repeats 1 --max-tokens $trunc_tokens"
 "$BENCH_BIN" "${bench_common[@]}" --prompt "$prompt_trunc" --max-tokens "$trunc_tokens" \
   --json "$tmp/trunc.jsonl" >"$tmp/trunc.report" 2>"$tmp/trunc.err"
 code=$?
@@ -339,7 +342,7 @@ if [ "$compare" = 1 ]; then
     echo "找不到用例集 $cases（REAL_CASES 可以指定别的）" >&2
     exit 2
   fi
-  ev_section "5. 双模型对比" "bench --models $model,$model_b --cases $cases --repeats $repeats"
+  ev_section "5. 双模型对比" "$BENCH_BIN --models $model,$model_b --cases $cases --repeats $repeats"
   "$BENCH_BIN" --models "$model,$model_b" --cases "$cases" --repeats "$repeats" \
     --max-tokens 512 --json "$runs_out" >"$tmp/compare.report" 2>"$tmp/compare.err"
   code=$?

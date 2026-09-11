@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web real-gateway fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web real-gateway install uninstall fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -43,8 +43,29 @@ api:  ## the server HTTP contract: overrides, exports, traversal guards
 e2e:  ## browser end to end; needs chromium, and it is slow
 	bash scripts/web-e2e.sh
 
-real-gateway:  ## against a real gateway; needs MOONLLM_BASE_URL / MOONLLM_API_KEY, not in CI
+# The one target that needs a real endpoint: export MOONLLM_BASE_URL,
+# MOONLLM_API_KEY and MOONLLM_MODEL first. Deliberately not part of `make ci`.
+real-gateway:  ## probes against a real gateway; needs a key, not in CI
 	bash scripts/real-gateway.sh
+
+# `moon install` copies the built main packages into a bin directory. The default
+# is the MoonBit toolchain's own ~/.moon/bin: a **per-user** directory, no sudo,
+# nothing touched outside your home. It is that way because that directory is
+# already on PATH — that is the whole point — not because it is a system
+# location. Override BIN_DIR to put the binaries somewhere else instead.
+BIN_DIR ?= $(HOME)/.moon/bin
+
+install:  ## install the CLIs into $BIN_DIR (per-user, no sudo)
+	@echo "installing faceoff + bench into $(BIN_DIR)"
+	@echo "（家目录下的普通目录，不需要 sudo，不动系统）"
+	$(MOON) install ./cmd/... --bin "$(BIN_DIR)"
+	@echo
+	@echo "装好了：$(BIN_DIR)/faceoff、$(BIN_DIR)/bench"
+	@echo "撤掉：make uninstall（或直接 rm 那两个文件）"
+
+uninstall:  ## remove the CLIs from $BIN_DIR
+	rm -f "$(BIN_DIR)/faceoff" "$(BIN_DIR)/bench"
+	@echo "已从 $(BIN_DIR) 移除 faceoff、bench"
 
 demo:  ## zero-API-key demo of all three paths
 	bash scripts/demo.sh
