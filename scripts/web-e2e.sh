@@ -71,6 +71,9 @@ mock_port=$(cat "$tmp/mock.port")
   MOONLLM_API_KEY=test-key \
   LLM_WEB_MODELS="mock-a,mock-b" \
   LLM_WEB_PORT="$WEB_PORT" \
+  LLM_WEB_WORK="$tmp/runs" \
+  LLM_WEB_CASES_DIR="$tmp/cases" \
+  LLM_WEB_PRESETS="$tmp/presets.json" \
   ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web.port" 2>"$tmp/server.log") &
 web_pid=$!
 for _ in $(seq 1 200); do
@@ -157,6 +160,32 @@ grep -q 'weighing the question' "$tmp/run.html" || fail "思考全文没有渲�
 grep -q 'primary busy' "$tmp/run.html" && fail "跑完之后按钮仍是忙碌态" "$tmp/run.html"
 grep -q '开始评测' "$tmp/run.html" || fail "跑完之后没有回到可点的开始按钮" "$tmp/run.html"
 echo "ok: 浏览器里跑完一次评测并渲染出了结果（按钮已回到可用态）"
+
+echo "==> 运行记录侧栏"
+grep -q '运行记录' "$tmp/run.html" || fail "页面里没有运行记录侧栏" "$tmp/run.html"
+grep -q 'history-item' "$tmp/run.html" || fail "侧栏里没有历史条目" "$tmp/run.html"
+# 规模描述（N 模型 × M 用例 × K 次）不写死数字：web/runs 可能还有别的运行，
+# 而且这个测试自己跑几次就会变。只要格式在就说明数据到位了。
+grep -qE '[0-9]+ 模型 × [0-9]+ 用例 × [0-9]+ 次' "$tmp/run.html" ||
+  fail "历史条目没描述这次跑的规模" "$tmp/run.html"
+# 点「打开」应该切到只读的历史视图：顶上一条横幅，下面是那一次的答案
+history_probe='(async () => {
+  const item = document.querySelector(".history-item");
+  if (!item) { return { error: "no history item" }; }
+  const label = item.querySelector(".history-models").textContent;
+  item.querySelectorAll(".history-actions button")[0].click();
+  await new Promise((r) => setTimeout(r, 2000));
+  const banner = document.querySelector(".viewed-banner");
+  return { label: label, banner: banner && banner.textContent,
+           answers: document.querySelectorAll(".answer").length };
+})()'
+dump_page_script "$run_url" 8000 "$tmp/history.html" "$history_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/history.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '正在看历史运行' ||
+  fail "点「打开」没切到历史视图：$probe"
+echo "$probe" | grep -q '"answers":[1-9]' ||
+  fail "历史视图里没渲染出那次的结果：$probe"
+echo "ok: 侧栏列得出历史，点开能看历史结果（只读）"
 
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
@@ -293,9 +322,28 @@ unique=$(printf '%s\n' $ids | sort -u | grep -c . || true)
 echo "ok: 8 个并发运行拿到 8 个不同 id"
 
 echo "==> 服务端运行目录"
-runs=$(find web/runs -maxdepth 1 -type d -name 'run-*' | wc -l)
+runs=$(find "$tmp/runs" -maxdepth 1 -type d -name 'run-*' 2>/dev/null | wc -l)
 [ "$runs" -ge 1 ] || fail "服务端没有留下运行记录"
 echo "ok: 运行记录 $runs 份"
+
+# 删除放在最后：它会真的删掉一条历史，前面那些断言还要用这些运行。
+echo "==> 删除一条历史"
+delete_probe='(async () => {
+  const before = document.querySelectorAll(".history-item").length;
+  const item = document.querySelector(".history-item");
+  if (!item) { return { error: "no history item" }; }
+  item.querySelectorAll(".history-actions button")[2].click();
+  await new Promise((r) => setTimeout(r, 1500));
+  return { before: before, after: document.querySelectorAll(".history-item").length };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/delete.html" "$delete_probe" 2000
+probe=$(grep -o 'SCRIPT .*' "$tmp/delete.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"after":' || fail "删除探针没跑起来：$probe"
+before=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')
+after=$(echo "$probe" | sed -n 's/.*"after":\([0-9]*\).*/\1/p')
+[ -n "$before" ] && [ -n "$after" ] && [ "$after" -lt "$before" ] ||
+  fail "点「删除」之后列表没变短（$before → $after）：$probe"
+echo "ok: 点「删除」之后那条从列表里消失（$before → $after）"
 
 echo
 echo "web e2e: 全部通过"

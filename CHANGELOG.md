@@ -102,6 +102,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The page is a workbench: the left column is the run history.** Every run that
+  has happened is listed with its time, models, scale and counters; one click
+  opens it read-only (the answer/chain-of-thought view, and the export links
+  follow the run you are reading), `重跑` starts exactly the parameters that run
+  used — read back from its `request.json`, gateway address included, because the
+  key was never stored — and `删除` removes it. The list refreshes itself when a
+  run finishes.
+
+  The current run and the viewed run are separate state on purpose: sharing one
+  slot means a finished run silently replaces the history you were reading. A
+  failed run has no `data.json`, so opening one shows its `stderr` tail instead
+  of a blank page.
+
+  `scripts/web-e2e.sh` drives it in a real browser (open → read-only banner +
+  answers, delete → the item goes away) and — like `scripts/server-api.sh` — the
+  test's server now points `runs/`, `cases/` and `presets.json` at a temp
+  directory, so running the suite cannot delete your data.
+
 - **The server side of a test workbench: run history, named case sets, presets.**
   Until now the page could start a run and show that run; the things that made a
   test *manageable* were all file work by hand. The API grew:

@@ -443,6 +443,9 @@ From the page you can:
   optional and fall back to the server's environment;
 - watch progress, the live failure/retry/truncation counts, and a collapsible
   tail of the run's `stderr`;
+- **go back to any earlier run**: the left column lists every run with its time,
+  models, scale and counters. Open one to read its results (read-only, exports
+  follow it), rerun it with exactly the parameters it ran with, or delete it;
 - compare the answers case by case — every answer carries its model's chain of
   thought underneath, folded into a `<details>` (`思考过程 · N token · M 字`).
   Comparing two reasoning models means comparing that text, and a token count
@@ -667,7 +670,7 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding (one-shot outcome: content / reasoning / usage / stop reason), SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
 | `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, **status lines on stderr with stdout left alone**, `--quiet`, `--show-cot`, **an empty reply warned about and non-zero instead of a blank line**, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
-| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results (including the chain of thought folded under every answer), eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
+| `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results (including the chain of thought folded under every answer), **the run-history rail lists that run and opening it switches to the read-only view**, **deleting one drops it from the list**, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 | `scripts/real-gateway.sh` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |
 
 Four of these exist because the obvious version would pass on a broken
