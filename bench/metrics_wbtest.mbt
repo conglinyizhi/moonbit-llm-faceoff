@@ -250,3 +250,41 @@ test "the metric key list is the documented contract" {
   assert_true(names.contains("reasoning_ratio"))
   assert_true(names.contains("decode_tok_per_s"))
 }
+
+///|
+/// 分位数：线性插值，和 numpy / R 默认同一套规则。
+///
+/// 这条测试的意义在于「P99 到底是什么」：4 个样本时它就是最大值，20 个样本时
+/// 它落在第 2 大和第 1 大之间。写下来才不会哪天被人改成最近的次序统计量。
+test "percentiles interpolate between order statistics" {
+  let stats = Stats::of([
+    0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0,
+  ]).unwrap()
+  assert_eq(stats.n, 11)
+  assert_eq(stats.p50, 50.0)
+  // q * (n-1) = 0.1 * 10 = 1 → 正好落在第二个样本上
+  assert_eq(stats.p10, 10.0)
+  assert_eq(stats.p20, 20.0)
+  // 0.99 * 10 = 9.9 → 第 9 与第 10 之间插值
+  assert_eq(stats.p99, 99.0)
+  assert_eq(stats.median, stats.p50)
+}
+
+///|
+/// 样本很少时尾部是插值出来的，不是极值。
+///
+/// 3 个样本 [1,3,5] 的 P99 = 4.96：位置 = 0.99×2 = 1.98，落在第 2 与第 3 个
+/// 样本之间。它**不**等于最大值——这写在测试里，是为了避免以后有人「顺手」把
+/// 尾部改成取极值：那样 P99 会在小样本上突然变成 max，两边的数就没法比了。
+test "few samples interpolate the tails instead of taking the extremes" {
+  let stats = Stats::of([5.0, 1.0, 3.0]).unwrap()
+  assert_eq(stats.n, 3)
+  assert_eq(stats.min, 1.0)
+  assert_eq(stats.max, 5.0)
+  assert_eq(stats.p50, 3.0)
+  assert_true(stats.p99 > 4.9 && stats.p99 < 5.0)
+  assert_true(stats.p10 > 1.3 && stats.p10 < 1.5)
+  let single = Stats::of([42.0]).unwrap()
+  assert_eq(single.p10, 42.0)
+  assert_eq(single.p99, 42.0)
+}

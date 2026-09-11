@@ -102,6 +102,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Percentiles, not just a median.** `Stats` now carries P10 / P20 / P50 / P99
+  (linear interpolation between order statistics, numpy's default rule), the
+  model cards show P50 with the other three beside it, and the comparison table
+  has a P10 / P20 / P50 / P99 switch. A median answers "how fast is it usually"
+  and nothing else: the tail is the part where a model occasionally hangs, and
+  that is exactly what a two-model comparison is for. Older `data.json` files go
+  on rendering — a missing percentile falls back to the median.
+
 - **Compare long answers instead of scrolling past them.** The results section now
   switches between one block per model, side-by-side columns, and a diff. Columns
   are equal width, each scrolls on its own and keeps its header pinned. The diff

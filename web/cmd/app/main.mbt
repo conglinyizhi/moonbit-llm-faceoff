@@ -161,6 +161,9 @@ struct AppModel {
   tail : String
   /// 当下这条请求的实时进度（哪条、多快、多久没有输出了）。
   live : @shared.LiveProgress?
+  /// 结果看哪个分位：p10 / p20 / p50 / p99。P50 是默认——「通常有多快」是多数
+  /// 时候要问的问题，尾部（P99）是另一类问题（会不会偶发地卡住）。
+  percentile : String
   /// 结果区怎么摆：stacked（每个模型一条）/ columns（并排）/ diff（差异）。
   /// 长回答竖着堆下来是没法比的——1B 写 1100 字、2B 写 700 字，读完第一段
   /// 就找不回第二段在哪。
@@ -214,6 +217,7 @@ fn initial_model() -> AppModel {
     compare: None,
     tail: "",
     live: None,
+    percentile: "p50",
     results_mode: "stacked",
     failures: 0,
     retried: 0,
@@ -371,6 +375,7 @@ enum Msg {
   AddDraft
   RemoveDraft(Int)
   SetResultsMode(String)
+  SetPercentile(String)
   ImportTextChanged(String)
   ImportLines(Bool)
   DraftFieldChanged(Int, DraftField, String)
@@ -855,6 +860,7 @@ fn update(
       ({ ..model, editing_cases: true, drafts, cases_saved: None, }, @cmd.none)
     }
     SetResultsMode(mode) => ({ ..model, results_mode: mode, }, @cmd.none)
+    SetPercentile(which) => ({ ..model, percentile: which, }, @cmd.none)
     ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
     ImportLines(replace) => {
       // 上限按「已有 + 新导入」算：用例集那边也有 500 的上限
@@ -1942,6 +1948,32 @@ fn progress(model : AppModel) -> @html.Html {
 }
 
 ///|
+/// 分位切换：P10 / P20 / P50 / P99。
+///
+/// 四个都要能看到，是因为它们回答的不是同一个问题：P50 是「通常多快」，P99 是
+/// 「会不会偶发地卡一下」，而 P10 是「顺的时候能多快」。只给中位数等于只答了
+/// 第一个。
+fn percentile_switch(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let button = fn(which : String) {
+    @html.button(
+      class=if model.percentile == which {
+        "view-btn active"
+      } else {
+        "view-btn"
+      },
+      on_click=emit(Msg::SetPercentile(which)),
+      [txt(@shared.percentile_label(which))],
+    )
+  }
+  el("span", "view-buttons", [
+    button("p10"),
+    button("p20"),
+    button("p50"),
+    button("p99"),
+  ])
+}
+
+///|
 /// 结果区的视图切换：竖着堆 / 并排 / 差异。
 ///
 /// 「这么长我没法对比」是这里的全部理由：66 条用例、每条上千 token 的回答竖着
@@ -1993,6 +2025,8 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
                   @shared.with_annotations(data, model.annotations),
                   mode=model.results_mode,
                   switch=results_switch(model, emit),
+                  which=model.percentile,
+                  percentile_switch=percentile_switch(model, emit),
                   editor=fn(case_id, answer_model) {
                     annotation_editor_for(model, case_id, answer_model, emit)
                   },
@@ -2025,6 +2059,8 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
                 @shared.with_annotations(data, model.annotations),
                 mode=model.results_mode,
                 switch=results_switch(model, emit),
+                which=model.percentile,
+                percentile_switch=percentile_switch(model, emit),
                 editor=fn(case_id, answer_model) {
                   annotation_editor_for(model, case_id, answer_model, emit)
                 },

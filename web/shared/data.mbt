@@ -5,6 +5,12 @@ pub(all) struct MetricStats {
   median : Double
   min : Double
   max : Double
+  /// 分位数。老的结果文件里没有这几个字段——那时只存了中位数，所以解析时回退
+  /// 到中位数，页面仍然照常显示（历史运行不该因为工具升级就打不开）。
+  p10 : Double
+  p20 : Double
+  p50 : Double
+  p99 : Double
 } derive(Eq)
 
 ///|
@@ -179,11 +185,16 @@ fn parse_summary(json : Json) -> ModelSummary {
 ///|
 fn parse_metric(json : Json) -> MetricStats {
   let obj = as_object(json)
+  let median = number_field(obj, "median", 0.0)
   {
     n: int_field(obj, "n", 0),
-    median: number_field(obj, "median", 0.0),
+    median,
     min: number_field(obj, "min", 0.0),
     max: number_field(obj, "max", 0.0),
+    p10: number_field(obj, "p10", median),
+    p20: number_field(obj, "p20", median),
+    p50: number_field(obj, "p50", median),
+    p99: number_field(obj, "p99", median),
   }
 }
 
@@ -351,6 +362,33 @@ pub fn ModelSummary::metric_stats(
   key : String,
 ) -> MetricStats? {
   self.metrics.get(key)
+}
+
+///|
+/// 分位数取值：`p10` / `p20` / `p50` / `p99`，认不出来的当 p50。
+///
+/// 用字符串而不是枚举，是因为它一路从页面状态（按钮点击）传进来，中间还要过
+/// 一层 shared 的渲染件；多一个类型只为了转一次。
+pub fn MetricStats::percentile(self : MetricStats, which : String) -> Double {
+  match which {
+    "p10" => self.p10
+    "p20" => self.p20
+    "p99" => self.p99
+    _ => self.p50
+  }
+}
+
+///|
+/// 某指标在某个分位上的取值。
+pub fn ModelSummary::metric_at(
+  self : ModelSummary,
+  key : String,
+  which : String,
+) -> Double? {
+  match self.metric_stats(key) {
+    Some(stats) => Some(stats.percentile(which))
+    None => None
+  }
 }
 
 ///|
