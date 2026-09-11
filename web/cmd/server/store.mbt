@@ -361,3 +361,180 @@ fn string_array_of(obj : Map[String, Json], key : String) -> Array[String] {
     _ => []
   }
 }
+
+// ---------------------------------------------------------------- 标注
+
+///|
+/// 一条标注：这次运行 × 这道题 × 这个模型 → 判定 + 备注。
+///
+/// 判定只有三档，而且是稳定的英文标识（不是 emoji）：emoji 是显示层的事，
+/// 存进去的话以后换个符号就得改数据。三档对应的是「我判得了吗」：
+///   pass   通过
+///   fail   不行
+///   unsure 拿不准
+pub(all) struct Annotation {
+  case_id : String
+  model : String
+  verdict : String
+  note : String
+} derive(Eq, ToJson)
+
+///|
+/// derive(ToJson) 生成的方法在调用点会被隐式提升（已弃用），显式接一下。
+pub extend Annotation with ToJson::{to_json}
+
+///|
+let annotation_verdicts : Array[String] = ["pass", "fail", "unsure"]
+
+///|
+/// 一次运行的标注总量上限。超了不是「用错地方」也差不多了。
+let max_annotations : Int = 2000
+
+///|
+/// 备注上限，跟 prompt 一个量级就够了——这是给人看的一句话，不是文档。
+let max_note_chars : Int = 2000
+
+///|
+/// 标注文件就在运行目录里：删掉这次运行，它的标注跟着走，不留孤儿数据。
+fn annotations_path(dir : String) -> String {
+  dir + "/annotations.jsonl"
+}
+
+///|
+/// 读标注。逐条容错：手写坏一行不该让整次运行的标注都读不出来。
+async fn read_annotations(dir : String) -> Array[Annotation] {
+  let entries : Array[Annotation] = []
+  for line in read_text(annotations_path(dir)).split("\n") {
+    let content = line.trim(chars=" \t\r")
+    if content.length() == 0 {
+      continue
+    }
+    let parsed = @json.parse(content.to_owned()) catch { _ => continue }
+    guard parsed is Object(obj) else { continue }
+    let case_id = string_field(obj, "case_id")
+    let model = string_field(obj, "model")
+    let verdict = string_field(obj, "verdict")
+    if case_id == "" || model == "" || !annotation_verdicts.contains(verdict) {
+      continue
+    }
+    entries.push({ case_id, model, verdict, note: string_field(obj, "note"), })
+  }
+  entries
+}
+
+///|
+fn string_field(obj : Map[String, Json], key : String) -> String {
+  match obj.get(key) {
+    Some(String(text)) => text
+    _ => ""
+  }
+}
+
+///|
+/// 校验客户端送上来的一条标注。
+fn validate_annotation(json : Json, index : Int) -> Result[Annotation, String] {
+  guard json is Object(obj) else {
+    return Err("annotation #\{index + 1}: must be a JSON object")
+  }
+  let case_id = string_field(obj, "case_id")
+  if case_id == "" || case_id.length() > 128 {
+    return Err("annotation #\{index + 1}: needs a `case_id` (1–128 chars)")
+  }
+  let model = string_field(obj, "model")
+  if model == "" || model.length() > 128 {
+    return Err("annotation #\{index + 1}: needs a `model` (1–128 chars)")
+  }
+  let verdict = string_field(obj, "verdict")
+  if !annotation_verdicts.contains(verdict) {
+    return Err(
+      "annotation #\{index + 1}: `verdict` must be pass, fail or unsure",
+    )
+  }
+  let note = string_field(obj, "note")
+  if note.length() > max_note_chars {
+    return Err(
+      "annotation #\{index + 1}: `note` is longer than \{max_note_chars} characters",
+    )
+  }
+  Ok({ case_id, model, verdict, note, })
+}
+
+///|
+/// 整表覆盖写。返回 (条数, 错误)。
+async fn write_annotations(
+  dir : String,
+  annotations : Array[Annotation],
+) -> Result[Unit, String] {
+  let out = StringBuilder()
+  for entry in annotations {
+    out.write_string(
+      Json::object({
+        "case_id": Json::string(entry.case_id),
+        "model": Json::string(entry.model),
+        "verdict": Json::string(entry.verdict),
+        "note": Json::string(entry.note),
+      }).stringify(),
+    )
+    out.write_char('\n')
+  }
+  let path = annotations_path(dir)
+  @fs.write_file(path, out.to_string(), create_mode=@fs.CreateOrTruncate) catch {
+    err => return Err("cannot write annotations: " + err.to_string())
+  }
+  Ok(())
+}
+
+///|
+/// 把标注合并进页面数据文档：静态报告与 Markdown 导出都从它读。
+///
+/// 合并发生在服务端，而不是让 ssg 自己去读标注：ssg 只知道「一份页面数据」，
+/// 多给它一条隐式路径，就多一个以后对不上的地方。
+fn merge_annotations(
+  data_text : String,
+  annotations : Array[Annotation],
+) -> String {
+  let parsed = @json.parse(data_text) catch { _ => return data_text }
+  guard parsed is Object(root) else { return data_text }
+  guard root.get("cases") is Some(Array(cases)) else { return data_text }
+  let merged_cases : Array[Json] = []
+  for block in cases {
+    guard block is Object(block_obj) else {
+      merged_cases.push(block)
+      continue
+    }
+    let case_id = string_field(block_obj, "id")
+    let answers = match block_obj.get("answers") {
+      Some(Array(items)) => items
+      _ => []
+    }
+    let merged_answers : Array[Json] = []
+    for answer in answers {
+      guard answer is Object(answer_obj) else {
+        merged_answers.push(answer)
+        continue
+      }
+      let model = string_field(answer_obj, "model")
+      let hit = annotations.filter(fn(entry) {
+        entry.case_id == case_id && entry.model == model
+      })
+      match hit {
+        [] => merged_answers.push(answer)
+        [entry, ..] => {
+          let copy : Map[String, Json] = Map([])
+          answer_obj.each(fn(key, value) { copy[key] = value })
+          copy["verdict"] = Json::string(entry.verdict)
+          copy["note"] = Json::string(entry.note)
+          merged_answers.push(Json::object(copy))
+        }
+      }
+    }
+    let block_copy : Map[String, Json] = Map([])
+    block_obj.each(fn(key, value) { block_copy[key] = value })
+    block_copy["answers"] = Json::array(merged_answers)
+    merged_cases.push(Json::object(block_copy))
+  }
+  let root_copy : Map[String, Json] = Map([])
+  root.each(fn(key, value) { root_copy[key] = value })
+  root_copy["cases"] = Json::array(merged_cases)
+  Json::object(root_copy).stringify(indent=2)
+}

@@ -306,6 +306,18 @@ let body_unknown_set : String =
   #|{"models":["mock-a"],"caseSet":"nope","cases":["deck"]}
 
 ///|
+let body_annotations : String =
+  #|{"annotations":[{"case_id":"math-short","model":"mock-a","verdict":"fail","note":"把 17×23 算成了 391"},{"case_id":"math-short","model":"mock-b","verdict":"unsure","note":""},{"case_id":"fact-zh","model":"mock-a","verdict":"pass","note":"干净"}]}
+
+///|
+let body_bad_verdict : String =
+  #|{"annotations":[{"case_id":"c","model":"m","verdict":"maybe","note":""}]}
+
+///|
+let body_dup_annotation : String =
+  #|{"annotations":[{"case_id":"c","model":"m","verdict":"pass","note":""},{"case_id":"c","model":"m","verdict":"fail","note":""}]}
+
+///|
 let body_inline_conflict : String =
   #|{"models":["mock-a"],"inlineCases":[{"prompt":"x"}],"cases":["math-short"]}
 
@@ -765,6 +777,60 @@ async fn main {
     expect(
       !runs_json.contains("apiKey"),
       "历史里的 request 没有 apiKey",
+      "",
+    )
+
+    // ---- 标注（人工判定 + 备注）
+    println("==> 标注")
+    let ann_fresh = get(base + "/api/runs/" + run_id + "/annotations")
+    expect(
+      ann_fresh.code == 200 && ann_fresh.body.contains("\"annotations\":[]"),
+      "新运行的标注是空表",
+      ann_fresh.body,
+    )
+    expect(
+      put(base + "/api/runs/" + run_id + "/annotations", body_annotations).code == 200,
+      "PUT 标注（三档判定 + 备注）",
+      "",
+    )
+    let ann_back = get(base + "/api/runs/" + run_id + "/annotations")
+    expect(
+      ann_back.body.contains("把 17×23 算成了 391") &&
+      ann_back.body.contains("\"verdict\":\"unsure\""),
+      "标注读得回来（判定与备注都在）",
+      ann_back.body,
+    )
+    expect(
+      read_text(run_dir + "/annotations.jsonl").contains("\"model\":\"mock-b\""),
+      "标注落在运行目录里（删运行就跟着走，不留孤儿数据）",
+      read_text(run_dir + "/annotations.jsonl"),
+    )
+    expect(
+      put(base + "/api/runs/" + run_id + "/annotations", body_bad_verdict).code == 400,
+      "判定不在三档里 → 400",
+      "",
+    )
+    expect(
+      put(base + "/api/runs/" + run_id + "/annotations", body_dup_annotation).code == 400,
+      "同一条答案两条标注 → 400（读的人不知道该信哪条）",
+      "",
+    )
+    expect(
+      get(base + "/api/runs/nope/annotations").code == 404,
+      "不存在的运行 → 404",
+      "",
+    )
+    // 导出：报告是留着以后翻的东西，判定必须一起带走
+    let annotated_report = get(base + "/api/runs/" + run_id + "/report.html")
+    expect(
+      annotated_report.body.contains("把 17×23 算成了 391"),
+      "静态报告里带着备注",
+      "（报告没带上标注）",
+    )
+    expect(
+      // 判定显示成 ✅/❌/🤔 + 文字；这次运行里只有 mock-a 这条，标的是 fail
+      annotated_report.body.contains("不行"),
+      "静态报告里带着判定",
       "",
     )
 

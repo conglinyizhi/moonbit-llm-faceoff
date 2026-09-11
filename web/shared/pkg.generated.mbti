@@ -34,6 +34,8 @@ pub fn model_cards(PageData) -> @html.Html
 
 pub fn number_field(Map[String, Json], String, Double) -> Double
 
+pub fn optional_field(Map[String, Json], String) -> String?
+
 pub fn parse_page_data(String) -> Result[PageData, String]
 
 pub fn parse_page_data_json(Json) -> Result[PageData, String]
@@ -54,6 +56,10 @@ pub fn summary_card(ModelSummary) -> @html.Html
 
 pub fn txt(String) -> @html.Html
 
+pub fn verdict_badge(Answer) -> @html.Html
+
+pub fn verdict_label(String) -> String
+
 // Errors
 
 // Types and methods
@@ -66,6 +72,8 @@ pub(all) struct Answer {
   content : String
   reasoning : String
   error : String?
+  verdict : String?
+  note : String?
 } derive(Eq)
 pub fn Answer::equal(Self, Self) -> Bool
 pub fn Answer::not_equal(Self, Self) -> Bool

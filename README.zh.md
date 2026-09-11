@@ -464,7 +464,9 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 | `GET /api/runs` | 运行历史，新的在前：`{runs: [{id, startedAt, status, exitCode, request, total, done, failures, retried, truncated}]}` |
 | `POST /api/runs` | 建一次运行 → `{id, total}`。要跑什么有三种互斥的写法：`caseSet` + `cases`（磁盘上某套用例的 id）、单条 `prompt`、或 `inlineCases`（一组用例对象，直接写进这次运行的 `cases.jsonl`）。`system` 是整轮的 system prompt，单条用例可以自己覆盖 |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
-| `DELETE /api/runs/<id>` | 删掉那次运行的目录 |
+| `DELETE /api/runs/<id>` | 删掉那次运行的目录（它的标注跟着走） |
+| `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}`——人工判定，`verdict` 取 `pass` / `fail` / `unsure` |
+| `PUT /api/runs/<id>/annotations` | 整表覆盖；一条答案只能有一条标注，重复是 400 |
 | `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |
 | `GET /api/runs/<id>/data.json` | 页面数据文档，直接下载 |
 | `GET /api/runs/<id>/report.html` | 自包含的静态报告，首次请求时生成 |

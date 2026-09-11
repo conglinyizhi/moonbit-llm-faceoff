@@ -205,6 +205,8 @@ async fn handle(
         Json::object({ "runs": Json::array(scan_runs(config.work_dir)) }),
       )
     (Post, "/api/runs") => start_run(config, group, body, conn)
+    (Put, _) if path.has_prefix("/api/runs/") =>
+      put_annotations_route(config, path[10:].to_owned(), body, conn)
     (Delete, _) if path.has_prefix("/api/runs/") =>
       delete_run(config, path[10:].to_owned(), conn)
     (Get, _) if path.has_prefix("/api/runs/") =>
@@ -548,6 +550,119 @@ async fn put_presets(
 }
 
 // ---------------------------------------------------------------- 运行历史
+
+///|
+/// 读一次运行的标注。运行不存在是 404，没有标注就是空表。
+async fn get_annotations(
+  config : ServerConfig,
+  id : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let dir = config.work_dir + "/" + id
+  if !(@fs.exists(dir) catch { _ => false }) {
+    send_text(conn, 404, "no such run: " + id)
+    return
+  }
+  let annotations = read_annotations(dir)
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "id": Json::string(id),
+      "annotations": Json::array(annotations.map(fn(entry) { entry.to_json() })),
+    }),
+  )
+}
+
+///|
+/// 写标注：整表覆盖。一个人用，一次一格的增量接口只会多一种对不上的可能。
+async fn put_annotations_route(
+  config : ServerConfig,
+  suffix : String,
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Unit {
+  let slash = suffix.find("/")
+  let id = match slash {
+    Some(index) => suffix[:index].to_owned()
+    None => suffix
+  }
+  let wanted = match slash {
+    Some(index) => suffix[index + 1:].to_owned()
+    None => ""
+  }
+  if wanted != "annotations" {
+    send_text(conn, 404, "no such run endpoint")
+    return
+  }
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let dir = config.work_dir + "/" + id
+  if !(@fs.exists(dir) catch { _ => false }) {
+    send_text(conn, 404, "no such run: " + id)
+    return
+  }
+  let obj = match read_json_body(body, conn) {
+    Some(obj) => obj
+    None => return
+  }
+  let items = match obj.get("annotations") {
+    Some(Array(items)) => items
+    _ => {
+      send_text(conn, 400, "body needs an `annotations` array")
+      return
+    }
+  }
+  if items.length() > max_annotations {
+    send_text(conn, 400, "at most \{max_annotations} annotations")
+    return
+  }
+  let entries : Array[Annotation] = []
+  let seen : Array[String] = []
+  for i = 0; i < items.length(); i = i + 1 {
+    let entry = match validate_annotation(items[i], i) {
+      Ok(entry) => entry
+      Err(message) => {
+        send_text(conn, 400, message)
+        return
+      }
+    }
+    // 「这次运行 × 这道题 × 这个模型」只能有一条：两条的话，读的人不知道该信哪条
+    let key = entry.case_id + "\u0000" + entry.model
+    if seen.contains(key) {
+      send_text(
+        conn,
+        400,
+        "duplicate annotation for \{entry.case_id} / \{entry.model}",
+      )
+      return
+    }
+    seen.push(key)
+    entries.push(entry)
+  }
+  match write_annotations(dir, entries) {
+    Ok(_) => ()
+    Err(message) => {
+      send_text(conn, 500, message)
+      return
+    }
+  }
+  note("annotations for \{id}: \{entries.length()}")
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "id": Json::string(id),
+      "count": Json::number(entries.length().to_double()),
+    }),
+  )
+}
 
 ///|
 async fn delete_run(
@@ -1112,6 +1227,7 @@ async fn get_run_route(
   match wanted {
     Some("runs.jsonl") => send_run_file(config, id, "runs.jsonl", conn)
     Some("data.json") => send_run_file(config, id, "data.json", conn)
+    Some("annotations") => get_annotations(config, id, conn)
     Some("report.html") => send_report(config, id, conn)
     Some(_) => send_text(conn, 404, "no such run export")
     None => get_run(config, id, conn)
@@ -1162,16 +1278,35 @@ async fn send_report(
   }
   let dir = config.work_dir + "/" + id
   let report = dir + "/report/report.html"
-  if !(@fs.exists(report) catch { _ => false }) {
+  // 报告是打算存下来的东西，不能带着旧的判定——所以每次都把「当前标注合并后的
+  // 数据」重新算一遍，和上次构建用的比**内容**：比 mtime 在同秒内不可靠
+  // （真的踩过：标注改了、报告没重出）。
+  let merged = merge_annotations(
+    read_text(dir + "/data.json"),
+    read_annotations(dir),
+  )
+  let merged_path = dir + "/report/data.json"
+  let rebuild = !(@fs.exists(report) catch { _ => false }) ||
+    read_text(merged_path) != merged
+  if rebuild {
     let data = dir + "/data.json"
     if !(@fs.exists(data) catch { _ => false }) {
       send_text(conn, 409, "report is not ready")
       return
     }
+    // 标注合并进喂给 ssg 的那份数据：报告里因此带着当时的判定与备注。
+    // 合并写在 report/ 下面，不动 bench 产出的 data.json。
+    @fs.mkdir(dir + "/report", recursive=true) catch {
+      _ => ()
+    }
+    write_text(merged_path, merged)
     let pid = @process.spawn_orphan(
       config.ssg_bin,
       [],
-      extra_env={ "LLM_WEB_DATA": data, "LLM_WEB_OUT": dir + "/report" },
+      extra_env={
+        "LLM_WEB_DATA": dir + "/report/data.json",
+        "LLM_WEB_OUT": dir + "/report",
+      },
       inherit_env=true,
     ) catch {
       _ => {
