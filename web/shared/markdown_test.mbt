@@ -34,6 +34,8 @@ fn sample_data() -> PageData {
             reasoning_tokens: 4,
             content: "Hello from the mock server.",
             reasoning: "weighing the question",
+            verdict: Some("fail"),
+            note: Some("把 17×23 算成了 391"),
             error: None,
           },
           {
@@ -44,12 +46,21 @@ fn sample_data() -> PageData {
             reasoning_tokens: 0,
             content: "",
             reasoning: "",
+            verdict: None,
+            note: None,
             error: Some("http 500: upstream exploded"),
           },
         ],
       },
     ],
   }
+}
+
+///|
+test "results_markdown carries the human verdict and note" {
+  let md = results_markdown(sample_data())
+  assert_true(md.contains("✅ 通过") || md.contains("❌ 不行"))
+  assert_true(md.contains("把 17×23 算成了 391"))
 }
 
 ///|

@@ -536,7 +536,9 @@ and waits for you to fill the key in and press **开始评测**.
 | `GET /api/runs` | the run history, newest first: `{runs: [{id, startedAt, status, exitCode, request, total, done, failures, retried, truncated}]}` |
 | `POST /api/runs` | start a run → `{id, total}`. Three mutually exclusive ways to say what to run: `caseSet` + `cases` (ids from a set on disk), a single `prompt`, or `inlineCases` (an array of case objects, written into that run's `cases.jsonl`). `system` sets the system prompt for the whole run; a case may override it with its own |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
-| `DELETE /api/runs/<id>` | remove that run's directory |
+| `DELETE /api/runs/<id>` | remove that run's directory (its annotations go with it) |
+| `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}` — the human verdicts, `verdict` being `pass` / `fail` / `unsure` |
+| `PUT /api/runs/<id>/annotations` | whole-list write; one entry per (case, model), duplicates are a 400 |
 | `GET /api/runs/<id>/runs.jsonl` | the raw per-attempt log, as a download |
 | `GET /api/runs/<id>/data.json` | the page-data document, as a download |
 | `GET /api/runs/<id>/report.html` | a self-contained static report, generated on first request |

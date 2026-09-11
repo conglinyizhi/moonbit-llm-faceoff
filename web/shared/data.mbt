@@ -32,6 +32,11 @@ pub(all) struct Answer {
   content : String
   reasoning : String
   error : String?
+  /// 人工判定：`pass` / `fail` / `unsure`。没有标注就是 None。
+  /// 它来自运行目录里的 annotations.jsonl，由服务端合并进这份文档。
+  verdict : String?
+  /// 人工备注。
+  note : String?
 } derive(Eq)
 
 ///|
@@ -133,10 +138,21 @@ fn parse_answer(json : Json) -> Answer {
     reasoning_tokens: int_field(obj, "reasoning_tokens", 0),
     content: string_field(obj, "content", ""),
     reasoning: string_field(obj, "reasoning", ""),
+    verdict: optional_field(obj, "verdict"),
+    note: optional_field(obj, "note"),
     error: match obj.get("error") {
       Some(String(text)) => Some(text)
       _ => None
     },
+  }
+}
+
+///|
+/// 字段缺失或不是字符串都算「没有」，与 null 一视同仁。
+pub fn optional_field(obj : Map[String, Json], key : String) -> String? {
+  match obj.get(key) {
+    Some(String(text)) => if text == "" { None } else { Some(text) }
+    _ => None
   }
 }
 

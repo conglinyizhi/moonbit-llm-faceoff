@@ -177,12 +177,41 @@ pub fn answer_block(answer : Answer) -> @html.Html {
     }
     el("p", "failed", [txt(message)])
   }
-  let parts : Array[@html.Html] = [el("div", "answer-head", [txt(head)]), body]
+  let parts : Array[@html.Html] = [
+    el("div", "answer-head", [txt(head)]),
+    body,
+    // 人工判定跟着答案走：以后翻回来看时，当时的结论就在旁边
+    verdict_badge(answer),
+  ]
   // 失败的那些没有思考可看
   if answer.ok && answer.reasoning.length() > 0 {
     parts.push(cot_block(answer))
   }
   el("div", "answer", parts)
+}
+
+///|
+/// 人工判定与备注。没有标注就什么都不渲染，不占位。
+pub fn verdict_badge(answer : Answer) -> @html.Html {
+  match answer.verdict {
+    None => @html.fragment([])
+    Some(verdict) => {
+      let note = match answer.note {
+        Some(note) => if note == "" { "" } else { note }
+        None => ""
+      }
+      el("div", "verdict", [
+        el("span", "verdict-badge verdict-" + verdict, [
+          txt(verdict_label(verdict)),
+        ]),
+        if note == "" {
+          @html.fragment([])
+        } else {
+          el("span", "verdict-note", [txt(note)])
+        },
+      ])
+    }
+  }
 }
 
 ///|

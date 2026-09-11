@@ -6,6 +6,14 @@ package "conglinyizhi/moonbit-llm-faceoff-web/cmd/server"
 // Errors
 
 // Types and methods
+pub(all) struct Annotation {
+  case_id : String
+  model : String
+  verdict : String
+  note : String
+} derive(Eq, ToJson)
+pub fn Annotation::to_json(Self) -> Json
+
 type RunRequest
 
 type ServerConfig

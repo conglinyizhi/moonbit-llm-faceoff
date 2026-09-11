@@ -102,6 +102,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Human verdicts on results.** Every answer — one run × one case × one model — can
+  carry a verdict (`pass` / `fail` / `unsure`, `✅ 通过` / `❌ 不行` / `🤔 拿不准` on
+  screen) and a free-text note saying what was wrong. They live in
+  `web/runs/<id>/annotations.jsonl`, so deleting a run takes its verdicts with it
+  rather than leaving notes pointing at nothing.
+
+  The verdict is a stable English token in the file and an emoji in the UI on
+  purpose: swapping the symbol later should not mean rewriting the data.
+
+  They travel with the exports. `/api/runs/<id>/report.html` merges the annotations
+  into the data it hands the generator, and the Markdown copy includes them, so a
+  report someone opens in three weeks still says which answers were judged wrong and
+  why. Regenerating the cached report compares the *merged content* rather than
+  mtimes — the mtime version was wrong within the same second, which is exactly the
+  window a person annotating right after a run lives in.
+
 - **A playground page: one fixed system prompt, a list of user prompts, the models
   side by side** (`/playground.html`, linked from the workbench header). It is a
   separate bundle and a separate shell, so the workbench's own page is untouched.

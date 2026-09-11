@@ -1,4 +1,15 @@
 ///|
+/// 判定在导出里的说法。三档是稳定的英文标识，显示（含 emoji）是这一层的事。
+pub fn verdict_label(verdict : String) -> String {
+  match verdict {
+    "pass" => "✅ 通过"
+    "fail" => "❌ 不行"
+    "unsure" => "🤔 拿不准"
+    _ => verdict
+  }
+}
+
+///|
 /// 把一次对比渲染成 Markdown，给页面上的「复制」按钮用。
 ///
 /// 和 `view.mbt` 里的 `comparison` / `answers` 是同一批数据的第二种呈现方式：
@@ -51,6 +62,18 @@ pub fn results_markdown(data : PageData) -> String {
       } else {
         let reason = answer.error.unwrap_or("未知错误")
         out.write_string("\n失败：\{reason}\n")
+      }
+      // 人工判定跟着导出走：这份 Markdown 是留着以后翻的，
+      // 当时的结论必须一起带走
+      match answer.verdict {
+        Some(verdict) => {
+          let note = match answer.note {
+            Some(note) => if note == "" { "" } else { " — " + note }
+            None => ""
+          }
+          out.write_string("\n> \{verdict_label(verdict)}\{note}\n")
+        }
+        None => ()
       }
     }
   }
