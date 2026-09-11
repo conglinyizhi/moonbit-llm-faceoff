@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Opening the page with a run id in the URL.** The boot path had two branches,
+  and the one for `?run=<id>` forgot to fetch `/api/meta` — so with a run id in
+  the address bar the page sat at "正在载入配置…" forever, the sidebar never
+  rendered, and the two-column workbench collapsed to the width of the first
+  column (everything squeezed into ~270px). Found the easy way: bind an id that
+  does not exist. The sidebar now renders even before the meta arrives, so the
+  grid cannot collapse while loading, and an unknown id says 找不到这次运行
+  instead of leaving an empty page.
+- **The run id lives in the query (`?run=<id>`), not the fragment.** A change to
+  only the fragment is a same-document navigation, so editing the id in the
+  address bar kept the old run on screen. Writing it still uses `replaceState`,
+  so opening a run from the sidebar does not reload the page.
+
 ### Changed
 
 - **`moonbitlang/async` 0.20.1 → 0.21.3** in the library, the CLIs and the

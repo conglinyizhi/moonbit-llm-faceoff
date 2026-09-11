@@ -215,7 +215,7 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
 /// 左侧的历史面板。放在表单旁边而不是折叠起来：管理测试的时候，
 /// 「之前跑过什么」和「这次要跑什么」是同一个视线里的两件事。
 fn history_panel(
-  meta : Meta,
+  meta : Meta?,
   model : AppModel,
   emit : @cmd.Emit[Msg],
 ) -> @html.Html {
@@ -238,7 +238,15 @@ fn history_panel(
   }
   el("aside", "history", [
     // 预设在上：它是「准备跑之前先定下来」的东西，比翻历史更靠前一步
-    preset_panel(meta, model, emit),
+    match meta {
+      Some(meta) => preset_panel(meta, model, emit)
+      // 载入中也要占位：这块塌了会让下面的运行记录往上跳
+      None =>
+        el("div", "preset-panel", [
+          el("div", "section-head", [el("h2", "", [txt("预设")])]),
+          el("p", "hint", [txt("正在载入…")]),
+        ])
+    },
     el("div", "section-head", [
       el("h2", "", [txt("运行记录")]),
       // 勾满两个就把「刷新」换成「对比」——头部只有一格，而这两个动作

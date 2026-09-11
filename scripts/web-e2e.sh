@@ -221,6 +221,17 @@ grep -q 'id="model-mock-b"' "$tmp/form.html" || fail "表单里没有第二个�
 grep -q 'id="case-math-short"' "$tmp/form.html" || fail "表单里没有用例选项" "$tmp/form.html"
 grep -q '开始评测' "$tmp/form.html" || fail "表单里没有开始按钮" "$tmp/form.html"
 grep -q 'id="repeats"' "$tmp/form.html" || fail "表单里没有参数输入" "$tmp/form.html"
+# .workbench 是两列网格：侧栏那一格必须一直在，否则 meta 还在载入（或加载失败）
+# 的时候主内容会掉进第一列，整个页面被挤成 270px 宽
+if ! python3 - "$tmp/form.html" <<'GRID'
+import re, sys
+html = open(sys.argv[1], encoding="utf-8").read()
+wrap = re.search(r'<div class="wrap workbench">(.*?)<footer', html, re.S)
+sys.exit(0 if wrap and 'class="history"' in wrap.group(1) and 'workbench-main' in wrap.group(1) else 1)
+GRID
+then
+  fail "工作区不是「侧栏 + 主内容」两格（加载中会挤成一列）" "$tmp/form.html"
+fi
 # 新增的输入控件：能手填模型 id、网关地址与密钥
 grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模型 id 的输入框" "$tmp/form.html"
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
@@ -828,6 +839,43 @@ runs=$(find "$tmp/runs" -maxdepth 1 -type d -name 'run-*' 2>/dev/null | wc -l)
 echo "ok: 运行记录 $runs 份"
 
 # 删除放在最后：它会真的删掉一条历史，前面那些断言还要用这些运行。
+echo "==> 地址栏带 run id（?run=…：刷新/转发/绑一个不存在的）"
+# 这一条是给一个真 bug 加的：init 里「hash 有 run id」那条分支漏了 fetch_meta，
+# 于是带着 #run=… 打开页面时永远停在「正在载入配置…」，侧栏不出现，两列网格
+# 塌成一列（主内容被挤进 270px）。绑定一个不存在的 id 是最容易撞上的入口。
+hash_probe='(async () => {
+  await new Promise((r) => setTimeout(r, 1200));
+  const wrap = document.querySelector(".wrap.workbench");
+  const main = document.querySelector(".workbench-main");
+  return {
+    children: wrap ? wrap.children.length : 0,
+    mainWidth: main ? Math.round(main.getBoundingClientRect().width) : 0,
+    formLoaded: !!document.querySelector("#model-mock-a"),
+    error: (document.querySelector(".failed") || {}).textContent || "",
+  };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/?run=nope-does-not-exist" 8000 "$tmp/hash-bad.html" "$hash_probe" 1500
+probe=$(grep -o 'SCRIPT .*' "$tmp/hash-bad.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -qE '"children":2' ||
+  fail "带一个不存在的 run id 打开时网格塌了（不是两列）：$probe"
+echo "$probe" | grep -qE '"mainWidth":([4-9][0-9][0-9]|[1-9][0-9][0-9][0-9])' ||
+  fail "主内容被挤窄了（掉进侧栏那一列）：$probe"
+echo "$probe" | grep -q '"formLoaded":true' ||
+  fail "带 run id 打开时表单没载入（meta 没拉）：$probe"
+echo "$probe" | grep -q '找不到这次运行' ||
+  fail "不存在的 run id 没有给出提示：$probe"
+echo "ok: 不存在的 run id（表单照常载入、两列网格、提示找不到）"
+
+# 真实的 run id：应当直接把那次运行打开
+real_id=$(ls "$tmp/runs" 2>/dev/null | head -1)
+[ -n "$real_id" ] || fail "找不到可用的 run id"
+dump_page "http://127.0.0.1:$PORT/?run=$real_id" 8000 "$tmp/hash-good.html"
+grep -q '正在看历史运行' "$tmp/hash-good.html" ||
+  fail "带真实 run id 打开时没有进入那次运行：$tmp/hash-good.html"
+grep -q 'id="model-mock-a"' "$tmp/hash-good.html" ||
+  fail "带真实 run id 打开时表单没载入" "$tmp/hash-good.html"
+echo "ok: 真实 run id（直接打开那次运行，表单照常）"
+
 echo "==> 删除一条历史"
 delete_probe='(async () => {
   const before = document.querySelectorAll(".history-item").length;

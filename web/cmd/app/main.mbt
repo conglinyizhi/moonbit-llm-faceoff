@@ -82,11 +82,13 @@ extern "js" fn current_search() -> String = "() => window.location.search"
 /// 算），拿不到就退到 execCommand 的老路子。返回是否已经发出复制指令。
 
 ///|
-/// 把「正在看的那次运行」写进地址栏的 hash。
+/// 把「正在看的那次运行」写进地址栏的 query（`?run=<id>`），空串 = 清掉。
 ///
-/// hash 而不是 query：hash 的变化不会让浏览器重新请求页面，所以刷新能找回它、
-/// 却不会因为一次点击就整页重载。空串 = 清掉。
-extern "js" fn set_hash(hash : String) -> Unit = "(hash) => { try { const next = hash ? '#' + hash : window.location.pathname + window.location.search; history.replaceState(null, '', next) } catch (e) {} }"
+/// 用 query 而不是 hash：hash 的改动属于同文档导航，浏览器不会重新加载页面，
+/// 于是「手动把地址栏里的 id 改成另一条」不会生效（页面还是原来那条）。query
+/// 一改就是一次真正的导航，重载之后按新的 id 走；而这里写地址用
+/// `history.replaceState`，所以自己点开一条运行不会触发重载
+extern "js" fn set_run_param(id : String) -> Unit = "(id) => { try { const url = new URL(window.location.href); if (id) { url.searchParams.set('run', id) } else { url.searchParams.delete('run') } history.replaceState(null, '', url.toString()) } catch (e) {} }"
 
 ///|
 extern "js" fn copy_text(text : String) -> Bool = "(text) => { try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text); return true } const a = document.createElement('textarea'); a.value = text; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); const ok = document.execCommand('copy'); document.body.removeChild(a); return ok } catch (e) { return false } }"
@@ -109,6 +111,9 @@ struct AppModel {
   temperature : Double
   pace_ms : Int
   retry : Int
+  /// 「打不开某次运行」的错误。和 runs_error 分开：列表拉取成功不能把
+  /// 「这次运行不存在」这句话抹掉——它们同时发生（打开 + 刷新列表）
+  viewed_error : String?
   /// 已经点过一次「删除」、正在等第二次确认的那条运行。
   confirm_delete : String?
   /// 打开页面时要从 hash 里恢复的那条运行（恢复过就清掉，只做一次）。
@@ -253,34 +258,13 @@ fn json_name(json : Json) -> String {
 }
 
 ///|
-/// 地址栏 hash 里的那次运行：`#run=<id>`。
-fn hash_run_id() -> String? {
-  let hash = current_hash()
-  if hash == "" {
-    return None
+/// 地址栏 query 里的那次运行：`?run=<id>`。
+fn query_run_id(query : Map[String, String]) -> String? {
+  match query.get("run") {
+    Some(id) => if id == "" { None } else { Some(id) }
+    None => None
   }
-  let body = if hash.has_prefix("#") { hash[1:].to_owned() } else { hash }
-  for part in body.split("&") {
-    let mut key = ""
-    let mut value = ""
-    let mut first = true
-    for piece in part.split("=") {
-      if first {
-        key = piece.to_owned()
-        first = false
-      } else if value == "" {
-        value = piece.to_owned()
-      }
-    }
-    if key == "run" && value != "" {
-      return Some(value)
-    }
-  }
-  None
 }
-
-///|
-extern "js" fn current_hash() -> String = "() => window.location.hash"
 
 ///|
 /// 这次跑「临时 First User Prompt」还是跑测试集。
@@ -309,8 +293,9 @@ fn initial_model() -> AppModel {
     pace_ms: 3000,
     retry: 3,
     system: query.get("system").unwrap_or(""),
+    viewed_error: None,
     confirm_delete: None,
-    pending_run: hash_run_id(),
+    pending_run: query_run_id(query),
     import_path: "",
     panel_tab: if query.get("prompt") is Some(_) {
       "prompt"
@@ -587,17 +572,20 @@ fn app() -> @rabbita.App {
         // 地址栏 hash 里带着一条运行（#run=xxx）就直接打开它：刷新、把链接发给
         // 别人、或者从浏览器历史里退回来，都会走到这里。id 不存在时那次请求会
         // 404，页面按「找不到这次运行」处理。
-        let opening = match model.pending_run {
-          Some(id) =>
-            @cmd.batch([
-              fetch_viewed(id, emit),
-              fetch_runs(emit),
-              fetch_presets(emit),
-            ])
-          None =>
-            @cmd.batch([fetch_meta(emit), fetch_runs(emit), fetch_presets(emit)])
+        // meta 一定要拉：表单、测试集、预设都靠它。第一版这里按「有没有
+        // #run=<id>」分了两条路，带 id 那条漏了 fetch_meta——于是地址栏里有
+        // run id 时页面永远停在「正在载入配置…」，侧栏（那时还得靠 meta 才
+        // 渲染）跟着不出现，两列网格塌成一列
+        let commands : Array[@cmd.Cmd] = [
+          fetch_meta(emit),
+          fetch_runs(emit),
+          fetch_presets(emit),
+        ]
+        match model.pending_run {
+          Some(id) => commands.push(fetch_viewed(id, emit))
+          None => ()
         }
-        ({ ..model, pending_run: None, }, opening)
+        ({ ..model, pending_run: None, }, @cmd.batch(commands))
       },
       update~,
     )
@@ -799,6 +787,7 @@ fn update(
               ..model,
               viewed: Some(viewed),
               busy_run: None,
+              viewed_error: None,
               context: if same {
                 model.context
               } else {
@@ -819,18 +808,22 @@ fn update(
               // 历史运行的标注也要拉：它存在那次运行的目录里，不在当前这次里
               fetch_annotations(id, emit),
               // 写进 hash：刷新之后还能回到这一条，也能把链接发给别人
-              @cmd.effect(fn() { set_hash("run=" + id) }),
+              @cmd.effect(fn() { set_run_param(id) }),
               // 打开的可能还在跑：先接上轮询，跑完自己会停
               @rabbita.delay(poll_viewed(id, emit), 400),
             ]),
           )
         }
-        Err(error) =>
+        Err(_) =>
           (
             {
               ..model,
               busy_run: None,
-              runs_error: Some("打不开 \{id}：" + error.to_string()),
+              viewed: None,
+              // 人话优先：浏览器给的 "Request error, HTTP 404 OK" 对用户没有意义
+              viewed_error: Some(
+                "找不到这次运行（\{id}）——它可能已经被删掉了",
+              ),
             },
             @cmd.none,
           )
@@ -860,6 +853,7 @@ fn update(
             ..model,
             viewed: Some(viewed),
             runs_error: None,
+            viewed_error: None,
             context_case: model.context_case,
             context: model.context,
             context_error: model.context_error,
@@ -871,18 +865,24 @@ fn update(
             (next, @cmd.batch([fetch_runs(emit), fetch_annotations(id, emit)]))
           }
         }
-        Err(error) =>
+        Err(_) =>
           (
             {
               ..model,
               viewed: None,
               // 404 在这里落地：hash 里的 id 不存在（删掉了，或者从来就没有）
-              runs_error: Some("找不到这次运行（\{id}）：\{error}"),
+              viewed_error: Some(
+                "找不到这次运行（\{id}）——它可能已经被删掉了",
+              ),
             },
             @cmd.none,
           )
       }
-    CloseRun => ({ ..model, viewed: None, }, @cmd.effect(fn() { set_hash("") }))
+    CloseRun =>
+      (
+        { ..model, viewed: None, viewed_error: None, },
+        @cmd.effect(fn() { set_run_param("") }),
+      )
     // 删除要按两次：第一次只把按钮变成「确认删除」，第二次才真的删。
     DeleteRun(id) =>
       if model.busy_run == Some(id) {
@@ -1649,7 +1649,7 @@ fn update(
               // 找不到它，点开别的运行之后也回不来
               fetch_runs(emit),
               // 地址栏记住它：刷新之后还能回到这次运行
-              @cmd.effect(fn() { set_hash("run=" + response.id) }),
+              @cmd.effect(fn() { set_run_param(response.id) }),
             ]),
           )
         }
@@ -1927,10 +1927,10 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("div", "app", [
     header(model),
     el("div", "wrap workbench", [
-      match model.meta {
-        Some(meta) => history_panel(meta, model, emit)
-        None => @html.fragment([])
-      },
+      // 侧栏一直渲染，哪怕 meta 还没到：`.workbench` 是两列网格，少一个子元素
+      // 主内容就会掉进第一列（那 270px 里）——加载中或加载失败时整个页面挤成
+      // 一条。空着也得占住那一格
+      history_panel(model.meta, model, emit),
       el("main", "workbench-main", [
         controls(model, emit),
         progress(model),
@@ -2436,22 +2436,9 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
             viewed_banner(viewed, emit),
             match viewed.data {
               // 历史运行也一样能标注（标注在那次运行的目录里）
-              Some(data) =>
-                @shared.results_section(
-                  @shared.with_annotations(data, model.annotations),
-                  mode=model.results_mode,
-                  switch=results_switch(model, emit),
-                  which=model.percentile,
-                  percentile_switch=percentile_switch(model, emit),
-                  editor=fn(case_id, answer_model) {
-                    annotation_editor_for(model, case_id, answer_model, emit)
-                  },
-                  context=fn(case_id) {
-                    @shared.context_button(emit(Msg::OpenContext(case_id)))
-                  },
-                )
+              Some(data) => results_for(model, emit, data)
               // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
-              // 总比一片空白强。
+              // 总比一片空白强
               None =>
                 el("section", "progress-card", [
                   el("div", "progress-head", [
@@ -2472,25 +2459,47 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
             },
           ])
         None =>
-          match model.data {
-            Some(data) =>
-              @shared.results_section(
-                @shared.with_annotations(data, model.annotations),
-                mode=model.results_mode,
-                switch=results_switch(model, emit),
-                which=model.percentile,
-                percentile_switch=percentile_switch(model, emit),
-                editor=fn(case_id, answer_model) {
-                  annotation_editor_for(model, case_id, answer_model, emit)
-                },
-                context=fn(case_id) {
-                  @shared.context_button(emit(Msg::OpenContext(case_id)))
-                },
-              )
-            None => @html.fragment([])
+          match model.viewed_error {
+            // 地址栏里的 run id 打不开：说清楚，而不是给一个空页面
+            Some(message) =>
+              el("section", "progress-card", [
+                el("p", "failed", [txt(message)]),
+                el("p", "hint", [
+                  txt(
+                    "地址栏里那个 #run=… 指向的运行不存在；点侧栏里的任意一条可以打开别的运行。",
+                  ),
+                ]),
+              ])
+            None =>
+              match model.data {
+                Some(data) => results_for(model, emit, data)
+                None => @html.fragment([])
+              }
           }
       }
   }
+}
+
+///|
+/// 一份结果数据的渲染（当前运行与历史运行共用同一套）
+fn results_for(
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+  data : @shared.PageData,
+) -> @html.Html {
+  @shared.results_section(
+    @shared.with_annotations(data, model.annotations),
+    mode=model.results_mode,
+    switch=results_switch(model, emit),
+    which=model.percentile,
+    percentile_switch=percentile_switch(model, emit),
+    editor=fn(case_id, answer_model) {
+      annotation_editor_for(model, case_id, answer_model, emit)
+    },
+    context=fn(case_id) {
+      @shared.context_button(emit(Msg::OpenContext(case_id)))
+    },
+  )
 }
 
 ///|
