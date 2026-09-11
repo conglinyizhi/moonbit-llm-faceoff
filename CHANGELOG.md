@@ -102,6 +102,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The progress bar moves while a run is going.** It was counting finished
+  requests from `runs.jsonl`, and the harness writes that file once, when the
+  whole suite is done — so the bar sat at 0 for the entire run and jumped to 100%
+  at the end. It now counts `case_done` events from the live progress stream (and
+  takes the larger of the two), so failure / retry / truncation counts move too.
+  The live line is also gone once the run ends: polling stops there, which froze
+  `liveAgeMs`, so the pulse and the flowing token bar kept animating over stale
+  numbers. It now hides when the run is not running, and between requests once
+  the last result is older than 1.5s.
+- **The browser suite is ~4x faster.** Every page dump waited a fixed 6–8 seconds
+  after navigating, plus another 2–2.5s after the script — 17 dumps, ~170 of the
+  223 seconds, and none of it had anything to do with the run. `cdp-dump.mjs` now
+  takes a `--wait-for <expr>` readiness condition (polled, with the old number as
+  the cap, so a slow machine behaves exactly as before) and drains for DOM
+  stability instead of sleeping. Each call site passes the condition that its own
+  assertions need — form rendered, run finished, history present, log tail
+  arrived. Measured: **223s → 58s**, 15/15 waits satisfied in 88–573ms.
+
 - **Test runs clean up after themselves.** `web-e2e.sh` builds a temp directory
   per run and was leaving one behind every time (31 of them had piled up in the
   repository root, each holding a browser profile). Two causes: `[ -n "$pid" ] &&

@@ -40,7 +40,7 @@ smoke:  ## the CLIs end to end, against a local mock endpoint
 api:  ## the server HTTP contract: overrides, exports, traversal guards
 	$(MOON) run --target native scripts/server-api.mbtx
 
-e2e:  ## browser end to end; needs chromium, and it is slow
+e2e:  ## browser end to end; needs chromium (~1 min, was ~4)
 	bash scripts/web-e2e.sh
 
 # The one target that needs a real endpoint: export MOONLLM_BASE_URL,

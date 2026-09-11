@@ -2014,7 +2014,7 @@ fn progress(model : AppModel) -> @html.Html {
         ([] : Array[@html.Html]),
       ),
     ]),
-    @shared.live_row(model.live),
+    @shared.live_row(if model.status == "running" { model.live } else { None }),
     el("div", "progress-counts", [
       txt(
         "失败 \{model.failures} · 重试 \{model.retried} · 截断 \{model.truncated}",

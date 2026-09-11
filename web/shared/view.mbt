@@ -587,6 +587,12 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
     None => return @html.fragment([])
     Some(live) => live
   }
+  // 上一条已经返回、而它又不新鲜了：说明现在没有请求在飞（用例之间的间隔、
+  // 或者整次运行已经结束、轮询停了）。这时候留着那一行只有坏处——数字是旧的，
+  // 动画还在跑，看着就像「还在生成」。宁可不显示。
+  if live.event == "case_done" && live.age_ms > 1500.0 {
+    return @html.fragment([])
+  }
   // 2 秒没有任何新分片就算安静下来了：可能是模型在长思考，也可能是上游卡住，
   // 页面分不清，但能说清「多久没有输出了」——这就够人决定要不要再等。
   let stalled = live.age_ms > 2000.0

@@ -1495,7 +1495,11 @@ async fn get_run(
     return
   }
   let exit_code = read_text(dir + "/exit_code").trim(chars=" \t\r\n").to_owned()
-  let done = count_lines(dir + "/runs.jsonl")
+  // 运行中的计数只能来自进度事件：`runs.jsonl` 是 bench 跑完才一次性写出来的，
+  // 整个运行期间它都是空的——照它数，进度条就会一直停在 0，直到结束才跳到 100%。
+  let live_counts = progress_counts(dir + "/progress.jsonl")
+  let file_done = count_lines(dir + "/runs.jsonl")
+  let done = if file_done > live_counts.0 { file_done } else { live_counts.0 }
   let total = total_of(dir + "/request.json")
   let status = if exit_code.length() == 0 {
     "running"
@@ -1527,10 +1531,17 @@ async fn get_run(
     }
     None => ()
   }
+  // 三个计数同样取两边的大者：文件里有就是最终的，没有就用事件里数出来的
   let counts = run_counts(dir + "/runs.jsonl")
-  payload["failures"] = Json::number(counts.0.to_double())
-  payload["retried"] = Json::number(counts.1.to_double())
-  payload["truncated"] = Json::number(counts.2.to_double())
+  payload["failures"] = Json::number(
+    @cmp.maximum(counts.0, live_counts.1).to_double(),
+  )
+  payload["retried"] = Json::number(
+    @cmp.maximum(counts.1, live_counts.2).to_double(),
+  )
+  payload["truncated"] = Json::number(
+    @cmp.maximum(counts.2, live_counts.3).to_double(),
+  )
   if status == "done" {
     match parse_json(read_text(dir + "/data.json")) {
       Some(parsed) => payload["data"] = parsed
@@ -1551,6 +1562,43 @@ fn parse_json(text : String) -> Json? {
     return None
   }
   Some(@json.parse(text) catch { _ => return None })
+}
+
+///|
+/// 从进度事件里数「跑完了几条 / 失败几条 / 重试几条 / 截断几条」。
+///
+/// 只认 `case_done` 行：`tick` 是过程，`case_start` 是「开始了但还没有结果」。
+/// 文件不存在（旧运行）或读不出来都算全 0，页面照旧能看。
+///
+/// 返回 (完成, 失败, 重试, 截断)。
+async fn progress_counts(path : String) -> (Int, Int, Int, Int) {
+  let mut done = 0
+  let mut failures = 0
+  let mut retried = 0
+  let mut truncated = 0
+  for line in read_text(path).split("\n") {
+    if !line.contains("\"event\":\"case_done\"") {
+      continue
+    }
+    let json = @json.parse(line.trim(chars=" \t\r").to_owned()) catch {
+      _ => continue
+    }
+    guard json is Object(obj) else { continue }
+    done = done + 1
+    match obj.get("ok") {
+      Some(True) => ()
+      _ => failures = failures + 1
+    }
+    match obj.get("attempts") {
+      Some(Number(value, ..)) => if value > 1.0 { retried = retried + 1 }
+      _ => ()
+    }
+    match obj.get("truncated") {
+      Some(True) => truncated = truncated + 1
+      _ => ()
+    }
+  }
+  (done, failures, retried, truncated)
 }
 
 ///|

@@ -207,6 +207,10 @@ async fn Progress::case_done(
     "case": Json::string(result.case_id),
     "repeat": Json::number(result.repeat.to_double()),
     "ok": Json::boolean(result.ok),
+    // 失败/重试/截断也随事件走：runs.jsonl 是整次跑完才写的，页面在运行期间
+    // 只看得到这个文件，不从这儿数就永远是 0
+    "attempts": Json::number(result.attempts.to_double()),
+    "truncated": Json::boolean(result.finish_reason == Some("length")),
     // 每条事件都自带身份与上限：页面不必记住上一条，也不会在 case 边界上
     // 把进度条抖没了
     "maxTokens": Json::number(self.max_tokens.to_double()),
