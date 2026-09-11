@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web real-gateway install uninstall fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web serve real-gateway install uninstall fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -72,6 +72,14 @@ demo:  ## zero-API-key demo of all three paths
 
 web:  ## build the page and the static report
 	bash web/build.sh
+
+# 服务端必须从 web/ 启动：out/、runs/、cases/、presets.json 都是按工作目录解析的，
+# 从仓库根起会「/api 通、页面全 404」。这个目标把 cd 做掉，省得每次记。
+serve:  ## build the page, then start the server from web/ (Ctrl-C to stop)
+	bash web/build.sh
+	@echo
+	@echo "打开 http://127.0.0.1:$${LLM_WEB_PORT:-8137}/  （Ctrl-C 停）"
+	cd web && ./_build/native/debug/build/cmd/server/server.exe
 
 fmt:  ## format, and refresh the generated .mbti
 	$(MOON) fmt

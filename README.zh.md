@@ -75,14 +75,21 @@ model mock-a
 ### 3. 打开网页版——同样不需要 key
 
 ```bash
-bash web/build.sh
-cd web
-./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
+make serve          # 构建页面，然后从 web/ 起服务端
+# → http://127.0.0.1:8137/
 ```
 
-打开 <http://127.0.0.1:8137/> 就在那儿干活：勾模型、选用例、调参数、把 API key 填进去（或者在启动服务端前就设好），然后点 **开始评测**。进度、实时计数、导出都在那一页上。
+也可以按两步走：
 
-**服务端要从 `web/` 目录里启动。** 它的 `out/`、`runs/` 和 `../bench/cases.example.jsonl` 都按当前工作目录解析；从仓库根目录启动的话，`/api/meta` 会通，但页面本身一律 404。
+```bash
+bash web/build.sh
+cd web
+./_build/native/debug/build/cmd/server/server.exe
+```
+
+两种方式都记住一条：**服务端必须以 `web/` 作为工作目录。** 它的 `out/`、`runs/`、
+`cases/`、`presets.json` 都按当前工作目录解析；从仓库根启动的话，`/api` 通、
+页面一律 404。`make serve` 替你做了那次 `cd`。
 
 要连真实网关，要么启动前导出 `MOONLLM_BASE_URL` / `MOONLLM_API_KEY`，要么干脆不配 key、**在页面上填**——它只对这一次运行生效，也不会写到磁盘。
 

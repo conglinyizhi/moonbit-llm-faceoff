@@ -29,6 +29,11 @@ import {
 let default_min_gap_ms : UInt64 = 300
 
 ///|
+/// 给子进程的 token 预算。够推理模型想完并开口，否则截断会把流式判定也一起弄挂。
+/// STREAM_MAX_TOKENS 可覆盖。
+let default_max_tokens : String = "2048"
+
+///|
 extern "c" fn c_exit(code : Int) -> Unit = "exit"
 
 ///|
@@ -55,7 +60,21 @@ async fn main {
   }
   // 只有 --stream 和 prompt 走命令行。端点、模型、密钥都靠继承来的环境变量，
   // 所以它们不会出现在 ps 的输出里。
-  let child_args : Array[String] = ["--stream", "--max-tokens", "256", prompt]
+  // 预算给得大一点。真实推理模型（MiniCPM5-1B 就是）能把几百个 token 全花在
+  // 思考上——那时可见正文为空，CLI 会以非零退出，而这是预算问题，不是端点问题。
+  // 之前写死 256，就真的在这里误报过一次。
+  let pocket = match @env.get_env_var("STREAM_MAX_TOKENS") {
+    Some(text) => {
+      let value = @string.parse_int(text) catch { _ => 0 }
+      if value > 0 {
+        value.to_string()
+      } else {
+        default_max_tokens
+      }
+    }
+    None => default_max_tokens
+  }
+  let child_args : Array[String] = ["--stream", "--max-tokens", pocket, prompt]
   let (reader, sink) = @process.read_from_process() catch {
     _ => {
       fail("无法创建读取管道")
@@ -96,7 +115,7 @@ async fn main {
   let total_ms = @env.now() - start
   if code != 0 {
     fail(
-      "子进程退出码 \{code}——对着这个端点的一次流式请求没跑通，先修这个再看流式",
+      "子进程退出码 \{code}。它自己打印的那几行才是原因，常见两种：\n  · 没有可见正文——推理模型把 --max-tokens \{pocket} 全花在思考上；用 STREAM_MAX_TOKENS 调大\n  · 连不上 / 4xx——那是端点和鉴权的事，先修那个再看流式",
     )
   }
   if first_ms == 0 || bytes_total == 0 {

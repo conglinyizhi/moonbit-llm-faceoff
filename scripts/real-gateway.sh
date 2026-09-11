@@ -34,6 +34,9 @@
 #   REAL_TRUNCATE_MAX_TOKENS=8  截断探针用的 token 预算（网关对预算有最小值限制时调大）
 #   REAL_ONE_SHOT_MAX_TOKENS=256  one-shot 探针的 token 预算（推理模型需要的多些）
 #   STREAM_MIN_GAP_MS=300    流式判定的最小间隔，见 scripts/check_stream.mbtx
+#   REAL_STREAM_MAX_TOKENS=2048  流式探针的 token 预算。推理模型会把预算全花在
+#                            思考上、可见正文为空，那时 CLI 非零退出，看起来很像
+#                            端点坏了——其实是预算不够
 
 set -uo pipefail
 
@@ -269,7 +272,11 @@ fi
 
 say "==> 2/4 streaming"
 prompt_stream="用大约 150 个字说明为什么流式输出对交互体验重要，不要用列表。"
-ev_section "2. streaming" "$STREAM_BIN $FACEOFF_BIN \"$prompt_stream\""
+# 预算给推理模型留够：想不完就开不了口，而那时失败的样子很像端点坏了。
+# 第一次对着 MiniCPM5-1B 跑就是撞在这个上面（写死 256）。
+stream_tokens="${REAL_STREAM_MAX_TOKENS:-2048}"
+export STREAM_MAX_TOKENS="$stream_tokens"
+ev_section "2. streaming" "STREAM_MAX_TOKENS=$stream_tokens $STREAM_BIN $FACEOFF_BIN \"$prompt_stream\""
 if "$STREAM_BIN" "$FACEOFF_BIN" "$prompt_stream" >"$tmp/stream.out" 2>"$tmp/stream.err"; then
   ev_body "$tmp/stream.out"
   ev_ok

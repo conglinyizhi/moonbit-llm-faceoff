@@ -102,6 +102,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `make serve` builds the page and then starts the server **from `web/`**, which is
+  the part everyone forgets: the server resolves `out/`, `runs/`, `cases/` and
+  `presets.json` against its working directory, so starting it from the repository
+  root answers `/api/meta` and 404s every page request. The README's two-step
+  version still works; this just removes the trap from the one-liner.
+- The streaming probe's token budget is no longer hardcoded, and its failure
+  message no longer guesses. `scripts/check_stream.mbtx` was asking for 256
+  output tokens; a reasoning model can spend all of them thinking, which leaves
+  the visible answer empty, which makes `faceoff` exit non-zero — and the probe
+  then reported that as "a streaming request against this endpoint did not work",
+  pointing at the gateway instead of at its own budget. Reported by the first
+  real-gateway run (`docs/real-gateway-run.md`): 3 probes passed, this one failed,
+  and the fix was on our side. The budget is now `STREAM_MAX_TOKENS` (default
+  2048), named in the evidence line, and the message lists both likely causes
+  instead of choosing one.
+
 - **Two runs, side by side.** Tick two entries in the history rail and the main
   area becomes a comparison in three parts: which parameters actually differ
   (models, case set, repeats, `max_tokens`, pacing, the gateway — so "I only
