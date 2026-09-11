@@ -102,6 +102,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`real-gateway.sh` is now `real-gateway.mbtx`** — the same four probes against
+  a real endpoint, the same evidence file, and the same key handling: read from
+  the environment only, never on a command line, and if the key turns up in the
+  evidence the script deletes the file and exits non-zero rather than leave it
+  behind. `@env.now()` milliseconds are turned into a UTC timestamp with the
+  civil-from-days algorithm, so it no longer shells out to `date` either.
+
+  What is left in shell after this round: `demo.sh` and `web/build.sh` (next), the
+  `lib.sh` they share, and `web-e2e.sh` with its `cdp-dump.mjs` (deliberately
+  deferred — that one drives Chromium over a CDP WebSocket, which is a separate
+  risk and its own round).
+
 - **`server-api.sh` is now `server-api.mbtx`** (42 assertions, the same ones, and
   what `make ci` runs). The shell version drove the HTTP contract with `curl`
   plus `sed`/`grep` on the response text; the MoonBit version calls the endpoints

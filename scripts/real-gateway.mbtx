@@ -1,0 +1,676 @@
+///| 对着**真实**网关跑一遍，把过程与结果留证到 docs/real-gateway-run.md。
+///
+///   export MOONLLM_BASE_URL="https://<你的网关>/v1"
+///   export MOONLLM_API_KEY="sk-..."
+///   export MOONLLM_MODEL="<模型名>"
+///   moon run --target native scripts/real-gateway.mbtx
+///
+/// 这是 scripts/real-gateway.sh 的 .mbtx 版：报告、断言、留证位置一一对应。
+///
+/// 为什么单独一个：仓库里其他测试全部跑在离线假端点上（demo.sh / smoke.mbtx /
+/// server-api.mbtx / web-e2e.sh），它们证明不了对真实网关的适配。离线全绿和
+/// 「真实 API 能跑」是两件事，这个脚本就是那条缺掉的证据。
+///
+/// 四个探针，各有独立结论：
+///   1. one-shot     真实端点出真结果
+///   2. streaming    分片是增量到达的，不是攒完再吐（量首字节 vs 进程退出）
+///   3. 错 key       退出非零、报 4xx、key 不回显
+///   4. 截断         max_tokens 小于回复长度时，finish_reason=length 落进截断计数
+///
+/// key 只从环境变量读：不上命令行、不写进留证（落盘前会查一遍，出现就删文件并非零退出）。
+///
+/// 可调环境变量：
+///   REAL_MODEL_B=<模型B>          配合 --compare 跑双模型对比
+///   REAL_EVIDENCE=<路径>          留证文件，默认 docs/real-gateway-run.md
+///   REAL_RUNS_OUT=<路径>          --compare 的原始 runs.jsonl
+///   REAL_CASES=<路径>             --compare 的用例集
+///   REAL_REPEATS=<n>              --compare 的 repeats，默认 1
+///   REAL_SHOW_FULL_URL=1          留证里写完整端点（默认只写 scheme://host）
+///   STREAM_MIN_GAP_MS=300         流式判定的最小间隔（见 check_stream.mbtx）
+///   REAL_STREAM_MAX_TOKENS=2048   流式探针的 token 预算：推理模型会把预算全花在
+///                                 思考上、可见正文为空，那时 CLI 非零退出，看起来
+///                                 很像端点坏了
+///   REAL_ONE_SHOT_MAX_TOKENS=256  one-shot 探针的 token 预算
+///   REAL_TRUNCATE_MAX_TOKENS=8    截断探针的 token 预算
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/fs" @fs,
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/string" @string,
+}
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+// ---------------------------------------------------------------- 结果
+
+///|
+let results : Array[String] = []
+
+///|
+fn say(message : String) -> Unit {
+  println(message)
+}
+
+///|
+fn ok(name : String) -> Unit {
+  results.push("ok   " + name)
+  say("ok: " + name)
+}
+
+///|
+/// 有结论但不算失败：本地无鉴权端点那种，测不出结论是事实，不是缺陷。
+fn skip(name : String) -> Unit {
+  results.push("warn " + name)
+  say("warn: " + name)
+}
+
+///|
+fn bad(name : String) -> Unit {
+  results.push("FAIL " + name)
+  say("FAIL: " + name)
+}
+
+///|
+async fn bail(message : String, code : Int) -> Unit {
+  @stdio.stderr.write(message + "\n") catch { _ => () }
+  c_exit(code)
+}
+
+///|
+fn trim(text : String) -> String {
+  text.trim(chars=" \t\r\n").to_owned()
+}
+
+///|
+/// StringView 版本的 trim：split 出来的是 StringView，别每处都写一遍。
+fn trim_view(text : StringView) -> String {
+  text.trim(chars=" \t\r\n").to_owned()
+}
+
+///|
+fn env_or(keys : Array[String], fallback : String) -> String {
+  for key in keys {
+    match @env.get_env_var(key) {
+      Some(value) => if value != "" { return value }
+      None => ()
+    }
+  }
+  fallback
+}
+
+///|
+fn text_of(data : &@io.Data) -> String {
+  data.text() catch { _ => "" }
+}
+
+// ---------------------------------------------------------------- 进程
+
+///|
+struct Output {
+  code : Int
+  out : String
+  err : String
+}
+
+///|
+async fn run(
+  bin : String,
+  args : Array[String],
+  env : Map[String, String],
+) -> Output {
+  let (code, out, err) = @process.collect_output(
+    bin,
+    args,
+    extra_env=env,
+    inherit_env=true,
+  ) catch {
+    err => return { code: -1, out: "", err: err.to_string() }
+  }
+  { code, out: text_of(out), err: text_of(err) }
+}
+
+// ---------------------------------------------------------------- 文件
+
+///|
+async fn read_text(path : String) -> String {
+  let data = @fs.read_file(path) catch { _ => return "" }
+  text_of(data)
+}
+
+///|
+async fn write_text(path : String, content : String) -> Bool {
+  @fs.write_file(path, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+///|
+async fn copy_file(from : String, to : String) -> Bool {
+  let content = @fs.read_file(from) catch { _ => return false }
+  @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+///|
+async fn bin_path(path_without_suffix : String) -> String {
+  let exe = path_without_suffix + ".exe"
+  if (@fs.exists(exe) catch { _ => false }) {
+    exe
+  } else {
+    path_without_suffix
+  }
+}
+
+///|
+async fn build_mbtx(src : String, out : String) -> Bool {
+  let built = run("moon", ["build", "--target", "native", src], {})
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    return false
+  }
+  let single = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single) catch { _ => false }) {
+    single
+  } else {
+    "scripts/_build/native/debug/build/single/single"
+  }
+  if !copy_file(single, out) {
+    return false
+  }
+  @fs.chmod(out, 0o755) catch { _ => () }
+  true
+}
+
+// ---------------------------------------------------------------- 时间
+
+///|
+/// epoch 毫秒 → 「YYYY-MM-DD HH:MM UTC」。
+///
+/// 自己算而不是调 `date`：这就是这个脚本换掉 shell 的意义所在。日期换算是
+/// Howard Hinnant 那套 civil_from_days，标准算法，不涉及时区。
+fn iso_utc(now_ms : UInt64) -> String {
+  let total_seconds = (now_ms / 1000).to_int64()
+  let days = total_seconds / 86400
+  let seconds_of_day = total_seconds % 86400
+  let (year, month, day) = civil_from_days(days.to_int())
+  let hour = (seconds_of_day / 3600).to_int()
+  let minute = ((seconds_of_day % 3600) / 60).to_int()
+  pad4(year) +
+  "-" +
+  pad2(month) +
+  "-" +
+  pad2(day) +
+  " " +
+  pad2(hour) +
+  ":" +
+  pad2(minute) +
+  " UTC"
+}
+
+///|
+fn civil_from_days(z0 : Int) -> (Int, Int, Int) {
+  let z = z0 + 719468
+  let era = (if z >= 0 { z } else { z - 146096 }) / 146097
+  let doe = z - era * 146097
+  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  let y = yoe + era * 400
+  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  let mp = (5 * doy + 2) / 153
+  let d = doy - (153 * mp + 2) / 5 + 1
+  let m = if mp < 10 { mp + 3 } else { mp - 9 }
+  (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+///|
+fn pad2(value : Int) -> String {
+  if value < 10 {
+    "0" + value.to_string()
+  } else {
+    value.to_string()
+  }
+}
+
+///|
+fn pad4(value : Int) -> String {
+  let text = value.to_string()
+  let mut out = text
+  while out.length() < 4 {
+    out = "0" + out
+  }
+  out
+}
+
+// ---------------------------------------------------------------- 留证
+
+///|
+struct Evidence {
+  path : String
+  body : StringBuilder
+}
+
+///|
+fn Evidence::head(
+  self : Evidence,
+  endpoint : String,
+  models : String,
+  toolchain : String,
+) -> Unit {
+  self.body.write_string("# 真实网关跑通记录\n\n")
+  self.body.write_string(
+    "> 由 `scripts/real-gateway.mbtx` 生成，随时可以重跑覆盖。\n",
+  )
+  self.body.write_string(
+    "> **不含密钥**：脚本只从环境变量读 key，写盘前会查一遍确认它没出现。\n\n",
+  )
+  self.body.write_string("- 时间：" + iso_utc(@env.now()) + "\n")
+  self.body.write_string("- 端点：" + endpoint + "\n")
+  self.body.write_string("- 模型：" + models + "\n")
+  self.body.write_string("- 工具链：" + toolchain + "\n")
+  self.body.write_string(
+    "- 探针：one-shot / streaming / 错 key / 截断\n\n",
+  )
+  self.body.write_string(
+    "四个探针各自回答一个问题：真实端点能不能出结果、分片是不是真的增量到达、\n",
+  )
+  self.body.write_string(
+    "鉴权失败会不会被吞掉或把 key 吐出来、被 token 预算截断的回复会不会被当成功。\n\n",
+  )
+  self.body.write_string(
+    "下面的命令是实际跑的那一条，照抄能跑：二进制就在仓库里（构建产物不在 PATH 上），\n",
+  )
+  self.body.write_string("端点 / 模型 / 密钥来自上面那三个环境变量。\n")
+}
+
+
+///|
+fn Evidence::section(self : Evidence, title : String, command : String) -> Unit {
+  self.body.write_string("\n## " + title + "\n\n```text\n$ " + command + "\n")
+}
+
+///|
+/// 输出进留证，太长就截断——留证是给人读的，不是原始日志。
+fn Evidence::excerpt(self : Evidence, text : String, cap : Int) -> Unit {
+  let trimmed = trim(text)
+  if trimmed == "" {
+    self.body.write_string("(无输出)\n")
+  } else if trimmed.length() > cap {
+    self.body.write_string(trimmed[:cap].to_owned() + "\n…（已截断）\n")
+  } else {
+    self.body.write_string(trimmed + "\n")
+  }
+}
+
+///|
+fn Evidence::verdict(self : Evidence, verdict : String, note : String) -> Unit {
+  if note == "" {
+    self.body.write_string("\n结果：" + verdict + "\n```\n")
+  } else {
+    self.body.write_string("\n结果：" + verdict + " — " + note + "\n```\n")
+  }
+}
+
+///|
+async fn Evidence::flush(self : Evidence) -> Unit {
+  ignore(write_text(self.path, self.body.to_string()))
+}
+
+// ---------------------------------------------------------------- 主体
+
+///|
+async fn main {
+  let args = @env.args().filter(fn(arg) { arg != "--" })
+  let mut compare = false
+  for arg in args {
+    match arg {
+      "--compare" => compare = true
+      "-h" | "--help" => {
+        say("用法：moon run --target native scripts/real-gateway.mbtx [--compare]")
+        return
+      }
+      _ => ()
+    }
+  }
+
+  let base_url = env_or(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"], "")
+  let api_key = env_or(["MOONLLM_API_KEY", "OPENAI_API_KEY", "LLM_API_KEY"], "")
+  let model = env_or(["MOONLLM_MODEL", "OPENAI_MODEL"], "")
+  let missing : Array[String] = []
+  if base_url == "" {
+    missing.push("MOONLLM_BASE_URL")
+  }
+  if api_key == "" {
+    missing.push("MOONLLM_API_KEY")
+  }
+  if model == "" {
+    missing.push("MOONLLM_MODEL")
+  }
+  if missing.length() > 0 {
+    bail(
+      "缺少环境变量：" +
+      missing.join("、") +
+      "\n必须 export，子进程是从环境里读它们的：\n" +
+      "  export MOONLLM_BASE_URL=\"https://<你的网关>/v1\" MOONLLM_API_KEY=\"sk-...\" MOONLLM_MODEL=\"<模型名>\"",
+      2,
+    )
+    return
+  }
+  // 统一成 MOONLLM_* 再交给子进程，免得 OPENAI_* 与 MOONLLM_* 同时存在时两边理解不同
+  let child_env : Map[String, String] = {
+    "MOONLLM_BASE_URL": base_url,
+    "MOONLLM_API_KEY": api_key,
+    "MOONLLM_MODEL": model,
+  }
+  let evidence_path = env_or(["REAL_EVIDENCE"], "docs/real-gateway-run.md")
+  let runs_out = env_or(["REAL_RUNS_OUT"], "docs/real-gateway-runs.jsonl")
+  let model_b = env_or(["REAL_MODEL_B"], "")
+  let cases = env_or(["REAL_CASES"], "bench/cases.example.jsonl")
+  let repeats = env_or(["REAL_REPEATS"], "1")
+  let one_shot_tokens = env_or(["REAL_ONE_SHOT_MAX_TOKENS"], "256")
+  let stream_tokens = env_or(["REAL_STREAM_MAX_TOKENS"], "2048")
+  let truncate_tokens = env_or(["REAL_TRUNCATE_MAX_TOKENS"], "8")
+
+  say("==> 构建")
+  let built = run("moon", ["build", "--target", "native"], {})
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    bail("构建失败", 1)
+    return
+  }
+  let tmp = @fs.tmpdir(prefix="real-gateway") catch { _ => "" }
+  if tmp == "" {
+    bail("建不了临时目录", 1)
+    return
+  }
+  @fs.mkdir(tmp, recursive=true) catch { _ => () }
+  if !build_mbtx("scripts/check_stream.mbtx", tmp + "/check-stream") {
+    bail("check_stream.mbtx 编译失败", 1)
+    return
+  }
+  let faceoff = bin_path("_build/native/debug/build/cmd/faceoff/faceoff")
+  let bench = bin_path("_build/native/debug/build/cmd/bench/bench")
+  if !(@fs.exists(faceoff) catch { _ => false }) ||
+    !(@fs.exists(bench) catch { _ => false }) {
+    bail("缺少构建产物：\{faceoff} / \{bench}", 1)
+    return
+  }
+
+  // 留证里默认不写完整端点：有些网关把 token 拼在 URL 路径里
+  let endpoint = if env_or(["REAL_SHOW_FULL_URL"], "") != "" {
+    base_url
+  } else {
+    masked_url(base_url)
+  }
+  let models_line = if model_b == "" {
+    model
+  } else {
+    model + "、" + model_b
+  }
+  let version = run("moon", ["version"], {})
+  let ev : Evidence = {
+    path: evidence_path,
+    body: StringBuilder(),
+  }
+  ev.head(endpoint, models_line, first_line(version.out))
+
+  say("==> 真实网关：\{endpoint}   模型：\{model}")
+  say("==> 本次会打 3 次模型请求（都限在很小的 token 数）")
+  say("")
+
+  // ---- 1. one-shot
+  say("==> 1/4 one-shot")
+  let prompt_one = "用一句话说明什么是甲板风。"
+  ev.section(
+    "1. one-shot",
+    "\{faceoff} --max-tokens \{one_shot_tokens} \"\{prompt_one}\"",
+  )
+  let one = run(
+    faceoff,
+    ["--max-tokens", one_shot_tokens, prompt_one],
+    child_env,
+  )
+  if one.code != 0 {
+    ev.excerpt(one.err, 2000)
+    ev.verdict("FAIL", "退出码 \{one.code}")
+    bad("1/4 one-shot：退出码 \{one.code}（stderr 见留证文件）")
+  } else if trim(one.out) == "" {
+    ev.excerpt(one.err, 2000)
+    ev.verdict("FAIL", "退出码 0，但 stdout 是空的")
+    bad("1/4 one-shot：退出码 0 但没输出")
+  } else {
+    ev.excerpt(one.out, 2000)
+    ev.verdict("ok", "\{one.out.length()} 字节")
+    ok("1/4 one-shot：真实端点出结果")
+  }
+
+  // ---- 2. streaming
+  say("==> 2/4 streaming")
+  let prompt_stream = "用大约 150 个字说明为什么流式输出对交互体验重要，不要用列表。"
+  let stream_env = child_env.copy()
+  stream_env["STREAM_MAX_TOKENS"] = stream_tokens
+  ev.section(
+    "2. streaming",
+    "STREAM_MAX_TOKENS=\{stream_tokens} \{tmp}/check-stream \{faceoff} \"\{prompt_stream}\"",
+  )
+  let stream = run(
+    tmp + "/check-stream",
+    [faceoff, prompt_stream],
+    stream_env,
+  )
+  if stream.code == 0 {
+    ev.excerpt(stream.out, 2000)
+    ev.verdict("ok", "")
+    ok("2/4 streaming：\{trim(stream.out)}")
+  } else {
+    ev.excerpt(stream.err, 2000)
+    ev.verdict("FAIL", "见上面的输出")
+    bad("2/4 streaming：\{last_line(stream.err)}")
+  }
+
+  // ---- 3. 错 key
+  say("==> 3/4 错 key")
+  // 故意无效的 key。这里必须走命令行：要的就是「绕过环境里那把真 key」，
+  // 而且它不是任何人的凭证。
+  let bad_key = "sk-invalid-key-for-faceoff-check-0000"
+  ev.section("3. 错 key", "\{faceoff} --api-key <故意无效的 key> --max-tokens 16 \"hi\"")
+  let wrong = run(faceoff, ["--api-key", bad_key, "--max-tokens", "16", "hi"], child_env)
+  if wrong.code == 0 {
+    ev.excerpt(wrong.err + wrong.out, 2000)
+    ev.verdict("warn", "端点用一把无效 key 也返回了 200")
+    skip("3/4 错 key：这个端点不校验密钥（本地端点常见），这一项测不出结论")
+  } else if !wrong.err.contains("http 4") {
+    ev.excerpt(wrong.err, 2000)
+    ev.verdict("FAIL", "退出码 \{wrong.code}，但没看到 4xx（网关自己出错了？）")
+    bad("3/4 错 key：退出码 \{wrong.code}，但错误里没有 4xx")
+  } else if wrong.err.contains(bad_key) {
+    ev.excerpt(wrong.err, 2000)
+    ev.verdict("FAIL", "无效 key 被原样回显")
+    bad("3/4 错 key：无效 key 被原样回显，遮蔽没生效")
+  } else if wrong.err.contains(api_key) || wrong.out.contains(api_key) {
+    ev.excerpt(wrong.err, 2000)
+    ev.verdict("FAIL", "真 key 出现在错误输出里")
+    bad("3/4 错 key：真 key 出现在错误输出里")
+  } else {
+    ev.excerpt(wrong.err, 2000)
+    ev.verdict("ok", "退出码 \{wrong.code}，报 4xx，key 没回显")
+    ok("3/4 错 key：退出非零、报 4xx、key 没回显")
+  }
+
+  // ---- 4. 截断
+  say("==> 4/4 截断")
+  let prompt_trunc = "写一段大约 200 字的说明。"
+  let trunc_jsonl = tmp + "/trunc.jsonl"
+  let trunc_run = run(
+    bench,
+    [
+      "--models", model,
+      "--prompt", prompt_trunc,
+      "--repeats", "1",
+      "--max-tokens", truncate_tokens,
+      "--json", trunc_jsonl,
+    ],
+    child_env,
+  )
+  ev.section(
+    "4. 截断",
+    "\{bench} --models \{model} --prompt \"\{prompt_trunc}\" --repeats 1 --max-tokens \{truncate_tokens}",
+  )
+  let trunc_log = read_text(trunc_jsonl)
+  if trunc_run.code != 0 {
+    ev.excerpt(trunc_run.out, 2000)
+    ev.verdict("FAIL", "退出码 \{trunc_run.code}（被截断的运行不该算失败）")
+    bad("4/4 截断：bench 退出码 \{trunc_run.code}")
+  } else if !trunc_log.contains("\"finish_reason\":\"length\"") {
+    ev.excerpt(trunc_run.out, 2000)
+    ev.verdict(
+      "FAIL",
+      "网关没按 max_tokens 报截断，或这次回复短到 8 个 token 都用不完",
+    )
+    bad("4/4 截断：没有 finish_reason=length")
+  } else if !trunc_run.out.contains("truncated 1") {
+    ev.excerpt(trunc_run.out, 2000)
+    ev.verdict("FAIL", "finish_reason 是 length，但摘要里没计进截断数")
+    bad("4/4 截断：截断没被计数")
+  } else {
+    ev.excerpt(trunc_run.out, 2000)
+    ev.verdict("ok", "finish_reason=length，摘要计进 truncated 1")
+    ok("4/4 截断：被预算截断的回复计进截断数，没当成功")
+  }
+
+  // ---- 5. 对比（可选）
+  if compare {
+    say("==> 5/5 双模型对比")
+    if model_b == "" {
+      bail("REAL_MODEL_B 没设，--compare 跑不了", 2)
+      return
+    }
+    if !(@fs.exists(cases) catch { _ => false }) {
+      bail("找不到用例集 \{cases}（REAL_CASES 可以指定别的）", 2)
+      return
+    }
+    ev.section(
+      "5. 双模型对比",
+      "\{bench} --models \{model},\{model_b} --cases \{cases} --repeats \{repeats}",
+    )
+    let cmp = run(
+      bench,
+      [
+        "--models", model + "," + model_b,
+        "--cases", cases,
+        "--repeats", repeats,
+        "--max-tokens", "512",
+        "--json", runs_out,
+      ],
+      child_env,
+    )
+    let cmp_runs = read_text(runs_out)
+    if cmp.code != 0 && cmp_runs == "" {
+      ev.excerpt(cmp.err, 2000)
+      ev.verdict("FAIL", "退出码 \{cmp.code}")
+      bad("5/5 对比：bench 退出码 \{cmp.code}")
+    } else if !cmp.out.contains("comparison (median per model)") {
+      ev.excerpt(cmp.out, 4000)
+      ev.verdict("FAIL", "报告里没有对比表")
+      bad("5/5 对比：报告里没有对比表")
+    } else {
+      ev.excerpt(cmp.out, 6000)
+      ev.body.write_string(
+        "\n原始逐条记录：`" + runs_out + "`（" + line_count(cmp_runs).to_string() + " 行）\n",
+      )
+      ev.verdict("ok", "两模型跑完，报告见上")
+      ok("5/5 对比：\{line_count(cmp_runs)} 条运行记录")
+    }
+  }
+
+  // ---- 收尾
+  let failures = results.filter(fn(line) { line.has_prefix("FAIL") }).length()
+  let warnings = results.filter(fn(line) { line.has_prefix("warn") }).length()
+  let passed = results.length() - failures - warnings
+  ev.body.write_string("\n## 结论\n\n")
+  ev.body.write_string(
+    "- ok \{passed} / warn \{warnings} / FAIL \{failures}\n",
+  )
+  for line in results {
+    ev.body.write_string("  - " + line + "\n")
+  }
+  ev.flush()
+
+  // key 到底有没有混进去：留证是准备提交的，这一步不能省
+  let evidence_text = read_text(evidence_path)
+  let runs_text = read_text(runs_out)
+  if evidence_text.contains(api_key) || runs_text.contains(api_key) {
+    @fs.remove(evidence_path) catch { _ => () }
+    @fs.remove(runs_out) catch { _ => () }
+    bail(
+      "密钥出现在留证文件里，已删除。这是脚本的 bug，不是你的操作问题。",
+      1,
+    )
+    return
+  }
+
+  say("")
+  say("留证：\{evidence_path}")
+  if compare && runs_text != "" {
+    say("原始记录：\{runs_out}")
+  }
+  say("真实网关：ok \{passed} / warn \{warnings} / FAIL \{failures}")
+  if failures > 0 {
+    say("有 \{failures} 项失败，逐条看上去（留证文件里有完整输出）。")
+    c_exit(1)
+  } else {
+    say("四个探针都过了：真实端点能出结果、流式是增量到达、鉴权失败被正确报出、")
+    say("被截断的回复进的是截断计数。")
+  }
+}
+
+///|
+/// 只留 scheme://host，路径丢掉：有些网关把 token 拼在 URL 路径里。
+fn masked_url(url : String) -> String {
+  let scheme_end = match url.find("://") {
+    Some(index) => index + 3
+    None => 0
+  }
+  let rest = url[scheme_end:].to_owned()
+  match rest.find("/") {
+    Some(index) => url[:scheme_end + index].to_owned() + "/…"
+    None => url
+  }
+}
+
+///|
+fn first_line(text : String) -> String {
+  for line in text.split("\n") {
+    if trim_view(line) != "" {
+      return trim_view(line)
+    }
+  }
+  ""
+}
+
+///|
+fn last_line(text : String) -> String {
+  let mut last = ""
+  for line in text.split("\n") {
+    if trim_view(line) != "" {
+      last = trim_view(line)
+    }
+  }
+  last
+}
+
+///|
+fn line_count(text : String) -> Int {
+  let mut count = 0
+  for line in text.split("\n") {
+    if trim_view(line) != "" {
+      count = count + 1
+    }
+  }
+  count
+}

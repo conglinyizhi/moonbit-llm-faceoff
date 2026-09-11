@@ -164,7 +164,7 @@ $bench \
 bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
 
 # 6. the same loop again, with assertions and a written record
-bash scripts/real-gateway.sh               # → docs/real-gateway-run.md
+moon run --target native scripts/real-gateway.mbtx   # → docs/real-gateway-run.md
 ```
 
 Two things to get right the first time:
@@ -183,7 +183,7 @@ If the gateway rate-limits you, `--pace-ms` spaces the attempts out and
 memory for one run); it is never written to a run directory or a commit, see
 [`SECURITY.md`](SECURITY.md).
 
-`scripts/real-gateway.sh` (step 6 above, or `make real-gateway`) is the one
+`scripts/real-gateway.mbtx` (step 6 above, or `make real-gateway`) is the one
 script here that talks to a real endpoint. It runs four probes and writes down
 what it saw:
 
@@ -699,7 +699,7 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | `scripts/smoke.mbtx` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, **status lines on stderr with stdout left alone**, `--quiet`, `--show-cot`, **an empty reply warned about and non-zero instead of a blank line**, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.mbtx` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results (including the chain of thought folded under every answer), **the run-history rail lists that run and opening it switches to the read-only view**, **editing a case in the page reaches the file on disk and a preset saved in the page shows up in the list**, **ticking two runs opens the comparison (parameter diff, metric deltas, per-case answers)**, **deleting a run drops it from the list**, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
-| `scripts/real-gateway.sh` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |
+| `scripts/real-gateway.mbtx` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |
 
 Four of these exist because the obvious version would pass on a broken
 implementation:
