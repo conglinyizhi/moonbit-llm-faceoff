@@ -18,17 +18,19 @@ pub fn answer_diffs(CaseBlock) -> @html.Html
 
 pub fn answer_digest(Answer) -> String
 
-pub fn answers(PageData, mode? : String, switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn answers(PageData, mode? : String, switch? : @html.Html, editor? : (String, String) -> @html.Html, context? : (String) -> @html.Html) -> @html.Html
 
 pub fn array_field(Map[String, Json], String) -> Array[Json]
 
 pub fn as_object(Json) -> Map[String, Json]
 
-pub fn case_block(CaseBlock, mode? : String, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn case_block(CaseBlock, mode? : String, editor? : (String, String) -> @html.Html, context? : (String) -> @html.Html) -> @html.Html
 
 pub fn collapse_same(Array[DiffLine], Int) -> Array[DiffLine]
 
 pub fn comparison(PageData, which? : String, switch? : @html.Html) -> @html.Html
+
+pub fn context_button(@cmd.Cmd) -> @html.Html
 
 pub fn diff_block(Answer, Answer) -> @html.Html
 
@@ -50,7 +52,9 @@ pub fn live_row(LiveProgress?) -> @html.Html
 
 pub fn metric_rows() -> Array[(String, String, String)]
 
-pub fn model_cards(PageData, which? : String) -> @html.Html
+pub fn modal(String, String, @html.Html, @cmd.Cmd) -> @html.Html
+
+pub fn model_cards(PageData) -> @html.Html
 
 pub fn number_field(Map[String, Json], String, Double) -> Double
 
@@ -62,21 +66,25 @@ pub fn parse_page_data(String) -> Result[PageData, String]
 
 pub fn parse_page_data_json(Json) -> Result[PageData, String]
 
+pub fn parse_run_context(Json) -> Result[RunContext, String]
+
 pub fn percentile_label(String) -> String
 
 pub fn plain(String, Array[@html.Html]) -> @html.Html
 
 pub fn results_markdown(PageData) -> String
 
-pub fn results_section(PageData, mode? : String, switch? : @html.Html, which? : String, percentile_switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn results_section(PageData, mode? : String, switch? : @html.Html, which? : String, percentile_switch? : @html.Html, editor? : (String, String) -> @html.Html, context? : (String) -> @html.Html) -> @html.Html
 
-pub fn stat(String, MetricStats?, String, which? : String) -> @html.Html
+pub fn run_context_body(RunContext, String) -> @html.Html
 
-pub fn stat_list(ModelSummary, which? : String) -> @html.Html
+pub fn stat(String, MetricStats?, String) -> @html.Html
+
+pub fn stat_list(ModelSummary) -> @html.Html
 
 pub fn string_field(Map[String, Json], String, String) -> String
 
-pub fn summary_card(ModelSummary, which? : String) -> @html.Html
+pub fn summary_card(ModelSummary) -> @html.Html
 
 pub fn txt(String) -> @html.Html
 
@@ -126,6 +134,17 @@ pub(all) struct CaseBlock {
 } derive(Eq)
 pub fn CaseBlock::equal(Self, Self) -> Bool
 pub fn CaseBlock::not_equal(Self, Self) -> Bool
+
+pub(all) struct ContextCase {
+  id : String
+  prompt : String
+  system : String
+  system_overridden : Bool
+  max_tokens : Int
+  temperature : Double?
+} derive(Eq)
+pub fn ContextCase::equal(Self, Self) -> Bool
+pub fn ContextCase::not_equal(Self, Self) -> Bool
 
 pub(all) struct DiffLine {
   kind : String
@@ -196,6 +215,15 @@ pub(all) struct PageData {
 } derive(Eq)
 pub fn PageData::equal(Self, Self) -> Bool
 pub fn PageData::not_equal(Self, Self) -> Bool
+
+pub(all) struct RunContext {
+  id : String
+  request : Json
+  models : Array[String]
+  cases : Array[ContextCase]
+} derive(Eq)
+pub fn RunContext::equal(Self, Self) -> Bool
+pub fn RunContext::not_equal(Self, Self) -> Bool
 
 // Type aliases
 

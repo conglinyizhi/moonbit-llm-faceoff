@@ -485,6 +485,12 @@ From the page you can:
   was wrong. The verdict is saved the moment you click it, the note when you press
   存备注, and both live in that run's directory — so they show up in the Markdown
   copy and the static report too, and deleting a run takes its verdicts with it;
+- **see what was actually asked**: every case has a 请求上下文 button that opens the
+  request as the model receives it — the parameters, and then the `system` and
+  `user` messages that were in effect for that case. A `system` written into the
+  case set overrides the global one, and when that happens the dialog says so;
+  "why did it answer that" is usually answered here rather than in the answer.
+  The endpoint returns the scrubbed request document, so no key is ever in it;
 - **read a distribution, not a single number**: the model cards put P50 next to
   P10 / P20 / P99 for every metric, and the comparison table has a percentile
   switch (P10 / P20 / P50 / P99). They answer different questions — P50 is "how
@@ -572,6 +578,7 @@ and waits for you to fill the key in and press **开始评测**.
 | `POST /api/runs` | start a run → `{id, total}`. Three mutually exclusive ways to say what to run: `caseSet` + `cases` (ids from a set on disk), a single `prompt`, or `inlineCases` (an array of case objects, written into that run's `cases.jsonl`). `system` sets the system prompt for the whole run; a case may override it with its own |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
 | `DELETE /api/runs/<id>` | remove that run's directory (its annotations go with it) |
+| `GET /api/runs/<id>/context` | what the run actually sent: the request document plus each case's effective `system` / `maxTokens` / `temperature` (`systemOverridden` marks a case-set prompt that beat the global one) |
 | `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}` — the human verdicts, `verdict` being `pass` / `fail` / `unsure` |
 | `PUT /api/runs/<id>/annotations` | whole-list write; one entry per (case, model), duplicates are a 400 |
 | `GET /api/runs/<id>/runs.jsonl` | the raw per-attempt log, as a download |

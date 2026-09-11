@@ -161,6 +161,10 @@ struct AppModel {
   tail : String
   /// 当下这条请求的实时进度（哪条、多快、多久没有输出了）。
   live : @shared.LiveProgress?
+  /// 请求上下文对话框：Some(用例 id) 时开着，带那次运行的上下文文档。
+  context_case : String?
+  context : @shared.RunContext?
+  context_error : String?
   /// 结果看哪个分位：p10 / p20 / p50 / p99。P50 是默认——「通常有多快」是多数
   /// 时候要问的问题，尾部（P99）是另一类问题（会不会偶发地卡住）。
   percentile : String
@@ -217,6 +221,9 @@ fn initial_model() -> AppModel {
     compare: None,
     tail: "",
     live: None,
+    context_case: None,
+    context: None,
+    context_error: None,
     percentile: "p50",
     results_mode: "stacked",
     failures: 0,
@@ -376,6 +383,10 @@ enum Msg {
   RemoveDraft(Int)
   SetResultsMode(String)
   SetPercentile(String)
+  // 请求上下文
+  OpenContext(String)
+  CloseContext
+  ContextLoaded(Result[Json, Error])
   ImportTextChanged(String)
   ImportLines(Bool)
   DraftFieldChanged(Int, DraftField, String)
@@ -619,7 +630,15 @@ fn update(
             live: @shared.parse_live(status.live, status.liveAgeMs),
           }
           (
-            { ..model, viewed: Some(viewed), busy_run: None, },
+            {
+              ..model,
+              viewed: Some(viewed),
+              busy_run: None,
+              // 换了一条运行，上一次的上下文作废
+              context: None,
+              context_case: None,
+              context_error: None,
+            },
             // 历史运行的标注也要拉：它存在那次运行的目录里，不在当前这次里
             fetch_annotations(id, emit),
           )
@@ -861,6 +880,44 @@ fn update(
     }
     SetResultsMode(mode) => ({ ..model, results_mode: mode, }, @cmd.none)
     SetPercentile(which) => ({ ..model, percentile: which, }, @cmd.none)
+    OpenContext(case_id) =>
+      (
+        {
+          ..model,
+          context_case: Some(case_id),
+          context_error: None,
+          // 已经拉过就不重复拉：同一个运行的上下文不会变
+          context: model.context,
+        },
+        match model.context {
+          Some(_) => @cmd.none
+          None => fetch_context(model.context_run_id(), emit)
+        },
+      )
+    CloseContext => ({ ..model, context_case: None, }, @cmd.none)
+    ContextLoaded(result) =>
+      match result {
+        Ok(json) =>
+          match @shared.parse_run_context(json) {
+            Ok(context) =>
+              (
+                { ..model, context: Some(context), context_error: None, },
+                @cmd.none,
+              )
+            Err(message) =>
+              ({ ..model, context_error: Some(message), }, @cmd.none)
+          }
+        Err(error) =>
+          (
+            {
+              ..model,
+              context_error: Some(
+                "拿不到请求上下文：" + error.to_string(),
+              ),
+            },
+            @cmd.none,
+          )
+      }
     ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
     ImportLines(replace) => {
       // 上限按「已有 + 新导入」算：用例集那边也有 500 的上限
@@ -1579,7 +1636,38 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       ]),
     ]),
     footer(model),
+    context_dialog(model, emit),
   ])
+}
+
+///|
+/// 请求上下文对话框。
+///
+/// 开着但没有数据时也要有一块东西：空白对话框会让人以为是坏了，而「正在取」
+/// 和「取不到、为什么取不到」都得说出来。
+fn context_dialog(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let case_id = match model.context_case {
+    None => return @html.fragment([])
+    Some(case_id) => case_id
+  }
+  let body = match model.context_error {
+    Some(message) => el("p", "failed", [txt(message)])
+    None =>
+      match model.context {
+        Some(context) => @shared.run_context_body(context, case_id)
+        None => el("p", "muted", [txt("正在取请求上下文…")])
+      }
+  }
+  @shared.modal(
+    "请求上下文",
+    if case_id == "" {
+      ""
+    } else {
+      case_id
+    },
+    body,
+    emit(Msg::CloseContext),
+  )
 }
 
 ///|
@@ -1998,6 +2086,19 @@ fn results_switch(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 }
 
 ///|
+/// 当前正在看的那次运行：优先「打开的历史运行」，其次「刚跑完/在跑的这次」。
+fn AppModel::context_run_id(self : AppModel) -> String {
+  match self.viewed {
+    Some(viewed) => viewed.id
+    None =>
+      match self.run_id {
+        Some(id) => id
+        None => ""
+      }
+  }
+}
+
+///|
 fn status_label(status : String) -> String {
   match status {
     "starting" => "提交中"
@@ -2029,6 +2130,9 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
                   percentile_switch=percentile_switch(model, emit),
                   editor=fn(case_id, answer_model) {
                     annotation_editor_for(model, case_id, answer_model, emit)
+                  },
+                  context=fn(case_id) {
+                    @shared.context_button(emit(Msg::OpenContext(case_id)))
                   },
                 )
               // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
@@ -2063,6 +2167,9 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
                 percentile_switch=percentile_switch(model, emit),
                 editor=fn(case_id, answer_model) {
                   annotation_editor_for(model, case_id, answer_model, emit)
+                },
+                context=fn(case_id) {
+                  @shared.context_button(emit(Msg::OpenContext(case_id)))
                 },
               )
             None => @html.fragment([])

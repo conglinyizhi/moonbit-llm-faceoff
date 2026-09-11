@@ -332,8 +332,11 @@ views_probe='(async () => {
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/views.html" "$views_probe" 2500
 probe=$(grep -o 'SCRIPT .*' "$tmp/views.html.err" | sed 's/^SCRIPT //')
-echo "$probe" | grep -q '"modes":\["每个模型一条","并排对比","差异"\]' ||
+# 选择器同时匹配到分位按钮（P10…P99）与视图按钮，所以按包含关系断言
+echo "$probe" | grep -q '"每个模型一条","并排对比","差异"' ||
   fail "结果区没有三种摆法的切换：$probe"
+echo "$probe" | grep -q '"P10","P20","P50","P99"' ||
+  fail "结果区没有分位切换：$probe"
 echo "$probe" | grep -qE '"columns":([2-9]|[1-9][0-9])' ||
   fail "并排对比没渲染出多列：$probe"
 # 表头是两个 span（模型名 + 规模），拼起来没有分隔符，所以分别断言
@@ -350,6 +353,54 @@ echo "$probe" | grep -qE '"noColumnsInDiff":0' ||
 echo "$probe" | grep -qE '"backToStacked":0' ||
   fail "切回「每个模型一条」之后并排列还在：$probe"
 echo "ok: 结果区三视图（并排列等宽各自滚动、差异视图、切回去）"
+
+# 请求上下文：问了什么得能就地看见，而不是去翻 cases.jsonl
+echo "==> 请求上下文对话框"
+context_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const item = document.querySelector(".history-item");
+  item.querySelectorAll(".history-actions button")[0].click();
+  await new Promise((r) => setTimeout(r, 2500));
+  const buttons = Array.from(document.querySelectorAll(".context-btn"));
+  out.buttons = buttons.length;
+  if (buttons.length === 0) { return out; }
+  out.firstLabel = buttons[0].textContent;
+  buttons[0].click();
+  await new Promise((r) => setTimeout(r, 1500));
+  const modal = document.querySelector(".modal");
+  out.modal = !!modal;
+  if (!modal) { return out; }
+  out.params = Array.from(modal.querySelectorAll(".context-params dt")).map((d) => d.textContent);
+  out.roles = Array.from(modal.querySelectorAll(".context-role")).map((r) => r.textContent);
+  out.systemText = modal.querySelector(".context-message pre")?.textContent || "";
+  out.userText = modal.querySelectorAll(".context-message pre")[1]?.textContent || "";
+  out.backdrop = getComputedStyle(document.querySelector(".modal-backdrop")).position;
+  out.radius = getComputedStyle(modal).borderRadius;
+  byText("关闭").click();
+  await new Promise((r) => setTimeout(r, 500));
+  out.closed = document.querySelector(".modal") === null;
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/context.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -qE '"buttons":[1-9]' ||
+  fail "用例行上没有「请求上下文」按钮：$probe"
+echo "$probe" | grep -q '"modal":true' ||
+  fail "点了按钮没有弹出对话框：$probe"
+echo "$probe" | grep -q '用例集' ||
+  fail "对话框里没有运行级参数：$probe"
+echo "$probe" | grep -qE '"roles":\["system","user"\]' ||
+  fail "对话框里没有 system / user 两条消息：$probe"
+echo "$probe" | grep -qE '"systemText":"[^"]{2,}"' ||
+  fail "对话框里的 system 是空的：$probe"
+echo "$probe" | grep -qE '"userText":"[^"]{2,}"' ||
+  fail "对话框里的 user 是空的：$probe"
+echo "$probe" | grep -q '"radius":"[1-9]' ||
+  fail "对话框没有圆角（拟态的浮起感全在阴影和圆角上）：$probe"
+echo "$probe" | grep -q '"closed":true' ||
+  fail "点关闭之后对话框还在：$probe"
+echo "ok: 请求上下文（按钮 → 拟态对话框 → system/user → 关闭）"
 
 echo "==> 人工标注"
 # 打开历史里的一次运行 → 给第一条答案打「不行」+ 备注 → 徽章出现、写进磁盘、

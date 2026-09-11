@@ -446,6 +446,11 @@ system prompt，下面一列 user prompt，勾上要看的模型，按一下：
 「差异视图」，第一个模型与其余每个逐字比一遍（绿 = 右边多了，红 = 左边多了）。
 单条 prompt 可以覆盖共用的 system；留空就是「跟着上面走」。
 
+- **看清到底问了什么**：每条用例旁边有个「请求上下文」按钮，点开就是模型收到
+  的东西——先是参数，然后是这条用例实际生效的 `system` 与 `user` 消息。用例集里
+  自带 system 时它会盖掉全局的，这种覆盖对话框会标出来（「为什么答成这样」多数
+  时候的答案在这里，而不在答案里）。接口返回的是已经洗过的请求文档，
+  **密钥从来不在里面**；
 - **看到的是一条分布，而不是一个数**：模型卡上每个指标都给 P50 与
   P10 / P20 / P99，对比表上还有一排分位切换（P10 / P20 / P50 / P99）。它们
   回答的不是同一个问题——P50 是「通常多快」，P99 是「会不会偶发地卡一下」，
@@ -491,6 +496,7 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 | `POST /api/runs` | 建一次运行 → `{id, total}`。要跑什么有三种互斥的写法：`caseSet` + `cases`（磁盘上某套用例的 id）、单条 `prompt`、或 `inlineCases`（一组用例对象，直接写进这次运行的 `cases.jsonl`）。`system` 是整轮的 system prompt，单条用例可以自己覆盖 |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
 | `DELETE /api/runs/<id>` | 删掉那次运行的目录（它的标注跟着走） |
+| `GET /api/runs/<id>/context` | 这次运行实际发了什么：请求文档，加上每条用例生效的 `system` / `maxTokens` / `temperature`（`systemOverridden` 标出被用例集覆盖的那条） |
 | `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}`——人工判定，`verdict` 取 `pass` / `fail` / `unsure` |
 | `PUT /api/runs/<id>/annotations` | 整表覆盖；一条答案只能有一条标注，重复是 400 |
 | `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |

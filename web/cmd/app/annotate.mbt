@@ -5,6 +5,17 @@
 /// 判断」——数据属于运行目录（`annotations.jsonl`），跟这次运行一起生死。
 
 ///|
+/// 拉这次运行的请求上下文（参数 + 每条用例生效的 system/prompt）。
+///
+/// 单开一个接口而不是塞进状态响应：状态在运行中是 250ms 拉一次的，而这份文档
+/// 只有点开对话框那一刻需要一次。
+fn fetch_context(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.get("/api/runs/" + id + "/context").expect_json(
+    emit.map(fn(result) { ContextLoaded(result) }),
+  )
+}
+
+///|
 fn fetch_annotations(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.get("/api/runs/" + id + "/annotations").expect_json(
     emit.map(fn(result) { AnnotationsLoaded(id, result) }),
