@@ -364,137 +364,6 @@ fn effective_models(model : AppModel) -> Array[String] {
   out
 }
 
-// ---------------------------------------------------------------- 差异
-
-///|
-/// 差异视图里的一段：same = 两边一样，del = 只有左边有，ins = 只有右边有。
-struct DiffPart {
-  kind : String
-  mut text : String
-} derive(Eq)
-
-///|
-/// 字符级差异。先剥掉公共前后缀，只对中间那段做 LCS——两个模型答同一道题时，
-/// 开头结尾往往是一样的，剥完剩下的通常很短。中间太长就整段标成「变了」，
-/// 不为一个 demo 页面把 O(n·m) 的表撑到几十兆。
-fn diff_chars(left : String, right : String) -> Array[DiffPart] {
-  let a = left
-  let b = right
-  let mut prefix = 0
-  let limit = min_int(a.length(), b.length())
-  while prefix < limit && a[prefix] == b[prefix] {
-    prefix = prefix + 1
-  }
-  let mut suffix = 0
-  while suffix < limit - prefix &&
-        a[a.length() - 1 - suffix] == b[b.length() - 1 - suffix] {
-    suffix = suffix + 1
-  }
-  let parts : Array[DiffPart] = []
-  if prefix > 0 {
-    parts.push({ kind: "same", text: a[:prefix].to_owned(), })
-  }
-  let mid_a = a[prefix:a.length() - suffix].to_owned()
-  let mid_b = b[prefix:b.length() - suffix].to_owned()
-  if mid_a != "" || mid_b != "" {
-    if mid_a.length() * mid_b.length() > 200000 {
-      // 两边几乎没有公共部分：直接说清楚，别假装算过
-      if mid_a != "" {
-        parts.push({ kind: "del", text: mid_a, })
-      }
-      if mid_b != "" {
-        parts.push({ kind: "ins", text: mid_b, })
-      }
-    } else {
-      for part in lcs_blocks(mid_a, mid_b) {
-        parts.push(part)
-      }
-    }
-  }
-  if suffix > 0 {
-    parts.push({ kind: "same", text: a[a.length() - suffix:].to_owned(), })
-  }
-  parts
-}
-
-///|
-/// 中间那段的 LCS 差异，返回按顺序的分段（相邻同类合并）。
-fn lcs_blocks(a : String, b : String) -> Array[DiffPart] {
-  let n = a.length()
-  let m = b.length()
-  // dp[i][j]：a[i:] 与 b[j:] 的最长公共子序列长度
-  let rows : Array[Array[Int]] = []
-  for i = 0; i <= n; i = i + 1 {
-    rows.push(Array::make(m + 1, 0))
-  }
-  for i = n - 1; i >= 0; i = i - 1 {
-    for j = m - 1; j >= 0; j = j - 1 {
-      rows[i][j] = if a[i] == b[j] {
-        rows[i + 1][j + 1] + 1
-      } else {
-        max_int(rows[i + 1][j], rows[i][j + 1])
-      }
-    }
-  }
-  let parts : Array[DiffPart] = []
-  let mut i = 0
-  let mut j = 0
-  while i < n && j < m {
-    if a[i] == b[j] {
-      push_part(parts, "same", a[i].to_string())
-      i = i + 1
-      j = j + 1
-    } else if rows[i + 1][j] >= rows[i][j + 1] {
-      push_part(parts, "del", a[i].to_string())
-      i = i + 1
-    } else {
-      push_part(parts, "ins", b[j].to_string())
-      j = j + 1
-    }
-  }
-  while i < n {
-    push_part(parts, "del", a[i].to_string())
-    i = i + 1
-  }
-  while j < m {
-    push_part(parts, "ins", b[j].to_string())
-    j = j + 1
-  }
-  parts
-}
-
-///|
-/// 相邻同类合并，不然差异视图是逐字符的节点，又慢又长。
-fn push_part(parts : Array[DiffPart], kind : String, text : String) -> Unit {
-  match parts {
-    [.., last] =>
-      if last.kind == kind {
-        last.text = last.text + text
-        return
-      }
-    [] => ()
-  }
-  parts.push({ kind, text, })
-}
-
-///|
-fn min_int(a : Int, b : Int) -> Int {
-  if a < b {
-    a
-  } else {
-    b
-  }
-}
-
-///|
-fn max_int(a : Int, b : Int) -> Int {
-  if a > b {
-    a
-  } else {
-    b
-  }
-}
-
 // ---------------------------------------------------------------- 更新
 
 ///|
@@ -508,7 +377,7 @@ fn update(
       match result {
         Ok(meta) => {
           // 默认勾前两个模型：这一页的常态就是「两个模型并排看」
-          let picked = meta.models[:min_int(2, meta.models.length())].to_owned()
+          let picked = meta.models[:@cmp.minimum(2, meta.models.length())].to_owned()
           (
             {
               ..model,
@@ -1460,54 +1329,12 @@ fn side_by_side(
 }
 
 ///|
-/// 差异视图：第一个模型作基准，其余每个与它逐字比一遍。
+/// 差异视图：第一个模型作基准，其余每个与它按行对齐比一遍。
+///
+/// 实现与工作台共用（@shared）：「同一个问题在两个页面上结论不同」是最难查的
+/// 一类 bug，而这两处看的本来就是同一份结果。
 fn diff_view(block : @shared.CaseBlock) -> @html.Html {
-  match block.answers {
-    [] => el("p", "muted", [txt("没有答案")])
-    [only, ..] =>
-      if block.answers.length() == 1 {
-        el("p", "muted", [
-          txt(
-            "只有一个模型，没有可比的对象（勾两个模型再跑）。",
-          ),
-        ])
-      } else {
-        let base = only
-        el(
-          "div",
-          "diffs",
-          block.answers[1:].map(fn(answer) { diff_block(base, answer) }),
-        )
-      }
-  }
-}
-
-///|
-fn diff_block(left : @shared.Answer, right : @shared.Answer) -> @html.Html {
-  let parts = diff_chars(left.content, right.content)
-  el("article", "diff-block", [
-    el("div", "diff-title", [
-      txt(
-        "\{left.model} → \{right.model}：\{summary_of(left)} / \{summary_of(right)}",
-      ),
-    ]),
-    @html.pre([
-      el(
-        "span",
-        "diff-text",
-        parts.map(fn(part) { el("span", "diff-" + part.kind, [txt(part.text)]) }),
-      ),
-    ]),
-  ])
-}
-
-///|
-fn summary_of(answer : @shared.Answer) -> String {
-  if !answer.ok {
-    return "失败"
-  }
-  let text = answer.content.trim(chars=" \t\r\n").to_owned()
-  "\{text.length()} 字 / \{answer.completion_tokens} token"
+  @shared.answer_diffs(block)
 }
 
 ///|

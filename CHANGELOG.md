@@ -102,6 +102,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Compare long answers instead of scrolling past them.** The results section now
+  switches between one block per model, side-by-side columns, and a diff. Columns
+  are equal width, each scrolls on its own and keeps its header pinned. The diff
+  is line-based: identical stretches collapse into a one-line notice, and a pair
+  of lines that only differ slightly is shown as a pair with the changed
+  characters highlighted. Two bugs came out of writing it: the character-level
+  diff had been building each fragment with `Char::to_string()`, which yields the
+  code point — Chinese diff output read `229142265` — and it is now built from
+  string slices, with tests that assert the *text* rather than the presence of an
+  element. The diff implementation moved to `shared/` so both pages render the
+  same comparison.
+
 - **A run shows what it is doing while it does it.** The progress card used to move
   once per finished case — with a suite of 66 cases that is a line of stderr every
   few seconds, and the seconds in between are the ones a person stares at. The

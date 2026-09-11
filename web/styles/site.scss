@@ -1118,6 +1118,156 @@ button.ghost {
   }
 }
 
+// 结果区的视图切换
+.section-title .view-switch {
+  margin-left: auto;
+}
+
+.view-buttons {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.view-btn {
+  background: $panel-2;
+  border: 1px solid $border;
+  border-radius: 999px;
+  color: $muted;
+  cursor: pointer;
+  font-size: 0.74rem;
+  padding: 0.2rem 0.6rem;
+
+  &:hover {
+    border-color: $accent;
+    color: $text;
+  }
+
+  &.active {
+    background: $accent;
+    border-color: $accent;
+    color: #04121f;
+    font-weight: 600;
+  }
+}
+
+// 同一道题、多个模型并排
+//
+// 长回答竖着堆是没法比的：读的人得靠记忆在两条之间横跳。并排之后两列各自
+// 滚动、表头钉住，至少一直知道自己在读哪个模型。
+.answer-cols {
+  display: grid;
+  gap: 0.9rem;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(18rem, 1fr);
+  overflow-x: auto;
+  padding-bottom: 0.3rem;
+
+  @media (max-width: 900px) {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+  }
+}
+
+.answer-col {
+  border: 1px solid $border;
+  border-radius: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+
+  .answer-col-head {
+    align-items: baseline;
+    background: $panel;
+    border-bottom: 1px solid $border;
+    display: flex;
+    gap: 0.5rem;
+    justify-content: space-between;
+    padding: 0.4rem 0.6rem;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .answer-col-model {
+    color: $title;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+
+  .answer-col-meta {
+    color: $muted;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  // 列内自己的滚动条：两边都长的时候能对准同一段读
+  .answer-col-body {
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 0.5rem 0.6rem;
+  }
+
+  .answer {
+    margin: 0;
+  }
+}
+
+// 行级差异：相同的行压掉，只留下分岔的地方
+.diff-lines {
+  font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+}
+
+.diff-line {
+  border-left: 3px solid transparent;
+  padding: 0.05rem 0.4rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &.diff-line-same {
+    color: $muted;
+  }
+
+  &.diff-line-del {
+    background: rgba(248, 81, 73, 0.12);
+    border-left-color: #f85149;
+  }
+
+  &.diff-line-ins {
+    background: rgba(63, 185, 80, 0.12);
+    border-left-color: $accent-2;
+  }
+
+  // 同一行的两种写法：成对出现，先左后右
+  &.diff-line-change-del {
+    background: rgba(248, 81, 73, 0.08);
+  }
+
+  &.diff-line-change-ins {
+    background: rgba(63, 185, 80, 0.08);
+  }
+}
+
+// 行内高亮：整行里真正变了的那几个字
+.diff-part-del {
+  background: rgba(248, 81, 73, 0.35);
+  border-radius: 0.15rem;
+}
+
+.diff-part-ins {
+  background: rgba(63, 185, 80, 0.35);
+  border-radius: 0.15rem;
+}
+
+.diff-gap {
+  color: $muted;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  text-align: center;
+}
+
 .compare-cols {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
