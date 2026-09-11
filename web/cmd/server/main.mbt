@@ -14,7 +14,10 @@
 ///   LLM_WEB_PORT    监听端口（默认 8137）
 ///   LLM_WEB_STATIC  静态目录（默认 out）
 ///   LLM_WEB_WORK    运行目录（默认 runs）
-///   LLM_WEB_CASES   用例文件（默认 ../bench/cases.example.jsonl）
+///   LLM_WEB_CASES   旧的单文件用例（默认 ../bench/cases.example.jsonl）；
+///                   只在用例集目录为空时当种子读一次
+///   LLM_WEB_CASES_DIR  用例集目录，每个集一个 <名字>.jsonl（默认 cases）
+///   LLM_WEB_PRESETS    预设文件（默认 presets.json）
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
 ///   LLM_WEB_SSG    静态报告生成器（默认 ../web/_build/.../ssg.exe）
 ///   LLM_WEB_MODELS  默认模型菜单，逗号分隔（请求也可使用其它模型）
@@ -27,6 +30,10 @@ async fn main {
   let cases_path = @env.get_env_var("LLM_WEB_CASES").unwrap_or(
     "../bench/cases.example.jsonl",
   )
+  let cases_dir = @env.get_env_var("LLM_WEB_CASES_DIR").unwrap_or("cases")
+  let presets_path = @env.get_env_var("LLM_WEB_PRESETS").unwrap_or(
+    "presets.json",
+  )
   let bench_bin = @env.get_env_var("LLM_BENCH_BIN").unwrap_or(
     "../_build/native/debug/build/cmd/bench/bench.exe",
   )
@@ -37,6 +44,8 @@ async fn main {
     static_dir,
     work_dir,
     cases_path,
+    cases_dir,
+    presets_path,
     bench_bin,
     ssg_bin,
     models: allowed_models(),
@@ -48,11 +57,12 @@ async fn main {
   @fs.mkdir(work_dir, recursive=true) catch {
     _ => ()
   }
+  seed_case_sets(config)
   if config.api_key == "" {
     note("warning: no MOONLLM_API_KEY / OPENAI_API_KEY in the environment")
   }
   note(
-    "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_path}",
+    "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_dir}  presets=\{config.presets_path}",
   )
   // 静态目录是按当前工作目录解析的（默认 out，就在 web/ 里）。从别处启动
   // 时服务端本身跑得起来、/api 也通，只有页面一律 404，很难看出是为什么。
@@ -88,12 +98,38 @@ async fn main {
 struct ServerConfig {
   static_dir : String
   work_dir : String
+  /// 旧的单文件用例路径：只在用例集目录为空时当种子读一次。
   cases_path : String
+  /// 用例集目录，一个集一个 `<名字>.jsonl`。
+  cases_dir : String
+  /// 预设文件（模型 + 参数组合）。
+  presets_path : String
   bench_bin : String
   ssg_bin : String
   models : Array[String]
   base_url : String
   api_key : String
+}
+
+///|
+/// 第一次启动时把 `LLM_WEB_CASES` 指向的那份用例播成 `default` 集。
+///
+/// 这样老的启动方式（只给 LLM_WEB_CASES）继续可用，而页面从此能切多套用例。
+/// 逐字复制而不是重新序列化：注释、字段顺序、你没写的字段全都留着。
+async fn seed_case_sets(config : ServerConfig) -> Unit {
+  @fs.mkdir(config.cases_dir, recursive=true) catch {
+    _ => ()
+  }
+  if list_case_sets(config.cases_dir).length() > 0 {
+    return
+  }
+  let text = read_text(config.cases_path)
+  if text == "" {
+    return
+  }
+  let path = case_set_path(config.cases_dir, "default")
+  write_text(path, text)
+  note("seeded \{path} from \{config.cases_path}")
 }
 
 ///|
@@ -156,9 +192,41 @@ async fn handle(
   }
   match (request.meth, path) {
     (Get, "/api/meta") => send_json(conn, 200, meta_json(config))
+    // 运行历史：扫 runs/ 目录，每条带磁盘上那份 request.json
+    (Get, "/api/runs") =>
+      send_json(
+        conn,
+        200,
+        Json::object({ "runs": Json::array(scan_runs(config.work_dir)) }),
+      )
     (Post, "/api/runs") => start_run(config, body, conn)
+    (Delete, _) if path.has_prefix("/api/runs/") =>
+      delete_run(config, path[10:].to_owned(), conn)
     (Get, _) if path.has_prefix("/api/runs/") =>
       get_run_route(config, path[10:].to_owned(), conn)
+    // 用例集
+    (Get, "/api/cases") =>
+      send_json(
+        conn,
+        200,
+        Json::object({ "sets": Json::array(case_sets(config)) }),
+      )
+    (Get, _) if path.has_prefix("/api/cases/") =>
+      get_case_set(config, path[11:].to_owned(), conn)
+    (Put, _) if path.has_prefix("/api/cases/") =>
+      put_case_set(config, path[11:].to_owned(), body, conn)
+    (Delete, _) if path.has_prefix("/api/cases/") =>
+      delete_case_set(config, path[11:].to_owned(), conn)
+    // 预设
+    (Get, "/api/presets") =>
+      send_json(
+        conn,
+        200,
+        Json::object({
+          "presets": Json::array(read_presets(config.presets_path)),
+        }),
+      )
+    (Put, "/api/presets") => put_presets(config, body, conn)
     (Get, _) => serve_static(config, path, conn)
     (Post, _) => send_text(conn, 404, "no such endpoint")
     _ => send_text(conn, 405, "method not allowed")
@@ -221,21 +289,14 @@ fn content_type(path : String) -> String {
   }
 }
 
-// ---------------------------------------------------------------- API
-
 ///|
 async fn meta_json(config : ServerConfig) -> Json {
-  let cases : Array[Json] = []
-  for entry in load_cases(config.cases_path) {
-    cases.push(
-      Json::object({
-        "id": Json::string(entry.id),
-        "prompt": Json::string(entry.prompt),
-      }),
-    )
-  }
+  let default_set = default_case_set(config)
+  let cases = read_case_set(case_set_path(config.cases_dir, default_set))
   Json::object({
     "models": Json::array(config.models.map(Json::string)),
+    "caseSets": Json::array(case_sets(config)),
+    "defaultCaseSet": Json::string(default_set),
     "cases": Json::array(cases),
     "defaults": Json::object({
       "repeats": Json::number(3.0),
@@ -249,37 +310,297 @@ async fn meta_json(config : ServerConfig) -> Json {
   })
 }
 
+// ---------------------------------------------------------------- 用例集
+
 ///|
-/// 用例文件里的一条记录。只取 id 和 prompt，够页面用。
-struct CaseEntry {
-  id : String
-  prompt : String
+/// 用例集列表：[{name, count}]。
+///
+/// 直接返回数组而不是包好的 Json 对象：调用点都是把它塞进自己的响应里，
+/// 包一层之后取出来还得再拆。
+async fn case_sets(config : ServerConfig) -> Array[Json] {
+  let sets : Array[Json] = []
+  for name in list_case_sets(config.cases_dir) {
+    let path = case_set_path(config.cases_dir, name)
+    sets.push(
+      Json::object({
+        "name": Json::string(name),
+        // 数解析出来的条数，不数行数：注释行和空行不是用例。
+        "count": Json::number(read_case_set(path).length().to_double()),
+      }),
+    )
+  }
+  sets
 }
 
 ///|
-async fn load_cases(path : String) -> Array[CaseEntry] {
-  let text = read_text(path)
-  let entries : Array[CaseEntry] = []
-  let mut index = 0
-  for line in text.split("\n") {
-    index = index + 1
-    let content = line.trim(chars=" \t\r")
-    if content.length() == 0 || content.has_prefix("#") {
-      continue
-    }
-    let parsed = @json.parse(content.to_owned()) catch { _ => continue }
-    guard parsed is Object(obj) else { continue }
-    let prompt = match obj.get("prompt") {
-      Some(String(text)) => text
-      _ => continue
-    }
-    let id = match obj.get("id") {
-      Some(String(id)) => id
-      _ => "case-\{index}"
-    }
-    entries.push({ id, prompt, })
+/// 默认用例集：有 `default` 就用它，否则第一个，一个都没有就是空串。
+///
+/// 不记住「上次选了哪个」：那是页面的状态（URL 参数），服务端不该有第二份。
+async fn default_case_set(config : ServerConfig) -> String {
+  let names = list_case_sets(config.cases_dir)
+  if names.contains("default") {
+    return "default"
   }
-  entries
+  match names {
+    [first, ..] => first
+    [] => ""
+  }
+}
+
+///|
+async fn get_case_set(
+  config : ServerConfig,
+  name : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if !is_safe_name(name) {
+    send_text(conn, 400, bad_name_message())
+    return
+  }
+  let path = case_set_path(config.cases_dir, name)
+  if !(@fs.exists(path) catch { _ => false }) {
+    send_text(conn, 404, "no such case set: " + name)
+    return
+  }
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "name": Json::string(name),
+      "cases": Json::array(read_case_set(path)),
+    }),
+  )
+}
+
+///|
+/// 整集覆盖写。名字不存在就是新建——「另存为一套」因此不需要单独的接口。
+async fn put_case_set(
+  config : ServerConfig,
+  name : String,
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if !is_safe_name(name) {
+    send_text(conn, 400, bad_name_message())
+    return
+  }
+  let obj = match read_json_body(body, conn) {
+    Some(obj) => obj
+    None => return
+  }
+  let items = match obj.get("cases") {
+    Some(Array(items)) => items
+    _ => {
+      send_text(conn, 400, "body needs a `cases` array")
+      return
+    }
+  }
+  if items.length() > max_cases_per_set {
+    send_text(conn, 400, "at most \{max_cases_per_set} cases per set")
+    return
+  }
+  let normalized : Array[Json] = []
+  let seen : Array[String] = []
+  for i = 0; i < items.length(); i = i + 1 {
+    let id = match case_id_of(items[i], i) {
+      Ok(id) => id
+      Err(message) => {
+        send_text(conn, 400, message)
+        return
+      }
+    }
+    if seen.contains(id) {
+      send_text(conn, 400, "duplicate case id: " + id)
+      return
+    }
+    seen.push(id)
+    // 缺 id 的补上：bench 侧按 id 过滤用例，缺 id 的条目会被静默丢掉，
+    // 而页面上又看得见它——「勾了却没跑」是最难查的那种。
+    normalized.push(with_id(items[i], id))
+  }
+  write_text(
+    case_set_path(config.cases_dir, name),
+    serialize_case_set(normalized),
+  )
+  note("case set '\{name}' saved (\{normalized.length()} case(s))")
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "name": Json::string(name),
+      "count": Json::number(normalized.length().to_double()),
+      "sets": Json::array(case_sets(config)),
+      "defaultCaseSet": Json::string(default_case_set(config)),
+    }),
+  )
+}
+
+///|
+async fn delete_case_set(
+  config : ServerConfig,
+  name : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if !is_safe_name(name) {
+    send_text(conn, 400, bad_name_message())
+    return
+  }
+  let path = case_set_path(config.cases_dir, name)
+  if !(@fs.exists(path) catch { _ => false }) {
+    send_text(conn, 404, "no such case set: " + name)
+    return
+  }
+  @fs.remove(path) catch {
+    _ => {
+      send_text(conn, 500, "cannot remove " + name)
+      return
+    }
+  }
+  note("case set '\{name}' deleted")
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "name": Json::string(name),
+      "sets": Json::array(case_sets(config)),
+      "defaultCaseSet": Json::string(default_case_set(config)),
+    }),
+  )
+}
+
+///|
+fn bad_name_message() -> String {
+  "bad name: 1–64 characters of [A-Za-z0-9._-], not starting with a dot"
+}
+
+///|
+/// 保证一条用例带 id：缺了就补一个，其余字段原样保留。
+fn with_id(json : Json, id : String) -> Json {
+  guard json is Object(obj) else { return json }
+  if obj.get("id") is Some(_) {
+    return json
+  }
+  let copy : Map[String, Json] = Map([])
+  obj.each(fn(key, value) { copy[key] = value })
+  copy["id"] = Json::string(id)
+  Json::object(copy)
+}
+
+// ---------------------------------------------------------------- 预设
+
+///|
+/// 预设的最大条数。超了说明该改用例集或分几次跑，而不是往这里堆。
+let max_presets : Int = 50
+
+///|
+async fn put_presets(
+  config : ServerConfig,
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Unit {
+  let obj = match read_json_body(body, conn) {
+    Some(obj) => obj
+    None => return
+  }
+  let items = match obj.get("presets") {
+    Some(Array(items)) => items
+    _ => {
+      send_text(conn, 400, "body needs a `presets` array")
+      return
+    }
+  }
+  if items.length() > max_presets {
+    send_text(conn, 400, "at most \{max_presets} presets")
+    return
+  }
+  let names : Array[String] = []
+  for i = 0; i < items.length(); i = i + 1 {
+    match validate_preset(items[i], i) {
+      Ok(_) => ()
+      Err(message) => {
+        send_text(conn, 400, message)
+        return
+      }
+    }
+    let name = match items[i] {
+      Object(item) =>
+        match item.get("name") {
+          Some(String(name)) => name
+          _ => ""
+        }
+      _ => ""
+    }
+    // 重名报错而不是「最后一个赢」：预设是按名字取的，留两份同名就是留个坑
+    if names.contains(name) {
+      send_text(conn, 400, "duplicate preset name: " + name)
+      return
+    }
+    names.push(name)
+  }
+  write_text(config.presets_path, serialize_presets(items))
+  note("presets saved (\{items.length()})")
+  send_json(conn, 200, Json::object({ "presets": Json::array(items) }))
+}
+
+// ---------------------------------------------------------------- 运行历史
+
+///|
+async fn delete_run(
+  config : ServerConfig,
+  id : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let dir = config.work_dir + "/" + id
+  if !(@fs.exists(dir) catch { _ => false }) {
+    send_text(conn, 404, "no such run: " + id)
+    return
+  }
+  @fs.rmdir(dir, recursive=true) catch {
+    _ => {
+      send_text(conn, 500, "cannot remove " + id)
+      return
+    }
+  }
+  note("run \{id} deleted")
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "id": Json::string(id),
+      "runs": Json::array(scan_runs(config.work_dir)),
+    }),
+  )
+}
+
+///|
+/// 读请求体并解析成 JSON 对象；失败时自己回响应并返回 None。
+async fn read_json_body(
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Map[String, Json]? {
+  let raw = body.read_all() catch {
+    _ => {
+      send_text(conn, 400, "cannot read request body")
+      return None
+    }
+  }
+  let json = @json.parse(raw.text() catch { _ => "" }) catch {
+    _ => {
+      send_text(conn, 400, "request body must be JSON")
+      return None
+    }
+  }
+  match json {
+    Object(obj) => Some(obj)
+    _ => {
+      send_text(conn, 400, "request body must be a JSON object")
+      None
+    }
+  }
 }
 
 ///|
@@ -320,7 +641,7 @@ async fn start_run(
   }
   // apiKey is deliberately omitted from the on-disk request document. It is
   // only carried in the child environment below.
-  let safe_json = sanitized_request_json(obj)
+  let safe_json = sanitized_request_json(obj, request.case_set)
   write_text(dir + "/request.json", safe_json.stringify(indent=2) + "\n")
   let command = match build_command(config, request, dir) {
     Ok(command) => command
@@ -371,6 +692,8 @@ fn run_env(config : ServerConfig, request : RunRequest) -> Map[String, String] {
 /// 拼进 shell 命令。
 struct RunRequest {
   models : Array[String]
+  /// 解析后的用例集名字（不是请求里那个可选的字符串）。
+  case_set : String
   case_ids : Array[String]
   prompt : String?
   repeats : Int
@@ -442,8 +765,37 @@ async fn parse_run_request(
   if prompt is None && case_ids.is_empty() {
     return Err("pick at least one case, or type a prompt")
   }
-  let known = load_cases(config.cases_path).map(fn(entry) { entry.id })
+  // 用例集：请求里给了就用它，没给就用默认集。
+  let case_set = match optional_string(obj, "caseSet") {
+    Some(name) =>
+      if is_safe_name(name) {
+        name
+      } else {
+        return Err("caseSet: " + bad_name_message())
+      }
+    None => default_case_set(config)
+  }
+  let set_path = case_set_path(config.cases_dir, case_set)
+  if prompt is None && !(@fs.exists(set_path) catch { _ => false }) {
+    return Err("caseSet: no such case set: " + case_set)
+  }
+  let known = read_case_set(set_path).map(fn(entry) {
+    match entry {
+      Object(item) =>
+        match item.get("id") {
+          Some(String(id)) => id
+          _ => ""
+        }
+      _ => ""
+    }
+  })
   let case_ids = case_ids.filter(fn(id) { known.contains(id) })
+  // 过滤之后是空的，就是「勾了但一个都不认得」——静默跑 0 条用例比报错难查得多
+  if prompt is None && case_ids.is_empty() {
+    return Err(
+      "cases: none of the selected ids are in case set '" + case_set + "'",
+    )
+  }
   let repeats = int_of(obj, "repeats", 3)
   let max_tokens = int_of(obj, "maxTokens", 2048)
   let pace_ms = int_of(obj, "paceMs", 0)
@@ -468,6 +820,7 @@ async fn parse_run_request(
   }
   Ok({
     models,
+    case_set,
     case_ids,
     prompt,
     repeats,
@@ -490,9 +843,15 @@ fn optional_string(obj : Map[String, Json], key : String) -> String? {
 
 ///|
 /// Make the persisted request safe: credentials never enter request.json.
-fn sanitized_request_json(obj : Map[String, Json]) -> Json {
+///
+/// `caseSet` 写上**解析后**的名字：请求里没给时它是默认集，而历史重跑要重放
+/// 的是「实际跑的那一套」，不是「当时的默认那一套」。
+fn sanitized_request_json(obj : Map[String, Json], case_set : String) -> Json {
   let safe : Map[String, Json] = Map([])
   obj.each(fn(key, value) { if key != "apiKey" { safe[key] = value } })
+  if case_set != "" {
+    safe["caseSet"] = Json::string(case_set)
+  }
   Json::object(safe)
 }
 
@@ -524,7 +883,10 @@ async fn build_command(
       argv.push(prompt)
     }
     None => {
-      let filtered = filter_cases(config.cases_path, request.case_ids)
+      let filtered = filter_cases(
+        case_set_path(config.cases_dir, request.case_set),
+        request.case_ids,
+      )
       let path = dir + "/cases.jsonl"
       write_text(path, filtered)
       argv.push("--cases")

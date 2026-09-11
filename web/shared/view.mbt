@@ -177,10 +177,7 @@ pub fn answer_block(answer : Answer) -> @html.Html {
     }
     el("p", "failed", [txt(message)])
   }
-  let parts : Array[@html.Html] = [
-    el("div", "answer-head", [txt(head)]),
-    body,
-  ]
+  let parts : Array[@html.Html] = [el("div", "answer-head", [txt(head)]), body]
   // 失败的那些没有思考可看
   if answer.ok && answer.reasoning.length() > 0 {
     parts.push(cot_block(answer))

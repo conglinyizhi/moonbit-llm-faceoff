@@ -419,12 +419,27 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 
 | 端点 | 作用 |
 | --- | --- |
-| `GET /api/meta` | `{models, cases, defaults, hasKey, baseUrl}` |
-| `POST /api/runs` | 建一次运行 → `{id, total}` |
+| `GET /api/meta` | `{models, caseSets, defaultCaseSet, cases, defaults, hasKey, baseUrl}`。`cases` 是默认集的列表，留着因为「URL 即配置」那条路要读它 |
+| `GET /api/runs` | 运行历史，新的在前：`{runs: [{id, startedAt, status, exitCode, request, total, done, failures, retried, truncated}]}` |
+| `POST /api/runs` | 建一次运行 → `{id, total}`。`caseSet` 指定 `cases` 里的 id 从哪套用例里读 |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
+| `DELETE /api/runs/<id>` | 删掉那次运行的目录 |
 | `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |
 | `GET /api/runs/<id>/data.json` | 页面数据文档，直接下载 |
 | `GET /api/runs/<id>/report.html` | 自包含的静态报告，首次请求时生成 |
+| `GET /api/cases` | `{sets: [{name, count}]}` |
+| `GET /api/cases/<name>` | `{name, cases: [...]}`——原始用例记录，字段全在 |
+| `PUT /api/cases/<name>` | 整集覆盖写（`{cases: [...]}`）；名字不存在就是新建 |
+| `DELETE /api/cases/<name>` | 删掉一套用例 |
+| `GET /api/presets` | `{presets: [...]}` |
+| `PUT /api/presets` | 整表覆盖写（`{presets: [...]}`） |
+
+**用例集**就是 `LLM_WEB_CASES_DIR` 下的一个 `<名字>.jsonl`；名字只允许
+`[A-Za-z0-9._-]`，因为它会变成路径片段。**预设**是一个名字加一组模型与运行
+参数，把「老是回到的那个组合」变成一次点击而不是重填一遍。两者都由服务端
+直接读写文件——`web/cases/` 与 `web/presets.json`，两个都在 gitignore 里，
+因为那是你的数据，而 prompt 可能是私人的。`LLM_WEB_CASES` 只是种子：服务端
+第一次启动、而用例集目录为空时，把那个文件拷成 `cases/default.jsonl`。
 
 `data` 和静态报告消费的是同一份文档。一次运行是一个**子进程**（`bench --json … --web-data …`），全部状态落在 `web/runs/<id>/` 里的文件：
 
@@ -446,7 +461,9 @@ web/runs/<id>/
 | `LLM_WEB_PORT` | `8137` |
 | `LLM_WEB_STATIC` | `out` |
 | `LLM_WEB_WORK` | `runs` |
-| `LLM_WEB_CASES` | `../bench/cases.example.jsonl` |
+| `LLM_WEB_CASES_DIR` | `cases`——一套用例一个 `<名字>.jsonl` |
+| `LLM_WEB_CASES` | `../bench/cases.example.jsonl`——只当 `cases/default.jsonl` 的种子 |
+| `LLM_WEB_PRESETS` | `presets.json` |
 | `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` —— 只是默认菜单，运行可以指定任意模型 |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
 | `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |

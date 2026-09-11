@@ -378,14 +378,14 @@ fn update(
             if has_key {
               let payload = RunPayload::of(next)
               (
-                { ..next, autorun: false, status: "starting" },
+                { ..next, autorun: false, status: "starting", },
                 start_run(payload, emit),
               )
             } else {
               // 没有可用密钥就不自动开跑：跑下去只会撞上鉴权失败，而看到那个
               // 错的人会以为是自己环境坏了。也不做成「填完就自动开跑」——
               // 那样每敲一个字符都会被当成一次触发。
-              ({ ..next, autorun: false, autorun_held: true }, @cmd.none)
+              ({ ..next, autorun: false, autorun_held: true, }, @cmd.none)
             }
           } else {
             (next, @cmd.none)
