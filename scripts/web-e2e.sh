@@ -241,6 +241,49 @@ grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
 echo "ok: 页面上能用例集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
 
+echo "==> 两次运行对比"
+# 勾两次运行 → 头部换成「对比这两次」→ 点下去应该出来三块：参数差异、指标
+# 差值、逐用例答案并排。
+compare_probe='(async () => {
+  const out = {};
+  const pickBtn = (item) =>
+    Array.from(item.querySelectorAll(".history-actions button")).find((b) => b.textContent.includes("对比"));
+  const items = Array.from(document.querySelectorAll(".history-item"));
+  out.items = items.length;
+  if (items.length < 2) { return out; }
+  pickBtn(items[0]).click();
+  await new Promise((r) => setTimeout(r, 300));
+  pickBtn(items[1]).click();
+  await new Promise((r) => setTimeout(r, 600));
+  out.picked = document.querySelectorAll(".history-item.picked").length;
+  const head = Array.from(document.querySelectorAll(".history .section-head button"));
+  const cmp = head.find((b) => b.textContent === "对比这两次");
+  out.hasButton = !!cmp;
+  if (cmp) { cmp.click(); }
+  await new Promise((r) => setTimeout(r, 2500));
+  out.banner = document.querySelector(".viewed-banner") ? document.querySelector(".viewed-banner").textContent : null;
+  out.blocks = Array.from(document.querySelectorAll(".compare-block h2")).map((h) => h.textContent);
+  out.cases = document.querySelectorAll(".compare-case").length;
+  out.cols = document.querySelectorAll(".compare-col").length;
+  out.deltaCells = document.querySelectorAll(".diff-delta").length;
+  return out;
+})()'
+dump_page_script "$run_url" 8000 "$tmp/compare.html" "$compare_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/compare.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"picked":2' ||
+  fail "勾两次运行没有把两条都选上：$probe"
+echo "$probe" | grep -q '"hasButton":true' ||
+  fail "勾满两条之后没出现「对比这两次」：$probe"
+echo "$probe" | grep -q '指标差值' ||
+  fail "对比视图里没有指标差值：$probe"
+echo "$probe" | grep -q '逐用例答案' ||
+  fail "对比视图里没有逐用例答案：$probe"
+echo "$probe" | grep -qE '"cases":[1-9]' ||
+  fail "对比视图里没有可比用例：$probe"
+echo "$probe" | grep -qE '"deltaCells":[1-9]' ||
+  fail "指标表里没有 Δ 列：$probe"
+echo "ok: 勾两次运行能进对比视图（参数差异 / 指标差值 / 逐用例答案）"
+
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
 # 这样拿到的正是应用要写进剪贴板的内容，且不依赖无头浏览器是否允许读剪贴板。
@@ -386,7 +429,10 @@ delete_probe='(async () => {
   const before = document.querySelectorAll(".history-item").length;
   const item = document.querySelector(".history-item");
   if (!item) { return { error: "no history item" }; }
-  item.querySelectorAll(".history-actions button")[2].click();
+  const del = Array.from(item.querySelectorAll(".history-actions button"))
+    .find((b) => b.textContent === "删除");
+  if (!del) { return { error: "no delete button" }; }
+  del.click();
   await new Promise((r) => setTimeout(r, 1500));
   return { before: before, after: document.querySelectorAll(".history-item").length };
 })()'

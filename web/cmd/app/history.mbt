@@ -214,9 +214,17 @@ fn history_panel(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("aside", "history", [
     el("div", "section-head", [
       el("h2", "", [txt("运行记录")]),
-      @html.button(class="link-btn", on_click=emit(Msg::RefreshRuns), [
-        txt("刷新"),
-      ]),
+      // 勾满两个就把「刷新」换成「对比」——头部只有一格，而这两个动作
+      // 不会同时被需要。
+      if model.compare_picks.length() == max_compare_picks {
+        @html.button(class="link-btn", on_click=emit(Msg::StartCompare), [
+          txt("对比这两次"),
+        ])
+      } else {
+        @html.button(class="link-btn", on_click=emit(Msg::RefreshRuns), [
+          txt("刷新"),
+        ])
+      },
     ]),
     el("div", "history-list", body),
     error,
@@ -234,7 +242,14 @@ fn run_item(
     None => false
   }
   let busy = model.busy_run == Some(info.id)
-  let classes = if active { "history-item active" } else { "history-item" }
+  let picked = model.compare_picks.contains(info.id)
+  let classes = if active {
+    "history-item active"
+  } else if picked {
+    "history-item picked"
+  } else {
+    "history-item"
+  }
   let badges : Array[@html.Html] = [
     el("span", "badge " + status_class(info.status), [txt(info.status_label())]),
   ]
@@ -265,6 +280,12 @@ fn run_item(
       @html.button(class="link-btn", on_click=emit(Msg::Rerun(info.id)), [
         txt("重跑"),
       ]),
+      // 勾满两个之后头部会出现「对比这两次」
+      @html.button(
+        class="link-btn",
+        on_click=emit(Msg::ToggleComparePick(info.id)),
+        [txt(if picked { "✓对比" } else { "对比" })],
+      ),
       @html.button(
         class="link-btn danger",
         on_click=emit(Msg::DeleteRun(info.id)),

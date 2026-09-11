@@ -900,3 +900,122 @@ button.ghost {
     font-size: 0.76rem;
   }
 }
+
+// ---------------------------------------------------------------- 两次运行对比
+
+.history-item.picked {
+  border-color: $accent-2;
+  background: rgba(63, 185, 80, 0.06);
+}
+
+.compare {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.compare-block {
+  @include card(0.9rem 1rem);
+
+  h2 {
+    margin: 0 0 0.7rem;
+    color: $title;
+    font-size: 1rem;
+  }
+
+  h3 {
+    margin: 0.9rem 0 0.4rem;
+    color: $title;
+    font-size: 0.88rem;
+  }
+}
+
+.diff-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.diff-row {
+  display: grid;
+  // 第一列是标签，最后两列（或三列）是两次运行。用 auto 让长 prompt 自己换行，
+  // 而不是把表格撑出屏幕。
+  grid-template-columns: 8rem minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  padding: 0.3rem 0;
+  border-top: 1px solid $border;
+  font-size: 0.82rem;
+  word-break: break-word;
+
+  &:first-child {
+    border-top: 0;
+  }
+
+  span {
+    min-width: 0;
+  }
+}
+
+.diff-head {
+  color: $muted;
+  font-size: 0.76rem;
+}
+
+.diff-label {
+  color: $muted;
+}
+
+.diff-old {
+  color: $muted;
+  text-decoration: line-through;
+  text-decoration-color: rgba(125, 136, 150, 0.5);
+}
+
+.diff-new {
+  color: $title;
+}
+
+.diff-delta {
+  @include value-text;
+  color: $muted;
+}
+
+// 这里刻意没有 .diff-up / .diff-down：同号的 Δ 在不同指标上好坏相反
+// （首 token 变长是坏，decode tok/s 变快是好），上色就等于替读者下结论了。
+
+.metric-block + .metric-block {
+  margin-top: 0.4rem;
+}
+
+.compare-case {
+  border-top: 1px solid $border;
+  padding-top: 0.7rem;
+  margin-top: 0.7rem;
+
+  h3 {
+    margin: 0 0 0.5rem;
+    color: $title;
+    font-size: 0.9rem;
+  }
+}
+
+.compare-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+
+  @media (max-width: 960px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.compare-col {
+  min-width: 0;
+}
+
+.compare-col-head {
+  color: $muted;
+  font-size: 0.76rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid $border;
+}

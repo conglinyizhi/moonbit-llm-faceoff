@@ -136,6 +136,10 @@ struct AppModel {
   presets : Array[Preset]?
   presets_error : String?
   preset_name : String
+  /// 勾了要对比的运行 id（最多两个）。
+  compare_picks : Array[String]
+  /// 正在看的对比。Some 时结果区被对比视图接管。
+  compare : CompareState?
   /// 正在看的那次历史运行。None 表示看当前这次。
   viewed : ViewedRun?
   /// 正在删/正在重跑的 id：同一条上重复点击直接忽略（按钮不用 disabled，
@@ -186,6 +190,8 @@ fn initial_model() -> AppModel {
     presets: None,
     presets_error: None,
     preset_name: "",
+    compare_picks: [],
+    compare: None,
     tail: "",
     failures: 0,
     retried: 0,
@@ -349,6 +355,11 @@ enum Msg {
   SavePreset
   ApplyPreset(String)
   DeletePreset(String)
+  // 两次运行对比
+  ToggleComparePick(String)
+  StartCompare
+  CompareRunLoaded(String, Result[RunStatus, Error])
+  CloseCompare
 }
 
 ///|
@@ -963,6 +974,99 @@ fn update(
             save_presets(presets.filter(fn(item) { item.name != name }), emit),
           )
       }
+    ToggleComparePick(id) =>
+      (
+        { ..model, compare_picks: toggle_pick(model.compare_picks, id), },
+        @cmd.none,
+      )
+    StartCompare => {
+      let picks = model.compare_picks
+      if picks.length() != 2 {
+        (
+          { ..model, runs_error: Some("先勾两次运行，再点对比"), },
+          @cmd.none,
+        )
+      } else {
+        match (find_run(model.runs, picks[0]), find_run(model.runs, picks[1])) {
+          (Some(left), Some(right)) =>
+            (
+              {
+                ..model,
+                // 对比接管结果区：不接管的话，对比表和「当前运行的结果」
+                // 会挤在一起，看上去像同一份数据。
+                viewed: None,
+                compare: Some({
+                  a: left.id,
+                  b: right.id,
+                  data_a: None,
+                  data_b: None,
+                  request_a: left.request,
+                  request_b: right.request,
+                  error: None,
+                }),
+                runs_error: None,
+              },
+              @cmd.batch([
+                fetch_compare_run(left.id, emit),
+                fetch_compare_run(right.id, emit),
+              ]),
+            )
+          _ =>
+            (
+              {
+                ..model,
+                runs_error: Some(
+                  "勾选的那两次里有已经不在列表里的",
+                ),
+              },
+              @cmd.none,
+            )
+        }
+      }
+    }
+    CompareRunLoaded(id, result) =>
+      match model.compare {
+        None => (model, @cmd.none)
+        Some(state) =>
+          match result {
+            Ok(status) => {
+              let data = match status.data {
+                Some(json) =>
+                  match @shared.parse_page_data_json(json) {
+                    Ok(data) => Some(data)
+                    Err(_) => None
+                  }
+                None => None
+              }
+              // 失败的运行没有 data.json：不要占着「正在载入」不放，
+              // 直接说清楚那一次没有可比的数据。
+              let error = if data is None {
+                Some(
+                  "\{id} 没有结果数据（状态：\{status.status}），那一次比不了",
+                )
+              } else {
+                state.error
+              }
+              let next = if id == state.a {
+                { ..state, data_a: data, error, }
+              } else if id == state.b {
+                { ..state, data_b: data, error, }
+              } else {
+                state
+              }
+              ({ ..model, compare: Some(next), }, @cmd.none)
+            }
+            Err(error) =>
+              (
+                {
+                  ..model,
+                  compare: Some({ ..state, error: Some(error.to_string()), }),
+                },
+                @cmd.none,
+              )
+          }
+      }
+    CloseCompare => ({ ..model, compare: None, compare_picks: [], }, @cmd.none)
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
     MaxTokensChanged(text) =>
@@ -1657,37 +1761,42 @@ fn status_label(status : String) -> String {
 
 ///|
 fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  match model.viewed {
-    Some(viewed) =>
-      @html.fragment([
-        viewed_banner(viewed, emit),
-        match viewed.data {
-          Some(data) => @shared.results_section(data)
-          // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
-          // 总比一片空白强。
-          None =>
-            el("section", "progress-card", [
-              el("div", "progress-head", [
-                txt(
-                  "这次运行没有结果数据（状态：\{viewed.status}）",
-                ),
-              ]),
-              match viewed.error {
-                Some(message) => @html.pre([txt(message)])
-                None =>
-                  if viewed.tail == "" {
-                    @html.fragment([])
-                  } else {
-                    @html.pre([txt(viewed.tail)])
-                  }
-              },
-            ])
-        },
-      ])
+  match model.compare {
+    // 对比接管结果区：两份数据并排，而不是和当前运行的结果叠在一起
+    Some(state) => compare_view(state, emit)
     None =>
-      match model.data {
-        Some(data) => @shared.results_section(data)
-        None => @html.fragment([])
+      match model.viewed {
+        Some(viewed) =>
+          @html.fragment([
+            viewed_banner(viewed, emit),
+            match viewed.data {
+              Some(data) => @shared.results_section(data)
+              // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
+              // 总比一片空白强。
+              None =>
+                el("section", "progress-card", [
+                  el("div", "progress-head", [
+                    txt(
+                      "这次运行没有结果数据（状态：\{viewed.status}）",
+                    ),
+                  ]),
+                  match viewed.error {
+                    Some(message) => @html.pre([txt(message)])
+                    None =>
+                      if viewed.tail == "" {
+                        @html.fragment([])
+                      } else {
+                        @html.pre([txt(viewed.tail)])
+                      }
+                  },
+                ])
+            },
+          ])
+        None =>
+          match model.data {
+            Some(data) => @shared.results_section(data)
+            None => @html.fragment([])
+          }
       }
   }
 }
