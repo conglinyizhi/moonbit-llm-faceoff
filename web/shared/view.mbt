@@ -142,32 +142,55 @@ pub fn comparison(data : PageData) -> @html.Html {
 ///|
 pub fn answers(
   data : PageData,
+  mode? : String = "stacked",
+  switch? : @html.Html,
   editor? : (String, String) -> @html.Html,
 ) -> @html.Html {
   if data.cases.length() == 0 {
     return @html.fragment([])
   }
+  let hint = match mode {
+    "columns" => "每个模型一列，各自滚动"
+    "diff" => "以第一个模型为基准"
+    _ => "每个模型一条"
+  }
   el("section", "", [
     el("h2", "section-title", [
       txt("用例输出"),
-      el("span", "", [txt("每个模型一条")]),
+      el("span", "", [txt(hint)]),
+      match switch {
+        Some(control) => el("span", "view-switch", [control])
+        None => @html.fragment([])
+      },
     ]),
-    el("div", "cases", data.cases.map(fn(block) { case_block(block, editor?) })),
+    el(
+      "div",
+      "cases",
+      data.cases.map(fn(block) { case_block(block, mode~, editor?) }),
+    ),
   ])
 }
 
 ///|
 pub fn case_block(
   block : CaseBlock,
+  mode? : String = "stacked",
   editor? : (String, String) -> @html.Html,
 ) -> @html.Html {
   el("article", "case", [
     el("div", "case-head", [@html.h3([txt(block.id)])]),
-    el(
-      "div",
-      "",
-      block.answers.map(fn(answer) { answer_block(block.id, answer, editor?) }),
-    ),
+    match mode {
+      "columns" => answer_columns(block, editor?)
+      "diff" => answer_diffs(block)
+      _ =>
+        el(
+          "div",
+          "",
+          block.answers.map(fn(answer) {
+            answer_block(block.id, answer, editor?)
+          }),
+        )
+    },
   ])
 }
 
@@ -207,6 +230,117 @@ pub fn answer_block(
     parts.push(cot_block(answer))
   }
   el("div", "answer", parts)
+}
+
+///|
+/// 一条答案的简介：长回答对比时先看这一行就够判断值不值得读。
+pub fn answer_digest(answer : Answer) -> String {
+  if !answer.ok {
+    return "失败"
+  }
+  let text = answer.content.trim(chars=" \t\r\n").to_owned()
+  "\{text.length()} 字 / \{answer.completion_tokens} token"
+}
+
+///|
+/// 同一道题、多个模型：并排一列一个。
+///
+/// 长回答的问题不是「有没有可比的地方」，而是「两边都摆出来之后页面谁也不
+/// 认识谁」：竖着堆下来，1B 写了 1100 字、2B 写了 700 字，看完第一段就找不
+/// 回第二段在哪。列里各自滚动、表头钉住，至少能一直知道自己在读哪个模型。
+pub fn answer_columns(
+  block : CaseBlock,
+  editor? : (String, String) -> @html.Html,
+) -> @html.Html {
+  el(
+    "div",
+    "answer-cols",
+    block.answers.map(fn(answer) {
+      el("div", "answer-col", [
+        el("div", "answer-col-head", [
+          el("span", "answer-col-model", [txt(answer.model)]),
+          el("span", "answer-col-meta", [txt(answer_digest(answer))]),
+        ]),
+        el("div", "answer-col-body", [answer_block(block.id, answer, editor?)]),
+      ])
+    }),
+  )
+}
+
+///|
+/// 一行差异：`change-*` 带行内高亮——整行只差一个标点时，标红的那几个字才是
+/// 有用的信息。
+fn diff_line_html(line : DiffLine) -> @html.Html {
+  if line.kind == "gap" {
+    return el("div", "diff-gap", [txt(line.text)])
+  }
+  let body = match line.parts {
+    Some(parts) =>
+      el(
+        "span",
+        "diff-text",
+        parts.map(fn(part) {
+          if part.kind == "same" {
+            txt(part.text)
+          } else {
+            el("span", "diff-part-" + part.kind, [txt(part.text)])
+          }
+        }),
+      )
+    None => txt(line.text)
+  }
+  el("div", "diff-line diff-line-" + line.kind, [body])
+}
+
+///|
+/// 以第一个模型为基准的差异视图：每个后续模型一块。
+///
+/// 行级而不是字符级：两个模型各写一段话时，字符级的公共子序列很短，整段都会
+/// 标成「变了」，等于没有定位。行对齐之后，相同的行压掉，读者看到的是「从哪里
+/// 开始分岔」。
+pub fn answer_diffs(block : CaseBlock) -> @html.Html {
+  match block.answers {
+    [] => el("p", "muted", [txt("没有答案")])
+    [base, ..] =>
+      if block.answers.length() == 1 {
+        el("p", "muted", [
+          txt(
+            "只有一个模型，没有可比的对象（勾两个模型再跑）。",
+          ),
+        ])
+      } else {
+        el(
+          "div",
+          "diffs",
+          block.answers[1:].map(fn(answer) { diff_block(base, answer) }),
+        )
+      }
+  }
+}
+
+///|
+pub fn diff_block(left : Answer, right : Answer) -> @html.Html {
+  el("article", "diff-block", [
+    el("div", "diff-title", [
+      txt(
+        "\{left.model} → \{right.model}：\{answer_digest(left)} / \{answer_digest(right)}",
+      ),
+    ]),
+    if !left.ok || !right.ok {
+      el("p", "failed", [
+        txt(
+          if !left.ok {
+            "基准那条失败了，比不了"
+          } else {
+            "这条失败了，比不了"
+          },
+        ),
+      ])
+    } else {
+      let lines = collapse_same(diff_lines(left.content, right.content), 2)
+      el("div", "diff-lines", lines.map(diff_line_html))
+    },
+  ])
 }
 
 ///|
@@ -358,9 +492,15 @@ fn cot_block(answer : Answer) -> @html.Html {
 /// 结果区整体（卡片 + 对比 + 用例），供两个前端共用。
 pub fn results_section(
   data : PageData,
+  mode? : String = "stacked",
+  switch? : @html.Html,
   editor? : (String, String) -> @html.Html,
 ) -> @html.Html {
-  @html.fragment([model_cards(data), comparison(data), answers(data, editor?)])
+  @html.fragment([
+    model_cards(data),
+    comparison(data),
+    answers(data, mode~, switch?, editor?),
+  ])
 }
 
 ///|

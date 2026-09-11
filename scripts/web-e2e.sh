@@ -300,6 +300,57 @@ echo "$probe" | grep -qE '"deltaCells":[1-9]' ||
   fail "指标表里没有 Δ 列：$probe"
 echo "ok: 勾两次运行能进对比视图（参数差异 / 指标差值 / 逐用例答案）"
 
+# 结果区的三种摆法：长回答竖着堆下来没法比，所以要能换成并排，也得能只留下
+# 分岔的地方（差异视图）。
+echo "==> 结果区：每个模型一条 / 并排对比 / 差异"
+views_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const item = document.querySelector(".history-item");
+  item.querySelectorAll(".history-actions button")[0].click();
+  await new Promise((r) => setTimeout(r, 2500));
+  out.modes = Array.from(document.querySelectorAll(".view-btn")).map((b) => b.textContent);
+  out.stacked = document.querySelectorAll(".answer-col").length;
+  byText("并排对比").click();
+  await new Promise((r) => setTimeout(r, 700));
+  const cols = Array.from(document.querySelectorAll(".answer-col"));
+  out.columns = cols.length;
+  out.colHeads = cols.slice(0, 2).map((c) => c.querySelector(".answer-col-head").textContent);
+  const widths = cols.map((c) => Math.round(c.getBoundingClientRect().width));
+  out.uniformWidth = widths.length > 1 && Math.min.apply(null, widths) === Math.max.apply(null, widths);
+  const bodies = cols.map((c) => getComputedStyle(c.querySelector(".answer-col-body")).overflowY);
+  out.scrollPerColumn = bodies.slice(0, 2).every((v) => v === "auto");
+  byText("差异").click();
+  await new Promise((r) => setTimeout(r, 700));
+  out.diffBlocks = document.querySelectorAll(".diff-block").length;
+  out.diffTitles = Array.from(document.querySelectorAll(".diff-title")).slice(0, 1).map((t) => t.textContent);
+  out.noColumnsInDiff = document.querySelectorAll(".answer-col").length;
+  byText("每个模型一条").click();
+  await new Promise((r) => setTimeout(r, 500));
+  out.backToStacked = document.querySelectorAll(".answer-col").length;
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/views.html" "$views_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/views.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"modes":\["每个模型一条","并排对比","差异"\]' ||
+  fail "结果区没有三种摆法的切换：$probe"
+echo "$probe" | grep -qE '"columns":([2-9]|[1-9][0-9])' ||
+  fail "并排对比没渲染出多列：$probe"
+# 表头是两个 span（模型名 + 规模），拼起来没有分隔符，所以分别断言
+echo "$probe" | grep -qE '"colHeads":\["[^"]*mock-[a-z][^"]*[0-9]+ 字' ||
+  fail "并排列上没有模型名与规模：$probe"
+echo "$probe" | grep -q '"uniformWidth":true' ||
+  fail "并排列宽度不相等（没法对齐着看）：$probe"
+echo "$probe" | grep -q '"scrollPerColumn":true' ||
+  fail "并排列没有各自的滚动条：$probe"
+echo "$probe" | grep -qE '"diffBlocks":[1-9]' ||
+  fail "差异视图没有逐用例的对比块：$probe"
+echo "$probe" | grep -qE '"noColumnsInDiff":0' ||
+  fail "差异视图里还叠着并排的列：$probe"
+echo "$probe" | grep -qE '"backToStacked":0' ||
+  fail "切回「每个模型一条」之后并排列还在：$probe"
+echo "ok: 结果区三视图（并排列等宽各自滚动、差异视图、切回去）"
+
 echo "==> 人工标注"
 # 打开历史里的一次运行 → 给第一条答案打「不行」+ 备注 → 徽章出现、写进磁盘、
 # 重新打开还在（这是「标注到底存没存下来」的分界线）。

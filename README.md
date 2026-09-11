@@ -485,6 +485,13 @@ From the page you can:
   was wrong. The verdict is saved the moment you click it, the note when you press
   存备注, and both live in that run's directory — so they show up in the Markdown
   copy and the static report too, and deleting a run takes its verdicts with it;
+- **read two long answers side by side**: the results section switches between
+  one block per model, columns (one per model, equal width, each with its own
+  scrollbar and a pinned header), and a diff. Long answers are the case that
+  needed it: stacked, they are two walls of text that you have to hold in your
+  head at once. The diff aligns lines, collapses the identical stretches, and
+  pairs a line that only changed a little — highlighting the few characters that
+  actually differ, which for Chinese prose is usually one comma;
 - **watch a run while it happens**: the progress card carries a bar over the whole
   suite plus a live line — which model, which case, whether it is still waiting
   for the first token, how many characters have arrived, and the rate over the

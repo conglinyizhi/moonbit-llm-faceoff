@@ -161,6 +161,10 @@ struct AppModel {
   tail : String
   /// 当下这条请求的实时进度（哪条、多快、多久没有输出了）。
   live : @shared.LiveProgress?
+  /// 结果区怎么摆：stacked（每个模型一条）/ columns（并排）/ diff（差异）。
+  /// 长回答竖着堆下来是没法比的——1B 写 1100 字、2B 写 700 字，读完第一段
+  /// 就找不回第二段在哪。
+  results_mode : String
   failures : Int
   retried : Int
   truncated : Int
@@ -210,6 +214,7 @@ fn initial_model() -> AppModel {
     compare: None,
     tail: "",
     live: None,
+    results_mode: "stacked",
     failures: 0,
     retried: 0,
     truncated: 0,
@@ -365,6 +370,7 @@ enum Msg {
   SelectNoCases
   AddDraft
   RemoveDraft(Int)
+  SetResultsMode(String)
   ImportTextChanged(String)
   ImportLines(Bool)
   DraftFieldChanged(Int, DraftField, String)
@@ -848,6 +854,7 @@ fn update(
       drafts.push(blank_draft())
       ({ ..model, editing_cases: true, drafts, cases_saved: None, }, @cmd.none)
     }
+    SetResultsMode(mode) => ({ ..model, results_mode: mode, }, @cmd.none)
     ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
     ImportLines(replace) => {
       // 上限按「已有 + 新导入」算：用例集那边也有 500 的上限
@@ -1935,6 +1942,30 @@ fn progress(model : AppModel) -> @html.Html {
 }
 
 ///|
+/// 结果区的视图切换：竖着堆 / 并排 / 差异。
+///
+/// 「这么长我没法对比」是这里的全部理由：66 条用例、每条上千 token 的回答竖着
+/// 排下来，读的人只能靠记忆左右横跳。
+fn results_switch(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let button = fn(mode : String, label : String) {
+    @html.button(
+      class=if model.results_mode == mode {
+        "view-btn active"
+      } else {
+        "view-btn"
+      },
+      on_click=emit(Msg::SetResultsMode(mode)),
+      [txt(label)],
+    )
+  }
+  el("span", "view-buttons", [
+    button("stacked", "每个模型一条"),
+    button("columns", "并排对比"),
+    button("diff", "差异"),
+  ])
+}
+
+///|
 fn status_label(status : String) -> String {
   match status {
     "starting" => "提交中"
@@ -1960,6 +1991,8 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
               Some(data) =>
                 @shared.results_section(
                   @shared.with_annotations(data, model.annotations),
+                  mode=model.results_mode,
+                  switch=results_switch(model, emit),
                   editor=fn(case_id, answer_model) {
                     annotation_editor_for(model, case_id, answer_model, emit)
                   },
@@ -1990,6 +2023,8 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
             Some(data) =>
               @shared.results_section(
                 @shared.with_annotations(data, model.annotations),
+                mode=model.results_mode,
+                switch=results_switch(model, emit),
                 editor=fn(case_id, answer_model) {
                   annotation_editor_for(model, case_id, answer_model, emit)
                 },

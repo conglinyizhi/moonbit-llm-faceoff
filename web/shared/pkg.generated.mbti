@@ -12,15 +12,29 @@ pub fn annotation_editor(Annotation?, String, @cmd.Cmd, @cmd.Cmd, @cmd.Cmd, @cmd
 
 pub fn answer_block(String, Answer, editor? : (String, String) -> @html.Html) -> @html.Html
 
-pub fn answers(PageData, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn answer_columns(CaseBlock, editor? : (String, String) -> @html.Html) -> @html.Html
+
+pub fn answer_diffs(CaseBlock) -> @html.Html
+
+pub fn answer_digest(Answer) -> String
+
+pub fn answers(PageData, mode? : String, switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
 
 pub fn array_field(Map[String, Json], String) -> Array[Json]
 
 pub fn as_object(Json) -> Map[String, Json]
 
-pub fn case_block(CaseBlock, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn case_block(CaseBlock, mode? : String, editor? : (String, String) -> @html.Html) -> @html.Html
+
+pub fn collapse_same(Array[DiffLine], Int) -> Array[DiffLine]
 
 pub fn comparison(PageData) -> @html.Html
+
+pub fn diff_block(Answer, Answer) -> @html.Html
+
+pub fn diff_chars(String, String) -> Array[DiffPart]
+
+pub fn diff_lines(String, String) -> Array[DiffLine]
 
 pub fn el(String, String, Array[@html.Html]) -> @html.Html
 
@@ -52,7 +66,7 @@ pub fn plain(String, Array[@html.Html]) -> @html.Html
 
 pub fn results_markdown(PageData) -> String
 
-pub fn results_section(PageData, editor? : (String, String) -> @html.Html) -> @html.Html
+pub fn results_section(PageData, mode? : String, switch? : @html.Html, editor? : (String, String) -> @html.Html) -> @html.Html
 
 pub fn stat(String, MetricStats?, String) -> @html.Html
 
@@ -110,6 +124,21 @@ pub(all) struct CaseBlock {
 } derive(Eq)
 pub fn CaseBlock::equal(Self, Self) -> Bool
 pub fn CaseBlock::not_equal(Self, Self) -> Bool
+
+pub(all) struct DiffLine {
+  kind : String
+  text : String
+  parts : Array[DiffPart]?
+} derive(Eq)
+pub fn DiffLine::equal(Self, Self) -> Bool
+pub fn DiffLine::not_equal(Self, Self) -> Bool
+
+pub(all) struct DiffPart {
+  kind : String
+  mut text : String
+} derive(Eq)
+pub fn DiffPart::equal(Self, Self) -> Bool
+pub fn DiffPart::not_equal(Self, Self) -> Bool
 
 pub(all) struct LiveProgress {
   event : String
