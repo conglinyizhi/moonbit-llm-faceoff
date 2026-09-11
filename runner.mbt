@@ -56,8 +56,27 @@ fn redact_key(text : String, key : String) -> String {
 }
 
 ///|
-/// Decode a non-streaming chat response body and return its first choice text.
-pub fn response_text(json : Json) -> String raise ClientError {
+/// Everything a non-streaming reply carries.
+///
+/// The same information the streaming path assembles, and for a reason: without
+/// the stop reason and the token accounting, a reply that spent its whole budget
+/// thinking is indistinguishable from a broken client — the caller gets an empty
+/// string and no explanation for it.
+pub(all) struct AskOutcome {
+  /// The visible answer.
+  content : String
+  /// The chain of thought, when the gateway sent it on a non-streaming reply.
+  reasoning : String
+  /// Token accounting, when the endpoint sent a `usage` block.
+  usage : TokenUsage?
+  /// Why the model stopped, when the endpoint said so. `length` means the reply
+  /// was cut off by the token budget.
+  finish_reason : String?
+}
+
+///|
+/// Decode a non-streaming chat response body into everything it carries.
+pub fn response_outcome(json : Json) -> AskOutcome raise ClientError {
   let obj = match json {
     Object(obj) => obj
     _ => raise Decode("response is not a JSON object")
@@ -74,23 +93,47 @@ pub fn response_text(json : Json) -> String raise ClientError {
     Some(Object(message)) => message
     _ => raise Decode("response choice has no message")
   }
-  match message.get("content") {
-    Some(String(text)) => text
-    _ => ""
+  {
+    content: match message.get("content") {
+      Some(String(text)) => text
+      _ => ""
+    },
+    reasoning: match message.get("reasoning_content") {
+      Some(String(text)) => text
+      _ => ""
+    },
+    usage: match obj.get("usage") {
+      Some(Object(usage)) => Some(parse_usage(usage))
+      _ => None
+    },
+    finish_reason: match choice.get("finish_reason") {
+      Some(String(reason)) => Some(reason)
+      _ => None
+    },
   }
 }
 
 ///|
-/// Send `prompt` and return the complete reply, without streaming.
+/// Decode a non-streaming chat response body and return its first choice text.
+///
+/// Just the text. `response_outcome` is what a caller wants when an empty answer
+/// needs an explanation.
+pub fn response_text(json : Json) -> String raise ClientError {
+  response_outcome(json).content
+}
+
+///|
+/// Send `prompt` and return the complete reply, with the stop reason and the
+/// token accounting alongside it.
 ///
 /// Talks to the endpoint directly, same as the streaming path, so this module
 /// depends on nothing but the standard library and the async runtime.
 /// `Settings::timeout_ms` is honored here (the streaming path deliberately
 /// leaves it to the OS).
-pub async fn ask(
+pub async fn ask_outcome(
   settings : Settings,
   prompt : String,
-) -> String raise ClientError {
+) -> AskOutcome raise ClientError {
   let headers : Map[String, String] = { "Content-Type": "application/json" }
   if settings.api_key != "" {
     headers["Authorization"] = "Bearer " + settings.api_key
@@ -108,7 +151,16 @@ pub async fn ask(
     raise Status(code=response.code, message=redact_key(text, settings.api_key))
   }
   let json = @json.parse(text) catch { err => raise Decode(err.to_string()) }
-  response_text(json)
+  response_outcome(json)
+}
+
+///|
+/// Send `prompt` and return the complete reply text, without streaming.
+pub async fn ask(
+  settings : Settings,
+  prompt : String,
+) -> String raise ClientError {
+  ask_outcome(settings, prompt).content
 }
 
 ///|

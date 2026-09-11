@@ -32,6 +32,7 @@
 #   REAL_SHOW_FULL_URL=1     留证里写完整端点（默认只写 scheme://host，
 #                            有些网关把 token 拼在 URL 路径里）
 #   REAL_TRUNCATE_MAX_TOKENS=8  截断探针用的 token 预算（网关对预算有最小值限制时调大）
+#   REAL_ONE_SHOT_MAX_TOKENS=256  one-shot 探针的 token 预算（推理模型需要的多些）
 #   STREAM_MIN_GAP_MS=300    流式判定的最小间隔，见 scripts/check_stream.mbtx
 
 set -uo pipefail
@@ -244,8 +245,11 @@ say
 
 say "==> 1/4 one-shot"
 prompt_one="用一句话说明什么是甲板风。"
-ev_section "1. one-shot" "$FACEOFF_BIN --max-tokens 64 \"$prompt_one\""
-"$FACEOFF_BIN" --max-tokens 64 "$prompt_one" >"$tmp/one.out" 2>"$tmp/one.err"
+# 256 而不是 64：小 max_tokens 下推理模型会把预算全花在思考上，可见正文为空，
+# 探针会把失败的原因归到端点上。真想知道那个形态长什么样，看 smoke 的 THINK_ONLY。
+one_shot_tokens=${REAL_ONE_SHOT_MAX_TOKENS:-256}
+ev_section "1. one-shot" "$FACEOFF_BIN --max-tokens $one_shot_tokens \"$prompt_one\""
+"$FACEOFF_BIN" --max-tokens "$one_shot_tokens" "$prompt_one" >"$tmp/one.out" 2>"$tmp/one.err"
 code=$?
 if [ $code -ne 0 ]; then
   ev_body "$tmp/one.err"

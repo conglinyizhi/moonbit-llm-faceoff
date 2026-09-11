@@ -159,4 +159,48 @@ grep -qE 'failures 0   truncated 1   retried 0' "$tmpdir/report.txt" \
 rm -rf "$tmpdir"
 echo "ok: a truncated reply is counted separately from a failure"
 
+# 12. the one-shot path is not silent any more: the status goes to stderr, so a
+#     pipe still carries exactly the reply and nothing else.
+out=$(MOONLLM_BASE_URL="http://127.0.0.1:$port/v1" MOONLLM_API_KEY=test-key \
+  "$bin" "hi there" 2>err.log)
+[ "$out" = "$expected" ] || fail "one-shot stdout changed: $out"
+grep -q -- "-> POST" err.log || fail "no request line on stderr: $(cat err.log)"
+grep -q -- "<- " err.log || fail "no summary line on stderr: $(cat err.log)"
+rm -f err.log
+echo "ok: status goes to stderr, stdout stays exactly the reply"
+
+# 13. ... and can be turned off, for a caller that wants stderr clean.
+out=$(MOONLLM_BASE_URL="http://127.0.0.1:$port/v1" MOONLLM_API_KEY=test-key \
+  "$bin" --quiet "hi there" 2>err.log)
+[ "$out" = "$expected" ] || fail "--quiet changed stdout: $out"
+[ ! -s err.log ] || fail "--quiet still wrote to stderr: $(cat err.log)"
+rm -f err.log
+echo "ok: --quiet silences the status lines"
+
+# 14. the whole token budget spent on thinking: no visible answer. This used to
+#     be a blank line and exit 0 — a pipeline could not tell it apart from a
+#     model that happened to say nothing, and the cause was invisible.
+if MOONLLM_BASE_URL="http://127.0.0.1:$port/v1" MOONLLM_API_KEY=test-key \
+  "$bin" --max-tokens 64 "THINK_ONLY answer me" >out.log 2>err.log; then
+  fail "an empty reply should exit non-zero"
+fi
+[ "$(wc -c <out.log)" -le 1 ] \
+  || fail "stdout should carry only the newline: $(cat out.log)"
+grep -q "no visible content" err.log \
+  || fail "no warning about the empty reply: $(cat err.log)"
+grep -q "finish_reason: length" err.log \
+  || fail "the warning does not say why: $(cat err.log)"
+rm -f out.log err.log
+echo "ok: an empty reply is reported and exits non-zero, instead of a blank line"
+
+# 15. --show-cot routes the chain of thought to stderr, so the answer on stdout
+#     stays pipeable while the reasoning is still visible as it arrives.
+out=$(MOONLLM_BASE_URL="http://127.0.0.1:$port/v1" MOONLLM_API_KEY=test-key \
+  "$bin" --stream --show-cot "hi" 2>err.log)
+[ "$out" = "$expected" ] || fail "--show-cot changed stdout: $out"
+grep -q "weighing the question" err.log \
+  || fail "reasoning did not reach stderr: $(cat err.log)"
+rm -f err.log
+echo "ok: --show-cot sends the chain of thought to stderr"
+
 echo "smoke: all checks passed"

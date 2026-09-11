@@ -170,3 +170,47 @@ test "parse_sse_line tolerates carriage returns" {
     Some(SseEvent::Content("x")),
   )
 }
+
+///|
+test "response_outcome keeps the stop reason and the token accounting" {
+  let json = @json.parse(
+    "{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"hi\",\"reasoning_content\":\"thinking\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":4,\"reasoning_tokens\":4}}",
+  )
+  let outcome = response_outcome(json)
+  assert_eq(outcome.content, "hi")
+  assert_eq(outcome.reasoning, "thinking")
+  assert_eq(outcome.finish_reason, Some("length"))
+  assert_eq(outcome.usage, Some(TokenUsage::new(11, 4, 4)))
+}
+
+///|
+test "response_outcome reports an empty answer as empty, not as an error" {
+  let json = @json.parse(
+    "{\"choices\":[{\"index\":0,\"message\":{\"content\":\"\",\"reasoning_content\":\"spent the whole budget\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":4,\"reasoning_tokens\":4}}",
+  )
+  let outcome = response_outcome(json)
+  assert_eq(outcome.content, "")
+  assert_eq(outcome.reasoning, "spent the whole budget")
+  assert_eq(outcome.finish_reason, Some("length"))
+}
+
+///|
+test "response_outcome tolerates a missing usage block and stop reason" {
+  let json = @json.parse("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}")
+  let outcome = response_outcome(json)
+  assert_eq(outcome.content, "ok")
+  assert_eq(outcome.reasoning, "")
+  assert_true(outcome.usage is None)
+  assert_true(outcome.finish_reason is None)
+}
+
+///|
+test "response_outcome rejects a body with no choices" {
+  let result = Ok(response_outcome(@json.parse("{\"id\":\"1\"}"))) catch {
+    err => Err(err)
+  }
+  match result {
+    Err(ClientError::Decode(_)) => ()
+    _ => fail("expected Decode")
+  }
+}

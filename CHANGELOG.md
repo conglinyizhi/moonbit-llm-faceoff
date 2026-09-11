@@ -102,6 +102,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `faceoff` says what it is doing. A one-shot request used to print nothing at all
+  until it was finished — for a reasoning model that is a minute of a seemingly
+  dead terminal, and there was no way to tell it apart from a hang. It now writes
+  one line before the request and a summary after it to **stderr**, so stdout
+  stays exactly the reply:
+  `<- 3.2s  content 41 chars  reasoning 512 chars  tokens 21+64(reasoning 64)  finish_reason=length`.
+  `--quiet` turns those off; `--show-cot` streams the chain of thought to stderr,
+  which is the streaming counterpart of watching it think.
+- **An empty reply is no longer a blank line and exit 0.** When the visible
+  content is empty — the usual cause being a reasoning model that spent the whole
+  `--max-tokens` budget thinking — `faceoff` now says so on stderr, with the stop
+  reason and the token counts that explain it, and exits non-zero. A pipeline
+  could not tell the old behaviour apart from a model that said nothing.
+  `@faceoff.ask_outcome` is the library-level counterpart: the same request, but
+  it returns `content`, `reasoning`, `usage` and `finish_reason` instead of only
+  the text. `ask` is now a thin wrapper over it, and `response_outcome` should be
+  used wherever an empty answer needs an explanation.
+- The mock endpoint can simulate that shape: a prompt containing `THINK_ONLY`
+  returns an empty visible answer with non-empty reasoning and
+  `finish_reason: length`, so the empty-reply path is covered end to end instead
+  of only in theory.
+
 - `make install` (a thin wrapper over `moon install ./cmd/...`) puts `faceoff` and
   `bench` in `~/.moon/bin`. The README had been writing `faceoff` as a bare
   command without ever saying how it gets onto the PATH; it now covers both

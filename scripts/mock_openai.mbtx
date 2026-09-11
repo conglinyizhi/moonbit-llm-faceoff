@@ -17,6 +17,9 @@
 ///     会在结果里留下 attempts > 1
 ///   - 指令里含 TRUNCATE → 回复正常，但 finish_reason 是 length，
 ///     用来验证截断计数不是摆设
+///   - 指令里含 THINK_ONLY → 预算全花在思考上：可见正文为空、reasoning 非空、
+///     finish_reason 是 length。小 max_tokens 下的推理模型就是这个形态，
+///     客户端要能把它和「客户端坏了」区分开
 ///   - 请求里的 max_tokens 小于本端点的回复长度（9 个 token）→ 同样报 length。
 ///     真实网关就是这么干的，所以真实网关的验证脚本可以拿这个假端点试跑
 ///   - stream: true → chunked SSE：角色块、思考碎片、正文碎片、finish、
@@ -166,15 +169,20 @@ async fn handle(
     Some(Number(value, ..)) => value.to_int()
     _ => 0
   }
-  let finish = if truncated(prompt) || (budget > 0 && budget < completion_tokens) {
+  // THINK_ONLY：预算全花在思考上，可见正文为空。真实推理模型在小
+  // max_tokens 下就是这个样子，客户端要能把它和「坏掉」区分开。
+  let think_only = prompt.contains("THINK_ONLY")
+  let finish = if think_only ||
+    truncated(prompt) ||
+    (budget > 0 && budget < completion_tokens) {
     "length"
   } else {
     "stop"
   }
   if obj.get("stream") is Some(True) {
-    stream_reply(conn, model, finish)
+    stream_reply(conn, model, finish, think_only)
   } else {
-    json_reply(conn, model, finish)
+    json_reply(conn, model, finish, think_only)
   }
 }
 
@@ -203,6 +211,7 @@ async fn json_reply(
   conn : @http.ServerConnection,
   model : String,
   finish : String,
+  think_only : Bool,
 ) -> Unit {
   let payload = Json::object({
     "id": Json::string("mock-1"),
@@ -214,12 +223,13 @@ async fn json_reply(
         "index": Json::number(0.0),
         "message": Json::object({
           "role": Json::string("assistant"),
-          "content": Json::string(reply),
+          "content": Json::string(if think_only { "" } else { reply }),
+          "reasoning_content": Json::string("weighing the question"),
         }),
         "finish_reason": Json::string(finish),
       }),
     ]),
-    "usage": usage_object(),
+    "usage": usage_object(think_only),
   })
   conn.send_response(200, "OK", extra_headers={
     "Content-Type": "application/json; charset=utf-8",
@@ -235,6 +245,7 @@ async fn stream_reply(
   conn : @http.ServerConnection,
   model : String,
   finish : String,
+  think_only : Bool,
 ) -> Unit {
   conn.send_response(200, "OK", extra_headers={
     "Content-Type": "text/event-stream",
@@ -243,12 +254,15 @@ async fn stream_reply(
   let delay_ms = stream_delay_ms()
   event(conn, chunk(model, role_delta(), None))
   event(conn, chunk(model, reasoning_delta("weighing the question"), None))
-  for fragment in fragments {
-    @async.sleep(delay_ms) catch { _ => () }
-    event(conn, chunk(model, content_delta(fragment), None))
+  // THINK_ONLY 时正文一个分片都不发：预算全在思考上，要模拟的正是这个形态
+  if !think_only {
+    for fragment in fragments {
+      @async.sleep(delay_ms) catch { _ => () }
+      event(conn, chunk(model, content_delta(fragment), None))
+    }
   }
   event(conn, chunk(model, Map([]), Some(finish)))
-  event(conn, usage_event(model))
+  event(conn, usage_event(model, think_only))
   event(conn, "[DONE]")
   conn.end_response()
 }
@@ -295,24 +309,24 @@ fn chunk(model : String, delta : Map[String, Json], finish : String?) -> String 
 
 ///|
 /// usage 走一个 choices 为空数组的块，和真实网关一致。
-fn usage_event(model : String) -> String {
+fn usage_event(model : String, think_only : Bool) -> String {
   Json::object({
     "id": Json::string("mock-1"),
     "object": Json::string("chat.completion.chunk"),
     "model": Json::string(model),
     "choices": Json::array(([] : Array[Json])),
-    "usage": usage_object(),
+    "usage": usage_object(think_only),
   }).stringify()
 }
 
 ///|
-fn usage_object() -> Json {
+/// THINK_ONLY 时整个预算都在思考上：completion = reasoning。
+fn usage_object(think_only : Bool) -> Json {
+  let completion = if think_only { reasoning_tokens } else { completion_tokens }
   Json::object({
     "prompt_tokens": Json::number(prompt_tokens.to_double()),
-    "completion_tokens": Json::number(completion_tokens.to_double()),
-    "total_tokens": Json::number(
-      (prompt_tokens + completion_tokens).to_double(),
-    ),
+    "completion_tokens": Json::number(completion.to_double()),
+    "total_tokens": Json::number((prompt_tokens + completion).to_double()),
     "reasoning_tokens": Json::number(reasoning_tokens.to_double()),
   })
 }
