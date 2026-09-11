@@ -81,10 +81,22 @@ model mock-a
 ### 3. Run the web page — also without a key
 
 ```bash
+make serve          # builds the page, then starts the server from web/
+# → http://127.0.0.1:8137/
+```
+
+Or by hand, the same two steps:
+
+```bash
 bash web/build.sh
 cd web
-./_build/native/debug/build/cmd/server/server.exe    # → http://127.0.0.1:8137/
+./_build/native/debug/build/cmd/server/server.exe
 ```
+
+Either way: **the server must run with `web/` as its working directory.** It
+resolves `out/`, `runs/`, `cases/` and `presets.json` relative to it; started
+from the repository root it answers `/api/meta` and then 404s on every page
+request. `make serve` does that `cd` for you.
 
 Open <http://127.0.0.1:8137/> and work there: pick models and cases, adjust the
 parameters, put your API key in (or export it before starting the server), and
