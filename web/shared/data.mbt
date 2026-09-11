@@ -231,6 +231,82 @@ fn parse_answer(json : Json) -> Answer {
 }
 
 ///|
+/// What a run actually sent: the request document plus one entry per case with the
+/// values that were in effect for it.
+///
+/// The point is answering "why did it answer that" without leaving the page: a
+/// system prompt overridden per case, a temperature you forgot you set, a
+/// `max_tokens` that cut the answer off — all of it is in the run directory, and
+/// none of it was visible.
+pub(all) struct RunContext {
+  id : String
+  /// The sanitized request document (`apiKey` is never in it).
+  request : Json
+  models : Array[String]
+  cases : Array[ContextCase]
+} derive(Eq)
+
+///|
+pub extend RunContext with Eq::{equal, not_equal}
+
+///|
+pub(all) struct ContextCase {
+  id : String
+  prompt : String
+  /// The system prompt that was actually in effect for this case.
+  system : String
+  /// True when the case set carried its own system prompt (and the global one
+  /// never applied). The page says so, because that is usually the surprise.
+  system_overridden : Bool
+  max_tokens : Int
+  temperature : Double?
+} derive(Eq)
+
+///|
+pub extend ContextCase with Eq::{equal, not_equal}
+
+///|
+pub fn parse_run_context(json : Json) -> Result[RunContext, String] {
+  match json {
+    Object(fields) => {
+      let models = array_field(fields, "models").filter_map(fn(item) {
+        match item {
+          String(text) => Some(text)
+          _ => None
+        }
+      })
+      let cases = array_field(fields, "cases").map(fn(item) {
+        let entry = as_object(item)
+        {
+          id: string_field(entry, "id", ""),
+          prompt: string_field(entry, "prompt", ""),
+          system: string_field(entry, "system", ""),
+          system_overridden: match entry.get("systemOverridden") {
+            Some(True) => true
+            _ => false
+          },
+          max_tokens: int_field(entry, "maxTokens", 0),
+          temperature: match entry.get("temperature") {
+            Some(Number(value, ..)) => Some(value)
+            _ => None
+          },
+        }
+      })
+      Ok({
+        id: string_field(fields, "id", ""),
+        request: match fields.get("request") {
+          Some(value) => value
+          None => Json::object({})
+        },
+        models,
+        cases,
+      })
+    }
+    _ => Err("上下文不是一个对象")
+  }
+}
+
+///|
 /// The request that is in flight right now.
 ///
 /// The server forwards bench's last progress event verbatim (`live`) together

@@ -885,6 +885,63 @@ async fn main {
       "",
     )
 
+    // ---- 请求上下文：问了什么，页面得看得到
+    println("==> 请求上下文（GET /api/runs/<id>/context）")
+    // 用例级 system 覆盖全局——这条规则 bench 里有、服务端必须原样照搬，
+    // 否则页面上显示的「实际发出的内容」就是假的
+    let override_set = tmp + "/cases/override.jsonl"
+    // 目录通常已经被前面的用例集测试建出来了：已存在不算错误
+    // 目录通常已经被前面的用例集测试建出来了：已存在不算错误
+    @fs.mkdir(tmp + "/cases", recursive=true) catch {
+      _ => ()
+    }
+    @fs.write_file(
+      override_set,
+      "{\"id\":\"no-system\",\"prompt\":\"用一句话说明什么是甲板风。\"}\n" +
+      "{\"id\":\"own-system\",\"prompt\":\"用一句话说明什么是侧风。\",\"system\":\"只输出一个词，不要标点。\",\"maxTokens\":16,\"temperature\":0.9}\n",
+      create_mode=@fs.CreateOrTruncate,
+    ) catch {
+      err => {
+        bail("写不进用例集文件：\{override_set}：\{err}")
+        return
+      }
+    }
+    let context_body =
+      #|{"models":["mock-a"],"caseSet":"override","cases":["no-system","own-system"],"system":"全局 system。","repeats":1,"maxTokens":64,"temperature":0.2,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
+    let context_started = post(
+      base + "/api/runs",
+      context_body + mock_port + "/v1\",\"apiKey\":\"sk-context-should-not-leak\"}",
+    )
+    let context_id = json_string(context_started.body, "id")
+    if context_id == "" {
+      bail("没起成上下文那次运行：" + context_started.body)
+      return
+    }
+    ignore(await_finished(base, context_id))
+    let context = get(base + "/api/runs/" + context_id + "/context")
+    expect(
+      context.code == 200 &&
+      context.body.contains("\"caseSet\":\"override\"") &&
+      context.body.contains("\"全局 system。\"") &&
+      context.body.contains("\"只输出一个词，不要标点。\"") &&
+      context.body.contains("\"systemOverridden\":true") &&
+      context.body.contains("\"maxTokens\":16"),
+      "上下文给出参数与每条用例实际生效的 system/maxTokens",
+      "code=\{context.code} body=\{context.body}",
+    )
+    // 这个接口发的是请求文档，密钥绝不能跟着出去
+    expect(
+      !context.body.contains("sk-context-should-not-leak"),
+      "请求上下文里没有 API key",
+      context.body,
+    )
+    expect(
+      get(base + "/api/runs/" + context_id + "/context/../../moon.mod").code != 200,
+      "上下文接口不能拿来做路径穿越",
+      "",
+    )
+    let _ = delete(base + "/api/runs/" + context_id)
+
     // ---- 实时进度：跑着的时候状态里要有 live
     //
     // 慢一点的假端点：默认 0.02s 的间隔下整次运行不到 300ms，两次轮询之间就

@@ -76,6 +76,11 @@ the static-report generator. Nothing else — the name is matched against the li
 rather than joined onto a path, so `..` cannot escape it, and
 `scripts/server-api.mbtx` checks that.
 
+`GET /api/runs/<id>/context` is the same shape: it reads that run's `request.json`
+(with the key already scrubbed before it was written) and `cases.jsonl`, and
+serves the result as JSON. `scripts/server-api.mbtx` asserts the key is not in
+it.
+
 The consequence is that anything able to reach the server can read any run's
 results. That is the same trust boundary as the rest of the server (loopback, no
 authentication — see below), not a new one, but it is worth knowing before you

@@ -173,6 +173,7 @@ pub fn answers(
   mode? : String = "stacked",
   switch? : @html.Html,
   editor? : (String, String) -> @html.Html,
+  context? : (String) -> @html.Html,
 ) -> @html.Html {
   if data.cases.length() == 0 {
     return @html.fragment([])
@@ -194,7 +195,7 @@ pub fn answers(
     el(
       "div",
       "cases",
-      data.cases.map(fn(block) { case_block(block, mode~, editor?) }),
+      data.cases.map(fn(block) { case_block(block, mode~, editor?, context?) }),
     ),
   ])
 }
@@ -204,9 +205,16 @@ pub fn case_block(
   block : CaseBlock,
   mode? : String = "stacked",
   editor? : (String, String) -> @html.Html,
+  context? : (String) -> @html.Html,
 ) -> @html.Html {
   el("article", "case", [
-    el("div", "case-head", [@html.h3([txt(block.id)])]),
+    el("div", "case-head", [
+      @html.h3([txt(block.id)]),
+      match context {
+        Some(button) => el("span", "case-head-actions", [button(block.id)])
+        None => @html.fragment([])
+      },
+    ]),
     match mode {
       "columns" => answer_columns(block, editor?)
       "diff" => answer_diffs(block)
@@ -372,6 +380,201 @@ pub fn diff_block(left : Answer, right : Answer) -> @html.Html {
 }
 
 ///|
+/// 一块浮起来的对话框（拟态）：柔和的双向阴影、和页面同一个底色。
+///
+/// 用 CSS 而不是 `<dialog>`：页面是 VDOM 渲染的，`<dialog>` 的 open/close 由
+/// 浏览器命令式地管，两边状态很容易不同步——同一个毛病在 start 按钮那里已经
+/// 踩过一次（`disabled` 属性不会被 diff 摘掉）。
+///
+/// 点背景关掉：背景本身是一个带 on_click 的元素，不做「点外面」的坐标判断。
+pub fn modal(
+  title : String,
+  subtitle : String,
+  body : @html.Html,
+  on_close : @cmd.Cmd,
+) -> @html.Html {
+  el("div", "modal-backdrop", [
+    el("div", "modal", [
+      el("div", "modal-head", [
+        el("div", "modal-title", [
+          el("h3", "", [txt(title)]),
+          if subtitle == "" {
+            @html.fragment([])
+          } else {
+            el("span", "modal-subtitle", [txt(subtitle)])
+          },
+        ]),
+        @html.button(class="ghost modal-close", on_click=on_close, [
+          txt("关闭"),
+        ]),
+      ]),
+      el("div", "modal-body", [body]),
+    ]),
+  ])
+}
+
+///|
+/// 用例行右边那个「请求上下文」按钮。点开是一整个对话框，所以这里只负责发出
+/// 一个意图，具体的内容由页面拼。
+pub fn context_button(on_click : @cmd.Cmd) -> @html.Html {
+  @html.button(class="context-btn", on_click~, [txt("请求上下文")])
+}
+
+///|
+/// 一次运行的请求上下文：参数 + 每条用例实际生效的 system 与 user 消息。
+///
+/// 一条用例一块，按「模型会收到什么」的顺序写：system、user、然后是本条的
+/// 采样参数。看的是「到底问了什么」，不是「配置表」。
+pub fn run_context_body(context : RunContext, case_id : String) -> @html.Html {
+  let wanted = context.cases.filter(fn(entry) { entry.id == case_id })
+  let cases = if wanted.length() > 0 {
+    wanted
+  } else if context.cases.length() > 0 {
+    context.cases
+  } else {
+    // inline prompt 的运行没有 cases.jsonl，那条 prompt 就在请求文档里
+    inline_case(context)
+  }
+  el("div", "context", [
+    context_params(context),
+    el(
+      "div",
+      "context-cases",
+      cases.map(fn(entry) {
+        el("article", "context-case", [
+          el("div", "context-case-head", [
+            @html.h3([txt(entry.id)]),
+            el("span", "context-meta", [
+              txt(
+                "max_tokens \{entry.max_tokens} · temperature \{temperature_text(entry.temperature)}",
+              ),
+            ]),
+          ]),
+          message_block("system", entry.system, entry.system_overridden),
+          message_block("user", entry.prompt, false),
+          el(
+            "div",
+            "context-models",
+            context.models.map(fn(model) {
+              el("span", "context-model", [txt(model)])
+            }),
+          ),
+        ])
+      }),
+    ),
+  ])
+}
+
+///|
+/// 只有一条 inline prompt 的运行：把它当成唯一的一条用例。
+fn inline_case(context : RunContext) -> Array[ContextCase] {
+  let fields = as_object(context.request)
+  let prompt = string_field(fields, "prompt", "")
+  if prompt == "" {
+    return []
+  }
+  let system = string_field(fields, "system", "")
+  [
+    {
+      id: "inline prompt",
+      prompt,
+      system,
+      system_overridden: false,
+      max_tokens: int_field(fields, "maxTokens", 0),
+      temperature: match fields.get("temperature") {
+        Some(Number(value, ..)) => Some(value)
+        _ => None
+      },
+    },
+  ]
+}
+
+///|
+fn temperature_text(value : Double?) -> String {
+  match value {
+    None => "未设置（用服务端默认）"
+    Some(value) => fmt_number(value)
+  }
+}
+
+///|
+fn message_block(role : String, text : String, overridden : Bool) -> @html.Html {
+  el("div", "context-message", [
+    el("div", "context-role", [
+      txt(role),
+      if overridden {
+        el("span", "context-tag", [txt("用例级覆盖")])
+      } else {
+        @html.fragment([])
+      },
+    ]),
+    @html.pre([txt(if text == "" { "（没有）" } else { text })]),
+  ])
+}
+
+///|
+/// 运行级参数：这些是每条用例共用的底子。
+fn context_params(context : RunContext) -> @html.Html {
+  let request = context.request
+  let fields = as_object(request)
+  let rows : Array[(String, String)] = [
+    ("模型", context.models.join(", ")),
+    (
+      "system（全局）",
+      {
+        let system = string_field(fields, "system", "")
+        if system == "" {
+          "（没有）"
+        } else {
+          system
+        }
+      },
+    ),
+    (
+      "用例集",
+      {
+        let name = string_field(fields, "caseSet", "")
+        if name == "" {
+          "（inline prompt）"
+        } else {
+          name
+        }
+      },
+    ),
+    ("重复次数", int_field(fields, "repeats", 0).to_string()),
+    ("max tokens", int_field(fields, "maxTokens", 0).to_string()),
+    (
+      "temperature",
+      match fields.get("temperature") {
+        Some(Number(value, ..)) => fmt_number(value)
+        _ => "未设置"
+      },
+    ),
+    ("间隔 ms", int_field(fields, "paceMs", 0).to_string()),
+    ("重试次数", int_field(fields, "retry", 0).to_string()),
+    (
+      "网关",
+      {
+        let url = string_field(fields, "baseUrl", "")
+        if url == "" {
+          "服务端配置"
+        } else {
+          url
+        }
+      },
+    ),
+  ]
+  el(
+    "dl",
+    "context-params",
+    rows.map(fn(row) {
+      let (label, value) = row
+      @html.fragment([@html.dt([txt(label)]), @html.dd([txt(value)])])
+    }),
+  )
+}
+
+///|
 /// The "what is happening right now" line of a running benchmark.
 ///
 /// A suite of 66 cases takes minutes, and one stderr line per finished case
@@ -525,6 +728,7 @@ pub fn results_section(
   which? : String = "p50",
   percentile_switch? : @html.Html,
   editor? : (String, String) -> @html.Html,
+  context? : (String) -> @html.Html,
 ) -> @html.Html {
   // 名字对不上的可选参数只能自己拆开：`switch=<别的名字>?` 会把 Option 本身
   // 当成值传下去，而这里要的是「没有就不渲染任何东西」。
@@ -535,7 +739,7 @@ pub fn results_section(
   @html.fragment([
     model_cards(data),
     comparison(data, which~, switch=for_comparison),
-    answers(data, mode~, switch?, editor?),
+    answers(data, mode~, switch?, editor?, context?),
   ])
 }
 

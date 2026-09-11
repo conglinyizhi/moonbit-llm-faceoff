@@ -1232,9 +1232,140 @@ async fn get_run_route(
     Some("runs.jsonl") => send_run_file(config, id, "runs.jsonl", conn)
     Some("data.json") => send_run_file(config, id, "data.json", conn)
     Some("annotations") => get_annotations(config, id, conn)
+    Some("context") => get_run_context(config, id, conn)
     Some("report.html") => send_report(config, id, conn)
     Some(_) => send_text(conn, 404, "no such run export")
     None => get_run(config, id, conn)
+  }
+}
+
+///|
+/// 这次运行到底发了什么：参数 + 每条用例实际生效的上下文。
+///
+/// 「模型答得不对」有相当一部分其实是「问得不对」——system 被用例级覆盖了、
+/// 温度不一样、maxTokens 卡住了。这些都在运行目录里躺着，但页面看不到；把它们
+/// 原样端出来，比让人去翻 cases.jsonl 靠谱。
+///
+/// 每条用例给的是**生效值**：用例自己的 system 优先，没有才用全局的——和
+/// bench 里 `settings_for` 的规则逐字一致。前端要是自己合，迟早会合出两套规则。
+async fn get_run_context(
+  config : ServerConfig,
+  id : String,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if id.contains("/") || id.contains("..") || id.length() == 0 {
+    send_text(conn, 400, "bad run id")
+    return
+  }
+  let dir = config.work_dir + "/" + id
+  let request_text = read_text(dir + "/request.json")
+  if request_text == "" {
+    send_text(conn, 404, "run has no request document")
+    return
+  }
+  let request = match parse_json(request_text) {
+    Some(json) => json
+    None => {
+      send_text(conn, 500, "request document is unreadable")
+      return
+    }
+  }
+  let fields = obj_of(request)
+  let global_system = str_field(fields, "system")
+  let global_max_tokens = int_of(fields, "maxTokens", 0)
+  let global_temperature = fields.get("temperature")
+  // 用例文件可能不在：inline prompt 的运行只有一条、没有 cases.jsonl
+  let cases : Array[Json] = []
+  let cases_text = read_text(dir + "/cases.jsonl")
+  for raw in cases_text.split("\n") {
+    let line = raw.trim(chars=" \t\r").to_owned()
+    if line == "" {
+      continue
+    }
+    let entry = match parse_json(line) {
+      None => continue
+      Some(json) => obj_of(json)
+    }
+    let own_system = str_field(entry, "system")
+    cases.push(
+      context_case(
+        entry, own_system, global_system, global_max_tokens, global_temperature,
+      ),
+    )
+  }
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "id": Json::string(id),
+      "request": request,
+      "models": array_field(fields, "models"),
+      "cases": Json::array(cases),
+    }),
+  )
+}
+
+///|
+/// 一条用例的生效上下文：用例自己的值优先，没有才落到全局——和 bench 里
+/// `settings_for` 的规则逐字一致。
+fn context_case(
+  entry : Map[String, Json],
+  own_system : String,
+  global_system : String,
+  global_max_tokens : Int,
+  global_temperature : Json?,
+) -> Json {
+  Json::object({
+    "id": Json::string(str_field(entry, "id")),
+    "prompt": Json::string(str_field(entry, "prompt")),
+    "system": Json::string(
+      if own_system != "" {
+        own_system
+      } else {
+        global_system
+      },
+    ),
+    "systemOverridden": Json::boolean(own_system != ""),
+    "maxTokens": Json::number(
+      int_of(entry, "maxTokens", global_max_tokens).to_double(),
+    ),
+    "temperature": match entry.get("temperature") {
+      Some(value) => value
+      None =>
+        match global_temperature {
+          Some(value) => value
+          None => Json::null()
+        }
+    },
+  })
+}
+
+///|
+/// 从 Json 里取一个对象。
+
+///|
+/// 取一个字符串字段，缺失或类型不对都算空串。
+fn str_field(fields : Map[String, Json], key : String) -> String {
+  match fields.get(key) {
+    Some(String(text)) => text
+    _ => ""
+  }
+}
+
+///|
+/// 取一个数组字段，缺失就算空。
+fn array_field(fields : Map[String, Json], key : String) -> Array[Json] {
+  match fields.get(key) {
+    Some(Array(items)) => items
+    _ => []
+  }
+}
+
+///|
+fn obj_of(json : Json) -> Map[String, Json] {
+  match json {
+    Object(fields) => fields
+    _ => Map([])
   }
 }
 

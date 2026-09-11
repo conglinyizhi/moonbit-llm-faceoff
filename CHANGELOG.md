@@ -102,6 +102,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The request is now visible from the result.** Each case carries a 请求上下文
+  button that opens a neumorphic dialog with the parameters and the `system` /
+  `user` messages as the model received them, including the case's effective
+  values when the case set overrode the global ones. `GET /api/runs/<id>/context`
+  serves it from the run directory, and the document is the scrubbed one — a test
+  asserts the key is not in the response. The dialog is CSS, not `<dialog>`: the
+  page is VDOM-rendered and a `<dialog>`'s open/close state would drift out of
+  sync with the model, the same trap the start button fell into with `disabled`.
+
 - **Percentiles, not just a median.** `Stats` now carries P10 / P20 / P50 / P99
   (linear interpolation between order statistics, numpy's default rule), the
   model cards show P50 with the other three beside it, and the comparison table
