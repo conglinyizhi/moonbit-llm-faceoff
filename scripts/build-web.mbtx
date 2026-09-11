@@ -55,6 +55,10 @@ async fn exists(path : String) -> Bool {
 }
 
 ///|
+// 注意：可执行文件路径要**绝对**，即使同时给了 cwd。
+// 带 cwd 的相对路径在 POSIX 上没事（fork 之后再 exec，路径那时才解析），
+// 而 Windows 的 CreateProcess 不是这么干的——它会「找不到文件」（真的踩过）。
+///|
 /// 文件 A 是不是比 B 新（B 不存在也算「A 更新」）。
 async fn newer_than(a : String, b : String) -> Bool {
   if !exists(b) {
@@ -119,7 +123,7 @@ async fn main {
       return
     }
     let (code, _, err) = run(
-      "./_build/native/debug/build/cmd/bench/bench.exe",
+      root + "/_build/native/debug/build/cmd/bench/bench.exe",
       ["--from-json", results, "--no-key", "--web-data", data_path],
       root,
     )
@@ -155,7 +159,7 @@ async fn main {
     return
   }
   let (report_code, report_out, report_err) = run(
-    "./_build/native/debug/build/cmd/ssg/ssg.exe",
+    web + "/_build/native/debug/build/cmd/ssg/ssg.exe",
     [],
     web,
   )
