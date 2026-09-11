@@ -109,30 +109,42 @@ body.page {
     }
   }
 
-  .badge {
-    border: 1px solid $border;
-    border-radius: 999px;
-    padding: 0.15rem 0.55rem;
-    color: $muted;
-    font-size: 0.75rem;
-  }
-
   .badges {
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
     margin-bottom: 0.9rem;
   }
+}
 
-  .badge-ok {
-    color: $accent-2;
-    border-color: rgba(63, 185, 80, 0.4);
-  }
+// 徽章提到顶层：模型卡片和左侧运行记录都要用，两处各写一遍迟早会走形。
+.badge {
+  border: 1px solid $border;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  color: $muted;
+  font-size: 0.75rem;
+}
 
-  .badge-warn {
-    color: $warn;
-    border-color: rgba(210, 153, 34, 0.4);
-  }
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.badge-ok {
+  color: $accent-2;
+  border-color: rgba(63, 185, 80, 0.4);
+}
+
+.badge-warn {
+  color: $warn;
+  border-color: rgba(210, 153, 34, 0.4);
+}
+
+.badge-bad {
+  color: $danger;
+  border-color: rgba(248, 81, 73, 0.4);
 }
 
 .stat-list {
@@ -327,6 +339,127 @@ table {
 
 .app {
   min-height: 100vh;
+}
+
+// 左侧运行记录 + 右侧工作区。窄屏堆成一列：这个页面在手机上只是能看，
+// 不是主要使用场景。
+.workbench {
+  display: grid;
+  grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
+  gap: 1.4rem;
+  align-items: start;
+  padding-top: 1.5rem;
+  padding-bottom: 2rem;
+
+  @media (max-width: 960px) {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+// min-width: 0 否则列里的 <pre> 会把整个 grid 撬宽（长答案一行到底）
+.workbench-main {
+  min-width: 0;
+}
+
+.history {
+  @include card(0.9rem);
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+
+  @media (max-width: 960px) {
+    position: static;
+    max-height: none;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-bottom: 0.7rem;
+
+    h2 {
+      margin: 0;
+      color: $title;
+      font-size: 0.95rem;
+    }
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .muted {
+    color: $muted;
+    font-size: 0.82rem;
+    margin: 0;
+  }
+}
+
+.history-item {
+  border: 1px solid $border;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.82rem;
+
+  &.active {
+    border-color: $accent;
+    background: rgba(88, 166, 255, 0.06);
+  }
+
+  .history-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .history-time {
+    @include value-text;
+    color: $muted;
+    font-size: 0.78rem;
+  }
+
+  .history-models {
+    color: $text;
+    margin-top: 0.25rem;
+    word-break: break-word;
+  }
+
+  .history-scale {
+    color: $muted;
+    font-size: 0.76rem;
+  }
+
+  .history-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+
+    .link-btn {
+      padding: 0;
+    }
+
+    .danger {
+      color: $danger;
+    }
+  }
+}
+
+.viewed-banner {
+  @include card(0.7rem 0.9rem);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  border-color: $accent;
+  font-size: 0.85rem;
 }
 
 .picker {

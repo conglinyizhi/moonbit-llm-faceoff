@@ -18,6 +18,12 @@ struct CaseInfo {
 } derive(Eq, FromJson)
 
 ///|
+struct CaseSetInfo {
+  name : String
+  count : Int
+} derive(Eq, FromJson)
+
+///|
 struct Defaults {
   repeats : Int
   maxTokens : Int
@@ -30,6 +36,9 @@ struct Defaults {
 struct Meta {
   models : Array[String]
   cases : Array[CaseInfo]
+  /// 用例集列表（round 3 的切换器用它；现在只需要知道名字与条数）。
+  caseSets : Array[CaseSetInfo]
+  defaultCaseSet : String
   defaults : Defaults
   hasKey : Bool
   baseUrl : String
@@ -109,6 +118,16 @@ struct AppModel {
   api_key : String
   /// 上一次复制操作的反馈文字。
   copied : String?
+  /// 当前选的用例集（来自 meta.defaultCaseSet 或 ?caseSet=）。
+  case_set : String
+  /// 运行历史（`GET /api/runs`）。None = 还没拉到。
+  runs : Array[RunInfo]?
+  runs_error : String?
+  /// 正在看的那次历史运行。None 表示看当前这次。
+  viewed : ViewedRun?
+  /// 正在删/正在重跑的 id：同一条上重复点击直接忽略（按钮不用 disabled，
+  /// VDOM 从忙到闲不会把那个属性摘掉——见 action_row）。
+  busy_run : String?
   /// 运行中的实时信息：日志尾 + 失败/重试/截断计数。
   tail : String
   failures : Int
@@ -144,10 +163,15 @@ fn initial_model() -> AppModel {
     base_url: query.get("baseUrl").unwrap_or(""),
     api_key: "",
     copied: None,
+    case_set: query.get("caseSet").unwrap_or(""),
     tail: "",
     failures: 0,
     retried: 0,
     truncated: 0,
+    runs: None,
+    runs_error: None,
+    viewed: None,
+    busy_run: None,
   }
 }
 
@@ -274,6 +298,14 @@ enum Msg {
   ApiKeyChanged(String)
   CopyMarkdown
   CopyShareLink
+  RefreshRuns
+  RunsLoaded(Result[RunsResponse, Error])
+  OpenRun(String)
+  ViewedLoaded(String, Result[RunStatus, Error])
+  CloseRun
+  DeleteRun(String)
+  RunDeleted(String, Result[Json, Error])
+  Rerun(String)
 }
 
 // ---------------------------------------------------------------- 命令
@@ -305,7 +337,9 @@ fn poll_run(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
 fn app() -> @rabbita.App {
   @rabbita.new(fn() {
     let (model, emit) = @rabbita.create_state_with_init(
-      init=fn(emit) { (initial_model(), fetch_meta(emit)) },
+      init=fn(emit) {
+        (initial_model(), @cmd.batch([fetch_meta(emit), fetch_runs(emit)]))
+      },
       update~,
     )
     model.map(fn(model) { view(model, emit) })
@@ -370,6 +404,12 @@ fn update(
               None => model.prompt
             },
             use_prompt: query_prompt is Some(_),
+            // query 里能指定用例集；否则用服务端的默认集。
+            case_set: if model.case_set == "" {
+              meta.defaultCaseSet
+            } else {
+              model.case_set
+            },
           }
           let has_key = meta.hasKey || next.api_key != ""
           if next.autorun &&
@@ -422,6 +462,132 @@ fn update(
       ({ ..model, copied: Some(copy_markdown(model)), }, @cmd.none)
     CopyShareLink =>
       ({ ..model, copied: Some(copy_share_link(model)), }, @cmd.none)
+    RefreshRuns => (model, fetch_runs(emit))
+    RunsLoaded(result) =>
+      match result {
+        Ok(response) =>
+          ({ ..model, runs: Some(response.runs), runs_error: None, }, @cmd.none)
+        Err(error) =>
+          ({ ..model, runs_error: Some(error.to_string()), }, @cmd.none)
+      }
+    OpenRun(id) =>
+      // 已经是这条就直接忽略，不要白跑一次请求
+      match model.viewed {
+        Some(viewed) =>
+          if viewed.id == id {
+            (model, @cmd.none)
+          } else {
+            (
+              { ..model, busy_run: Some(id), runs_error: None, },
+              fetch_viewed(id, emit),
+            )
+          }
+        None =>
+          (
+            { ..model, busy_run: Some(id), runs_error: None, },
+            fetch_viewed(id, emit),
+          )
+      }
+    ViewedLoaded(id, result) =>
+      match result {
+        Ok(status) => {
+          let data = match status.data {
+            Some(json) =>
+              match @shared.parse_page_data_json(json) {
+                Ok(data) => Some(data)
+                Err(_) => None
+              }
+            None => None
+          }
+          let viewed : ViewedRun = {
+            id,
+            status: status.status,
+            data,
+            error: status.error,
+            tail: status.tail.unwrap_or(""),
+          }
+          ({ ..model, viewed: Some(viewed), busy_run: None, }, @cmd.none)
+        }
+        Err(error) =>
+          (
+            {
+              ..model,
+              busy_run: None,
+              runs_error: Some("打不开 \{id}：" + error.to_string()),
+            },
+            @cmd.none,
+          )
+      }
+    CloseRun => ({ ..model, viewed: None, }, @cmd.none)
+    DeleteRun(id) =>
+      if model.busy_run == Some(id) {
+        (model, @cmd.none)
+      } else {
+        ({ ..model, busy_run: Some(id), }, delete_run_cmd(id, emit))
+      }
+    RunDeleted(id, result) =>
+      match result {
+        Ok(_) => {
+          let viewed = match model.viewed {
+            Some(viewed) => if viewed.id == id { None } else { Some(viewed) }
+            None => None
+          }
+          // 删完重新拉一次列表，而不是自己从响应里拼：一份真相就够了，
+          // 而这一次请求是本地回环。
+          (
+            { ..model, busy_run: None, viewed, runs_error: None, },
+            fetch_runs(emit),
+          )
+        }
+        Err(error) =>
+          (
+            { ..model, busy_run: None, runs_error: Some(error.to_string()), },
+            @cmd.none,
+          )
+      }
+    Rerun(id) =>
+      if model.busy_run == Some(id) {
+        (model, @cmd.none)
+      } else {
+        match find_run(model.runs, id) {
+          None => (model, @cmd.none)
+          Some(info) => {
+            let has_key = match model.meta {
+              Some(meta) => meta.hasKey || model.api_key != ""
+              None => model.api_key != ""
+            }
+            if has_key {
+              (
+                {
+                  ..model,
+                  // 重跑就是新跑一次：把界面切回「当前这次」，
+                  // 否则新运行的进度会顶在历史结果背后，看不到。
+                  viewed: None,
+                  busy_run: Some(id),
+                  run_id: None,
+                  status: "starting",
+                  error: None,
+                  data: None,
+                  done: 0,
+                  total: 0,
+                },
+                start_run(rerun_payload(model, info), emit),
+              )
+            } else {
+              (
+                {
+                  ..model,
+                  busy_run: None,
+                  runs_error: Some(
+                    "重跑需要密钥：服务端环境里没有，页面上也没填。",
+                  ),
+                },
+                @cmd.none,
+              )
+            }
+          }
+        }
+      }
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
     MaxTokensChanged(text) =>
@@ -471,6 +637,7 @@ fn update(
             status: "running",
             total: response.total,
             done: 0,
+            busy_run: None,
           }
           (next, @rabbita.delay(poll_run(response.id, emit), 400))
         }
@@ -510,7 +677,9 @@ fn update(
           if status.status == "running" {
             (next, @rabbita.delay(poll_run(id, emit), 700))
           } else {
-            (next, @cmd.none)
+            // 跑完了刷新一次历史：新记录要立刻出现在侧栏里，
+            // 而不是等下次打开页面。
+            (next, fetch_runs(emit))
           }
         }
         Err(error) =>
@@ -571,6 +740,8 @@ struct RunPayload {
   models : Array[String]
   cases : Array[String]
   prompt : String
+  /// 这些 case id 从哪套用例里读。空表示用服务端的默认集。
+  caseSet : String?
   repeats : Int
   maxTokens : Int
   temperature : Double
@@ -594,6 +765,11 @@ fn RunPayload::of(model : AppModel) -> RunPayload {
       model.prompt
     } else {
       ""
+    },
+    caseSet: if model.case_set == "" {
+      None
+    } else {
+      Some(model.case_set)
     },
     repeats: model.repeats,
     maxTokens: model.max_tokens,
@@ -718,11 +894,14 @@ fn copy_share_link(model : AppModel) -> String {
 fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("div", "app", [
     header(model),
-    el("main", "wrap", [
-      controls(model, emit),
-      progress(model),
-      result_section(model),
-      export_row(model, emit),
+    el("div", "wrap workbench", [
+      history_panel(model, emit),
+      el("main", "workbench-main", [
+        controls(model, emit),
+        progress(model),
+        result_section(model, emit),
+        export_row(model, emit),
+      ]),
     ]),
     footer(model),
   ])
@@ -1034,7 +1213,12 @@ fn gateway_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 ///|
 /// 结果导出。前三个是纯下载链接（交给浏览器），后两个要写剪贴板。
 fn export_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  match model.run_id {
+  // 在看历史运行的时候，导出跟着历史走：那才是屏幕上这份数据的来源。
+  let target = match model.viewed {
+    Some(viewed) => Some(viewed.id)
+    None => model.run_id
+  }
+  match target {
     None => @html.fragment([])
     Some(id) => {
       let base = "/api/runs/" + id
@@ -1121,10 +1305,39 @@ fn status_label(status : String) -> String {
 }
 
 ///|
-fn result_section(model : AppModel) -> @html.Html {
-  match model.data {
-    Some(data) => @shared.results_section(data)
-    None => @html.fragment([])
+fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  match model.viewed {
+    Some(viewed) =>
+      @html.fragment([
+        viewed_banner(viewed, emit),
+        match viewed.data {
+          Some(data) => @shared.results_section(data)
+          // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
+          // 总比一片空白强。
+          None =>
+            el("section", "progress-card", [
+              el("div", "progress-head", [
+                txt(
+                  "这次运行没有结果数据（状态：\{viewed.status}）",
+                ),
+              ]),
+              match viewed.error {
+                Some(message) => @html.pre([txt(message)])
+                None =>
+                  if viewed.tail == "" {
+                    @html.fragment([])
+                  } else {
+                    @html.pre([txt(viewed.tail)])
+                  }
+              },
+            ])
+        },
+      ])
+    None =>
+      match model.data {
+        Some(data) => @shared.results_section(data)
+        None => @html.fragment([])
+      }
   }
 }
 
