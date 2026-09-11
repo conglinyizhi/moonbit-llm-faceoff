@@ -3,6 +3,15 @@
 let failure_exit_code : Int = 1
 
 ///|
+/// Whether a chain of thought was streamed and left the line open.
+///
+/// Shared by the two callbacks below, so the progress line can start on a fresh
+/// line instead of being glued to the end of the streamed reasoning.
+struct CotLine {
+  mut open : Bool
+}
+
+///|
 /// C `exit`, so failures surface as a non-zero process status.
 extern "c" fn c_exit(code : Int) -> Unit = "exit"
 
@@ -71,6 +80,7 @@ async fn main {
         retry_backoff_ms: cli.retry_backoff_ms,
         pace_ms: cli.pace_ms,
       }
+      let cot : CotLine = { open: false }
       note(
         "\{models.length()} model(s) x \{cases.length()} case(s) x \{cli.repeats} repeat(s)",
       )
@@ -92,9 +102,16 @@ async fn main {
                 }
               @faceoff.Content(_) => ()
             }
+            cot.open = true
           }
         },
         async fn(result) {
+          // 思考碎片是连续写出去的，没带换行。不先结掉这一行，进度行就会粘在
+          // 思考的尾巴上（"weighing the question[mock-a] ..."）。
+          if cot.open {
+            note("")
+            cot.open = false
+          }
           note(@harness.format_run_line(result))
           if cli.show_output && result.ok {
             note("  --- answer ---")
