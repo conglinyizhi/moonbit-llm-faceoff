@@ -123,6 +123,19 @@ struct AppModel {
   /// 运行历史（`GET /api/runs`）。None = 还没拉到。
   runs : Array[RunInfo]?
   runs_error : String?
+  /// 当前用例集里的用例。选中集、编辑保存之后会变，所以不能每次去读 meta。
+  available_cases : Array[CaseInfo]
+  /// 用例编辑态：草稿 + 反馈。
+  editing_cases : Bool
+  drafts : Array[CaseDraft]
+  cases_error : String?
+  cases_saved : String?
+  /// 「另存为新集」的输入框。
+  new_set_name : String
+  /// 预设。None = 还没拉到。
+  presets : Array[Preset]?
+  presets_error : String?
+  preset_name : String
   /// 正在看的那次历史运行。None 表示看当前这次。
   viewed : ViewedRun?
   /// 正在删/正在重跑的 id：同一条上重复点击直接忽略（按钮不用 disabled，
@@ -164,6 +177,15 @@ fn initial_model() -> AppModel {
     api_key: "",
     copied: None,
     case_set: query.get("caseSet").unwrap_or(""),
+    available_cases: [],
+    editing_cases: false,
+    drafts: [],
+    cases_error: None,
+    cases_saved: None,
+    new_set_name: "",
+    presets: None,
+    presets_error: None,
+    preset_name: "",
     tail: "",
     failures: 0,
     retried: 0,
@@ -306,6 +328,38 @@ enum Msg {
   DeleteRun(String)
   RunDeleted(String, Result[Json, Error])
   Rerun(String)
+  // 用例集
+  ToggleCaseEditor
+  SelectCaseSet(String)
+  CaseSetLoaded(String, Result[CaseSetResponse, Error])
+  NewSetNameChanged(String)
+  NewCaseSet
+  DeleteCaseSet
+  SelectNoCases
+  AddDraft
+  RemoveDraft(Int)
+  DraftFieldChanged(Int, DraftField, String)
+  SaveCases
+  CaseSetSaved(String, Result[Json, Error])
+  CaseSetDeleted(String, Result[Json, Error])
+  // 预设
+  PresetsLoaded(Result[PresetsResponse, Error])
+  PresetsSaved(Result[PresetsResponse, Error])
+  PresetNameChanged(String)
+  SavePreset
+  ApplyPreset(String)
+  DeletePreset(String)
+}
+
+///|
+/// 用例草稿里可以被编辑的字段。用一个枚举而不是四个 Msg：
+/// 四个几乎一样的消息只会让 update 里多四份重复的样板。
+enum DraftField {
+  Id
+  Prompt
+  System
+  MaxTokens
+  Temperature
 }
 
 // ---------------------------------------------------------------- 命令
@@ -338,7 +392,10 @@ fn app() -> @rabbita.App {
   @rabbita.new(fn() {
     let (model, emit) = @rabbita.create_state_with_init(
       init=fn(emit) {
-        (initial_model(), @cmd.batch([fetch_meta(emit), fetch_runs(emit)]))
+        (
+          initial_model(),
+          @cmd.batch([fetch_meta(emit), fetch_runs(emit), fetch_presets(emit)]),
+        )
       },
       update~,
     )
@@ -386,6 +443,8 @@ fn update(
             meta_error: None,
             selected_models: models,
             selected_cases: cases,
+            // meta 带的是默认集的用例，先当当前集用；切集时会重新拉。
+            available_cases: meta.cases,
             repeats: int_param(model.query, "repeats", meta.defaults.repeats),
             max_tokens: int_param(
               model.query,
@@ -587,6 +646,322 @@ fn update(
             }
           }
         }
+      }
+    ToggleCaseEditor =>
+      if model.editing_cases {
+        ({ ..model, editing_cases: false, cases_error: None, }, @cmd.none)
+      } else {
+        // 进编辑态时从当前选中的集现拉一份：available_cases 可能是旧的快照，
+        // 而编辑要改的是磁盘上那份。
+        (
+          {
+            ..model,
+            editing_cases: true,
+            cases_error: None,
+            cases_saved: None,
+          },
+          fetch_case_set(model.case_set, emit),
+        )
+      }
+    SelectCaseSet(name) =>
+      (
+        { ..model, case_set: name, cases_error: None, cases_saved: None, },
+        fetch_case_set(name, emit),
+      )
+    CaseSetLoaded(name, result) =>
+      match result {
+        Ok(response) => {
+          // 用服务端回显的名字，不是请求里那个：
+          // 它才是这份 cases 真正的归属。
+          let name = response.name
+          let cases = response.cases.map(fn(json) {
+            let obj = @shared.as_object(json)
+            {
+              id: @shared.string_field(obj, "id", ""),
+              prompt: @shared.string_field(obj, "prompt", ""),
+            }
+          })
+          let ids = cases.map(fn(case) { case.id })
+          let selected = if model.editing_cases {
+            model.selected_cases.filter(fn(id) { ids.contains(id) })
+          } else {
+            // 从下拉切集时默认全选：选一套集的意图就是「跑这套」
+            ids
+          }
+          (
+            {
+              ..model,
+              case_set: name,
+              available_cases: cases,
+              selected_cases: selected,
+              drafts: response.cases.map(fn(json) { CaseDraft::of(json) }),
+              cases_error: None,
+            },
+            @cmd.none,
+          )
+        }
+        Err(error) =>
+          (
+            {
+              ..model,
+              cases_error: Some(
+                "读不到用例集 \{name}：" + error.to_string(),
+              ),
+            },
+            @cmd.none,
+          )
+      }
+    NewSetNameChanged(text) => ({ ..model, new_set_name: text, }, @cmd.none)
+    NewCaseSet => {
+      let name = model.new_set_name.trim(chars=" \t\r\n").to_owned()
+      if name == "" {
+        ({ ..model, cases_error: Some("先给新集起个名字"), }, @cmd.none)
+      } else {
+        // 另存为：用当前草稿；还没进编辑态就拿当前集的内容铺一份
+        let drafts = if model.drafts.length() > 0 {
+          model.drafts
+        } else {
+          model.available_cases.map(fn(case) {
+            {
+              raw: Json::object({
+                "id": Json::string(case.id),
+                "prompt": Json::string(case.prompt),
+              }),
+              id: case.id,
+              prompt: case.prompt,
+              system: "",
+              max_tokens: "",
+              temperature: "",
+            }
+          })
+        }
+        (
+          {
+            ..model,
+            new_set_name: "",
+            cases_error: None,
+            cases_saved: Some("正在另存为 \{name}…"),
+          },
+          save_case_set(name, drafts, emit),
+        )
+      }
+    }
+    DeleteCaseSet =>
+      if model.case_set == "" {
+        (model, @cmd.none)
+      } else {
+        (
+          { ..model, cases_saved: None, },
+          delete_case_set_cmd(model.case_set, emit),
+        )
+      }
+    CaseSetSaved(name, result) =>
+      match result {
+        Ok(_) =>
+          (
+            {
+              ..model,
+              case_set: name,
+              cases_saved: Some("已保存 \{name}"),
+              cases_error: None,
+            },
+            @cmd.batch([fetch_meta(emit), fetch_case_set(name, emit)]),
+          )
+        Err(error) =>
+          (
+            {
+              ..model,
+              cases_error: Some(error.to_string()),
+              cases_saved: None,
+            },
+            @cmd.none,
+          )
+      }
+    CaseSetDeleted(name, result) =>
+      match result {
+        Ok(_) =>
+          (
+            {
+              ..model,
+              case_set: "",
+              drafts: [],
+              available_cases: [],
+              selected_cases: [],
+              cases_saved: Some("已删除 \{name}"),
+              cases_error: None,
+            },
+            fetch_meta(emit),
+          )
+        Err(error) =>
+          ({ ..model, cases_error: Some(error.to_string()), }, @cmd.none)
+      }
+    SelectNoCases => ({ ..model, selected_cases: [], }, @cmd.none)
+    AddDraft => {
+      // 不在编辑态点它，就顺手打开：点了没反应比多点一下更难受
+      let drafts = model.drafts.copy()
+      drafts.push(blank_draft())
+      ({ ..model, editing_cases: true, drafts, cases_saved: None, }, @cmd.none)
+    }
+    RemoveDraft(index) => {
+      let kept : Array[CaseDraft] = []
+      for i = 0; i < model.drafts.length(); i = i + 1 {
+        if i != index {
+          kept.push(model.drafts[i])
+        }
+      }
+      ({ ..model, drafts: kept, cases_saved: None, }, @cmd.none)
+    }
+    DraftFieldChanged(index, field, text) => {
+      let drafts = model.drafts.copy()
+      if index >= 0 && index < drafts.length() {
+        let draft = drafts[index]
+        let updated = match field {
+          Id => { ..draft, id: text, }
+          Prompt => { ..draft, prompt: text, }
+          System => { ..draft, system: text, }
+          MaxTokens => { ..draft, max_tokens: text, }
+          Temperature => { ..draft, temperature: text, }
+        }
+        drafts[index] = updated
+      }
+      ({ ..model, drafts, cases_saved: None, }, @cmd.none)
+    }
+    SaveCases =>
+      if model.case_set == "" {
+        (
+          {
+            ..model,
+            cases_error: Some(
+              "当前没有选中的用例集。先「另存为新集」。",
+            ),
+          },
+          @cmd.none,
+        )
+      } else {
+        match validate_drafts(model.drafts) {
+          Some(message) => ({ ..model, cases_error: Some(message), }, @cmd.none)
+          None =>
+            (
+              {
+                ..model,
+                cases_error: None,
+                cases_saved: Some("正在保存…"),
+              },
+              save_case_set(model.case_set, model.drafts, emit),
+            )
+        }
+      }
+    PresetsLoaded(result) =>
+      match result {
+        Ok(response) =>
+          (
+            { ..model, presets: Some(response.presets), presets_error: None, },
+            @cmd.none,
+          )
+        Err(error) =>
+          ({ ..model, presets_error: Some(error.to_string()), }, @cmd.none)
+      }
+    PresetsSaved(result) =>
+      match result {
+        Ok(response) =>
+          (
+            {
+              ..model,
+              presets: Some(response.presets),
+              presets_error: None,
+              preset_name: "",
+            },
+            @cmd.none,
+          )
+        Err(error) =>
+          ({ ..model, presets_error: Some(error.to_string()), }, @cmd.none)
+      }
+    PresetNameChanged(text) => ({ ..model, preset_name: text, }, @cmd.none)
+    SavePreset => {
+      let trimmed = model.preset_name.trim(chars=" \t\r\n").to_owned()
+      // 没起名字就用「几个模型 · 哪套用例」拼一个：拒掉不如先存下来
+      let name = if trimmed == "" {
+        "\{effective_models(model).length()} 模型 · \{model.case_set}"
+      } else {
+        trimmed
+      }
+      let preset : Preset = {
+        name,
+        models: effective_models(model),
+        caseSet: if model.case_set == "" {
+          None
+        } else {
+          Some(model.case_set)
+        },
+        repeats: Some(model.repeats),
+        maxTokens: Some(model.max_tokens),
+        temperature: Some(model.temperature),
+        paceMs: Some(model.pace_ms),
+        retry: Some(model.retry),
+      }
+      // 同名就是覆盖：预设的名字就是它的键
+      let kept = match model.presets {
+        Some(presets) => presets.filter(fn(item) { item.name != preset.name })
+        None => []
+      }
+      kept.push(preset)
+      (
+        { ..model, presets_error: None, preset_name: "", },
+        save_presets(kept, emit),
+      )
+    }
+    ApplyPreset(name) =>
+      match model.presets {
+        None => (model, @cmd.none)
+        Some(presets) =>
+          match presets.filter(fn(item) { item.name == name }) {
+            [] => (model, @cmd.none)
+            [preset, ..] => {
+              // 菜单里的勾上，菜单外的写进手输框：两处都看得见，
+              // 不然套用之后就找不到刚套进来的是哪个模型了。
+              let known = match model.meta {
+                Some(meta) => meta.models
+                None => []
+              }
+              let selected = preset.models.filter(fn(id) { known.contains(id) })
+              let extra = preset.models.filter(fn(id) { !known.contains(id) })
+              let next = {
+                ..model,
+                selected_models: selected,
+                extra_models: extra.join(","),
+                repeats: preset.repeats.unwrap_or(model.repeats),
+                max_tokens: preset.maxTokens.unwrap_or(model.max_tokens),
+                temperature: preset.temperature.unwrap_or(model.temperature),
+                pace_ms: preset.paceMs.unwrap_or(model.pace_ms),
+                retry: preset.retry.unwrap_or(model.retry),
+              }
+              match preset.caseSet {
+                Some(set) =>
+                  (
+                    {
+                      ..next,
+                      case_set: set,
+                      cases_saved: Some("套用了预设 \{name}"),
+                    },
+                    fetch_case_set(set, emit),
+                  )
+                None =>
+                  (
+                    { ..next, cases_saved: Some("套用了预设 \{name}"), },
+                    @cmd.none,
+                  )
+              }
+            }
+          }
+      }
+    DeletePreset(name) =>
+      match model.presets {
+        None => (model, @cmd.none)
+        Some(presets) =>
+          (
+            { ..model, presets_error: None, },
+            save_presets(presets.filter(fn(item) { item.name != name }), emit),
+          )
       }
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
@@ -979,7 +1354,8 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           @html.fragment([])
         },
         model_picker(meta, model, emit),
-        case_picker(meta, model, emit),
+        preset_panel(meta, model, emit),
+        case_panel(meta, model, emit),
         prompt_picker(model, emit),
         param_row(model, emit),
         gateway_row(model, emit),
@@ -1028,31 +1404,6 @@ fn model_picker(
         on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
       ),
     ]),
-  ])
-}
-
-///|
-fn case_picker(
-  meta : Meta,
-  model : AppModel,
-  emit : @cmd.Emit[Msg],
-) -> @html.Html {
-  let boxes = meta.cases.map(fn(case) {
-    labelled_checkbox(
-      "case-" + case.id,
-      case.id,
-      model.selected_cases.contains(case.id),
-      emit.map(fn(_value) { ToggleCase(case.id) }),
-    )
-  })
-  el("fieldset", "picker", [
-    el("legend", "", [
-      txt("用例"),
-      @html.button(class="link-btn", on_click=emit(Msg::SelectAllCases), [
-        txt("全选"),
-      ]),
-    ]),
-    el("div", "picker-items", boxes),
   ])
 }
 

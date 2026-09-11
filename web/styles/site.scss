@@ -730,3 +730,173 @@ button.ghost {
   margin: -0.6rem 0 1.6rem;
   padding: 0.7rem 0.9rem;
 }
+
+// ---------------------------------------------------------------- 工作台面板
+
+.case-panel,
+.preset-panel {
+  @include card(0.9rem 1rem);
+  margin-bottom: 1rem;
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+
+    h2 {
+      margin: 0;
+      color: $title;
+      font-size: 0.95rem;
+    }
+
+    .muted {
+      margin-left: auto;
+      font-size: 0.8rem;
+    }
+  }
+
+  .muted {
+    color: $muted;
+    font-size: 0.82rem;
+    margin: 0;
+  }
+}
+
+.set-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.7rem;
+}
+
+.set-select,
+.set-name {
+  background: $bg;
+  border: 1px solid $border;
+  border-radius: 0.35rem;
+  color: $text;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.set-name {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+
+.picker-all {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.case-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.draft {
+  border: 1px solid $border;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.65rem;
+
+  .draft-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.45rem;
+
+    .draft-index {
+      color: $muted;
+      font-size: 0.76rem;
+    }
+
+    input {
+      flex: 1 1 auto;
+      min-width: 0;
+      background: $bg;
+      border: 1px solid $border;
+      border-radius: 0.35rem;
+      color: $text;
+      padding: 0.25rem 0.45rem;
+      font-size: 0.8rem;
+    }
+  }
+
+  .draft-prompt {
+    width: 100%;
+    background: $bg;
+    border: 1px solid $border;
+    border-radius: 0.35rem;
+    color: $text;
+    // 中文 prompt 用等宽字体读起来更累，用正文字体
+    font-family: inherit;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    padding: 0.4rem 0.5rem;
+    resize: vertical;
+  }
+
+  .draft-more {
+    margin-top: 0.45rem;
+
+    summary {
+      color: $muted;
+      cursor: pointer;
+      font-size: 0.76rem;
+    }
+
+    .draft-extra {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.45rem;
+
+      input {
+        background: $bg;
+        border: 1px solid $border;
+        border-radius: 0.35rem;
+        color: $text;
+        padding: 0.25rem 0.45rem;
+        font-size: 0.8rem;
+      }
+    }
+  }
+}
+
+.editor-actions,
+.preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.preset {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid $border;
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.82rem;
+
+  .preset-name {
+    color: $title;
+  }
+
+  .preset-meta {
+    color: $muted;
+    font-size: 0.76rem;
+  }
+}
