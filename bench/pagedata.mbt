@@ -22,7 +22,7 @@
 ///     { "id": "math-short",
 ///       "answers": [ { "model": "A", "ok": true, "total_ms": 620.1,
 ///                      "completion_tokens": 190, "reasoning_tokens": 165,
-///                      "content": "...", "error": null } ] }
+///                      "content": "...", "reasoning": "...", "error": null } ] }
 ///   ]
 /// }
 /// ```
@@ -144,6 +144,8 @@ fn answer_of(result : RunResult) -> Json {
     "completion_tokens": Json::number(result.completion_tokens.to_double()),
     "reasoning_tokens": Json::number(result.reasoning_tokens.to_double()),
     "content": Json::string(result.content),
+    // 思考全文也交出去：页面上要和答案一起对比，「思考了多少 token」不够用
+    "reasoning": Json::string(result.reasoning),
     "error": optional_string(result.error),
   })
 }

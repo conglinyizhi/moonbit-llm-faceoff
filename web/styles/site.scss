@@ -270,6 +270,25 @@ table {
     font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
     font-size: 0.85rem;
   }
+
+  // 思考过程：默认收起。summary 是可点的挡头，展开后是同一套 pre 样式，
+  // 但压暗一档——它是过程，不是答案。
+  .cot {
+    margin-top: 0.4rem;
+
+    summary {
+      cursor: pointer;
+      color: $muted;
+      font-size: 0.78rem;
+    }
+
+    pre {
+      margin-top: 0.4rem;
+      color: $muted;
+      border-left: 2px solid $border;
+      padding-left: 0.6rem;
+    }
+  }
 }
 
 .failed {

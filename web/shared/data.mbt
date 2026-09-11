@@ -20,6 +20,9 @@ pub(all) struct ModelSummary {
 
 ///|
 /// 一次用例输出。
+///
+/// `reasoning` 是思考全文（可能很长，页面上默认收起）；`reasoning_tokens` 只是
+/// 它的长度，回答不了「两个模型想的有什么不一样」。
 pub(all) struct Answer {
   model : String
   ok : Bool
@@ -27,6 +30,7 @@ pub(all) struct Answer {
   completion_tokens : Int
   reasoning_tokens : Int
   content : String
+  reasoning : String
   error : String?
 } derive(Eq)
 
@@ -128,6 +132,7 @@ fn parse_answer(json : Json) -> Answer {
     completion_tokens: int_field(obj, "completion_tokens", 0),
     reasoning_tokens: int_field(obj, "reasoning_tokens", 0),
     content: string_field(obj, "content", ""),
+    reasoning: string_field(obj, "reasoning", ""),
     error: match obj.get("error") {
       Some(String(text)) => Some(text)
       _ => None

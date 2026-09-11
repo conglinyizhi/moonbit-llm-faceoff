@@ -228,6 +228,8 @@ test "page data carries sources, summaries and answers" {
   assert_true(text.contains("\"ttft_ms\""))
   assert_true(text.contains("\"cases\""))
   assert_true(text.contains("\"content\":\"hello\""))
+  // 思考全文也在里面：页面上要和答案一起看
+  assert_true(text.contains("\"reasoning\":\"thinking\""))
 }
 
 ///|

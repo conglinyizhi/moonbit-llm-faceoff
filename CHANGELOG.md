@@ -102,6 +102,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The chain of thought is on the page now**, folded under every answer
+  (`思考过程 · N token · M 字`, closed by default). The page data used to carry
+  `reasoning_tokens` and not the reasoning text, so the side-by-side answer view
+  could say how much a model thought but not *what* it thought — which is the
+  whole comparison when both models ran the same prompt. `bench`'s page-data
+  document now includes `reasoning` per answer, `web/shared` parses it, and the
+  static report gets it for free because both front-ends render the same
+  components.
+
 - `faceoff` says what it is doing. A one-shot request used to print nothing at all
   until it was finished — for a reasoning model that is a minute of a seemingly
   dead terminal, and there was no way to tell it apart from a hang. It now writes

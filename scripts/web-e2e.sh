@@ -147,6 +147,11 @@ grep -q 'mock-b' "$tmp/run.html" || fail "结果里没有第二个模型" "$tmp/
 grep -q '首 token' "$tmp/run.html" || fail "结果里没有指标卡" "$tmp/run.html"
 grep -q '对比' "$tmp/run.html" || fail "结果里没有对比表" "$tmp/run.html"
 grep -q 'Hello from the mock server' "$tmp/run.html" || fail "结果里没有模型输出" "$tmp/run.html"
+# 每个答案下面是默认收起的思考过程：摘要里有 token 与字数，正文在 details 里。
+# 两个模型各一份（用例只有一道）。
+grep -q '<details class="cot">' "$tmp/run.html" || fail "答案里没有可折叠的思考过程" "$tmp/run.html"
+grep -q '思考过程 · 4 token' "$tmp/run.html" || fail "思考过程的摘要没有 token 数" "$tmp/run.html"
+grep -q 'weighing the question' "$tmp/run.html" || fail "思考全文没有渲染出来" "$tmp/run.html"
 # 跑完之后按钮要回到可用态。之前用 disabled 属性，Rabbita 的 vdom diff 没把它
 # 摘掉，跑完一次就永远点不动——这条断言就是为那个 bug 加的。
 grep -q 'primary busy' "$tmp/run.html" && fail "跑完之后按钮仍是忙碌态" "$tmp/run.html"

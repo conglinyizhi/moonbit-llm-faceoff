@@ -177,7 +177,31 @@ pub fn answer_block(answer : Answer) -> @html.Html {
     }
     el("p", "failed", [txt(message)])
   }
-  el("div", "answer", [el("div", "answer-head", [txt(head)]), body])
+  let parts : Array[@html.Html] = [
+    el("div", "answer-head", [txt(head)]),
+    body,
+  ]
+  // 失败的那些没有思考可看
+  if answer.ok && answer.reasoning.length() > 0 {
+    parts.push(cot_block(answer))
+  }
+  el("div", "answer", parts)
+}
+
+///|
+/// 答案背后的思考过程。
+///
+/// 默认收起：它往往比答案长好几倍，拿到答案之后是第二个才想看的东西。但对比两个
+/// 推理模型时，它正是要比的那部分——所以放在同一个答案块里，不用去翻日志。
+fn cot_block(answer : Answer) -> @html.Html {
+  el("details", "cot", [
+    el("summary", "", [
+      txt(
+        "思考过程 · \{answer.reasoning_tokens} token · \{answer.reasoning.length()} 字",
+      ),
+    ]),
+    @html.pre([txt(answer.reasoning)]),
+  ])
 }
 
 ///|
