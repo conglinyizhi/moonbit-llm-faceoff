@@ -50,6 +50,9 @@ struct RunStatus {
   done : Int
   total : Int
   data : Json?
+  /// 服务端转发的最后一条进度事件，以及它有多旧。
+  live : Json?
+  liveAgeMs : Double?
   error : String?
   tail : String?
   exitCode : String?
@@ -91,6 +94,8 @@ struct AppModel {
   total : Int
   data : @shared.PageData?
   error : String?
+  /// 当下这条请求的实时进度。
+  live : @shared.LiveProgress?
   /// 展开的是哪一行（用例序号）；None = 全都收起。
   expanded : Int?
   /// 展开的那一行用差异视图，而不是左右并排。
@@ -125,6 +130,7 @@ fn initial_model() -> AppModel {
     temperature: 0.0,
     run_id: None,
     status: "idle",
+    live: None,
     done: 0,
     total: 0,
     data: None,
@@ -662,10 +668,11 @@ fn update(
             total: status.total,
             data,
             error: status.error,
+            live: @shared.parse_live(status.live, status.liveAgeMs),
             run_id: Some(status.id),
           }
           if status.status == "running" {
-            (next, @rabbita.delay(poll_run(status.id, emit), 700))
+            (next, @rabbita.delay(poll_run(status.id, emit), 250))
           } else {
             // 跑完把这次运行的标注拿进来（重跑同一条时可能已经有标注）
             (next, fetch_annotations(status.id, emit))
@@ -1204,6 +1211,16 @@ fn progress(model : AppModel) -> @html.Html {
         "\{status_label(model.status)}  \{model.done}/\{model.total}（\{percent}%）",
       ),
     ]),
+    @html.node("div", @html.Attrs::build().class("progress-bar"), [
+      @html.node(
+        "div",
+        @html.Attrs::build()
+        .class("progress-fill")
+        .style("width", "\{percent}%"),
+        ([] : Array[@html.Html]),
+      ),
+    ]),
+    @shared.live_row(model.live),
     match model.error {
       Some(error) => @html.pre([txt(error)])
       None => @html.fragment([])

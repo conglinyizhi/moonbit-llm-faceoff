@@ -220,6 +220,74 @@ fn parse_answer(json : Json) -> Answer {
 }
 
 ///|
+/// The request that is in flight right now.
+///
+/// The server forwards bench's last progress event verbatim (`live`) together
+/// with how old it is (`liveAgeMs`). That age is the only thing that tells
+/// "the model is producing tokens" apart from "the model has gone quiet":
+/// between two polls nothing on screen moves by itself, so without it a stalled
+/// gateway and a working one look identical.
+pub(all) struct LiveProgress {
+  /// `case_start`, `tick` or `case_done`.
+  event : String
+  model : String
+  case_id : String
+  repeat : Int
+  /// `reasoning` until the first visible fragment arrives, `content` after.
+  phase : String
+  /// Stream fragments per second, over a sliding window inside the request.
+  /// Fragments, not tokens — an OpenAI-compatible stream is normally one token
+  /// per fragment, but nothing guarantees it, so the page shows it as `≈`.
+  tok_per_s : Double
+  chars : Int
+  /// Fragments seen so far. The same caveat as `tok_per_s` applies.
+  tokens : Int
+  elapsed_ms : Double
+  max_tokens : Int
+  /// Position in the suite: 1-based, out of `total`.
+  index : Int
+  total : Int
+  /// Milliseconds since the server saw that line written.
+  age_ms : Double
+} derive(Eq)
+
+///|
+pub extend LiveProgress with Eq::{equal, not_equal}
+
+///|
+/// Decode the `live` + `liveAgeMs` pair from a run status.
+///
+/// Either piece missing means "nothing live to show": a replayed run, a run
+/// from before this existed, or a directory whose progress file went away.
+pub fn parse_live(json : Json?, age_ms : Double?) -> LiveProgress? {
+  let live = match json {
+    Some(value) => as_object(value)
+    None => return None
+  }
+  if live.is_empty() {
+    return None
+  }
+  Some(LiveProgress::{
+    event: string_field(live, "event", ""),
+    model: string_field(live, "model", ""),
+    case_id: string_field(live, "case", ""),
+    repeat: int_field(live, "repeat", 0),
+    phase: string_field(live, "phase", ""),
+    tok_per_s: number_field(live, "tokPerS", 0.0),
+    chars: int_field(live, "chars", 0),
+    tokens: int_field(live, "frags", int_field(live, "completionTokens", 0)),
+    elapsed_ms: number_field(live, "elapsedMs", 0.0),
+    max_tokens: int_field(live, "maxTokens", 0),
+    index: int_field(live, "index", 0),
+    total: int_field(live, "total", 0),
+    age_ms: match age_ms {
+      Some(value) => value
+      None => 0.0
+    },
+  })
+}
+
+///|
 /// 字段缺失或不是字符串都算「没有」，与 null 一视同仁。
 pub fn optional_field(obj : Map[String, Json], key : String) -> String? {
   match obj.get(key) {

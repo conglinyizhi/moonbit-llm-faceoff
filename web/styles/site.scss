@@ -689,6 +689,126 @@ button.ghost {
   margin-top: 0.6rem;
 }
 
+// 实时行：一次运行里真正在动的那几个数字
+//
+// 两次轮询之间页面上什么都不动，而有的一条请求要好几秒——所以这行里必须有个
+// 自己会动的东西（脉冲点），以及一个每 250ms 就换一次数的东西（tok/s、字符数）。
+.live-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.7rem;
+  font-size: 0.85rem;
+
+  .pulse {
+    background: $accent;
+    border-radius: 50%;
+    height: 0.5rem;
+    width: 0.5rem;
+    animation: live-pulse 1.1s ease-in-out infinite;
+  }
+
+  .live-who {
+    color: $title;
+    font-weight: 600;
+  }
+
+  .live-state {
+    color: $accent;
+  }
+
+  .live-nums,
+  .live-rate {
+    color: $muted;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .live-rate {
+    color: $title;
+  }
+
+  // 当前这条请求的 token 进度。分母是 max_tokens：那是上限，不是目标，
+  // 所以它可能中途停下——宽度只用来表示「在往前走」。
+  .live-bar {
+    background: $bg;
+    border-radius: 999px;
+    height: 0.3rem;
+    overflow: hidden;
+    position: relative;
+    width: 5rem;
+  }
+
+  .live-bar-fill {
+    background: $accent;
+    display: block;
+    height: 100%;
+    transition: width 0.25s linear;
+  }
+
+  // 流动纹样：短回答的宽度几乎看不出来，这层负责回答「还在动吗」
+  .live-bar-flow {
+    animation: live-flow 0.9s linear infinite;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(88, 166, 255, 0.75),
+      transparent
+    );
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    height: 100%;
+    left: 0;
+    position: absolute;
+    top: 0;
+    width: 100%;
+  }
+
+  &.stalled .live-bar-flow {
+    animation: none;
+    opacity: 0;
+  }
+
+  // 两秒没有新分片：点停下来、变灰，并直接说清楚安静了多久
+  &.stalled {
+    .pulse {
+      animation: none;
+      background: $muted;
+    }
+
+    .live-state {
+      color: $muted;
+    }
+  }
+
+  .live-stalled {
+    color: $warn;
+  }
+}
+
+@keyframes live-flow {
+  from {
+    background-position: -40% 0;
+  }
+
+  to {
+    background-position: 140% 0;
+  }
+}
+
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
 // 实时日志尾：默认折起来，要看的时候再展开
 .log-tail {
   margin-top: 0.8rem;

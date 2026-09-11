@@ -16,6 +16,209 @@ struct CotLine {
 extern "c" fn c_exit(code : Int) -> Unit = "exit"
 
 ///|
+/// Live progress, one JSON object per line.
+///
+/// The page needs something that moves *within* a request, not only between
+/// requests: a suite of 66 cases takes minutes, and one stderr line per finished
+/// case leaves the browser looking frozen for seconds at a time.
+///
+/// Everything here is best-effort. A run must not fail because nobody could
+/// open the file it was supposed to narrate.
+struct Progress {
+  file : @fs.File?
+  /// 当前这条的身份，写进每个 tick：一行就能自解释，页面不必记住上一条。
+  mut model : String
+  mut case_id : String
+  mut repeat : Int
+  mut max_tokens : Int
+  /// Milliseconds between two `tick` lines. Cheap to lower, noisy to raise.
+  throttle_ms : Int
+  mut case_start_ms : UInt64
+  mut last_tick_ms : UInt64
+  /// Sliding window for the rate: fragments counted since `window_ms`.
+  mut window_ms : UInt64
+  mut window_frags : Int
+  mut frags : Int
+  mut chars : Int
+  /// Whether any visible answer text has arrived yet. Until it has, the model is
+  /// still in its chain of thought, and the page says so.
+  mut answering : Bool
+  mut last_rate : Double
+}
+
+///|
+async fn progress_open(path : String?) -> Progress {
+  let file = match path {
+    None => None
+    Some(path) => progress_open_file(path)
+  }
+  Progress::{
+    file,
+    model: "",
+    case_id: "",
+    repeat: 0,
+    max_tokens: 0,
+    throttle_ms: 120,
+    case_start_ms: 0,
+    last_tick_ms: 0,
+    window_ms: 0,
+    window_frags: 0,
+    frags: 0,
+    chars: 0,
+    answering: false,
+    last_rate: 0.0,
+  }
+}
+
+///|
+/// Open the progress file for appending, or nothing at all if it cannot be
+/// opened. Failing to open a file must not take a run down with it.
+async fn progress_open_file(path : String) -> @fs.File? {
+  Some(@fs.open(path, mode=WriteOnly, create_mode=OpenOrCreate, append=true)) catch {
+    _ => None
+  }
+}
+
+///|
+/// Write one event.
+///
+/// `File` writes are plain unbuffered writes, so a line is readable the moment
+/// this returns — the server tails the file while the run is still going, and a
+/// userspace buffer would hide exactly the seconds it is watching for.
+async fn Progress::event(self : Progress, fields : Map[String, Json]) -> Unit {
+  match self.file {
+    None => ()
+    Some(file) =>
+      file.write(Json::object(fields).stringify() + "\n") catch {
+        _ => ()
+      }
+  }
+}
+
+///|
+/// A request started. Carries its position in the suite so the page can say
+/// "12 / 66" before the first token arrives.
+async fn Progress::case_started(
+  self : Progress,
+  model : String,
+  case_id : String,
+  repeat : Int,
+  index : Int,
+  total : Int,
+  max_tokens : Int,
+) -> Unit {
+  let now = @env.now()
+  self.model = model
+  self.case_id = case_id
+  self.repeat = repeat
+  self.max_tokens = max_tokens
+  self.case_start_ms = now
+  self.last_tick_ms = now
+  self.window_ms = now
+  self.window_frags = 0
+  self.frags = 0
+  self.chars = 0
+  self.answering = false
+  self.last_rate = 0.0
+  self.event({
+    "event": Json::string("case_start"),
+    "t": Json::number(now.to_double()),
+    "model": Json::string(model),
+    "case": Json::string(case_id),
+    "repeat": Json::number(repeat.to_double()),
+    "index": Json::number(index.to_double()),
+    "total": Json::number(total.to_double()),
+    "maxTokens": Json::number(max_tokens.to_double()),
+  })
+}
+
+///|
+/// A stream fragment arrived.
+///
+/// Throttled: a 500-token answer arrives in hundreds of fragments, and a line
+/// per fragment would be a megabyte of file for something the page samples a
+/// few times a second.
+///
+/// The rate is measured over a sliding window of fragments rather than over the
+/// whole request, which is the point — a cumulative average barely moves once
+/// the answer is under way, and this is the number meant to move.
+async fn Progress::part(self : Progress, chars : Int, visible : Bool) -> Unit {
+  let now = @env.now()
+  if visible {
+    self.answering = true
+  }
+  self.frags = self.frags + 1
+  self.chars = self.chars + chars
+  self.window_frags = self.window_frags + 1
+  let span = (now - self.window_ms).to_double()
+  if span >= 500.0 {
+    // 窗口关掉，下一段重新起算：速率要跟着模型当下的速度走，不是整段的平均
+    self.last_rate = self.window_frags.to_double() / (span / 1000.0)
+    self.window_ms = now
+    self.window_frags = 0
+  } else if span >= 120.0 && self.window_frags >= 2 {
+    // 还没到 500ms，但够算一个数了。不重置窗口：重置会让下一行也只看得见一小段
+    self.last_rate = self.window_frags.to_double() / (span / 1000.0)
+  }
+  if now < self.last_tick_ms ||
+    now - self.last_tick_ms < self.throttle_ms.to_uint64() {
+    return
+  }
+  self.last_tick_ms = now
+  self.event({
+    "event": Json::string("tick"),
+    "t": Json::number(now.to_double()),
+    "model": Json::string(self.model),
+    "case": Json::string(self.case_id),
+    "repeat": Json::number(self.repeat.to_double()),
+    "maxTokens": Json::number(self.max_tokens.to_double()),
+    "elapsedMs": Json::number((now - self.case_start_ms).to_double()),
+    "phase": Json::string(if self.answering { "content" } else { "reasoning" }),
+    "tokPerS": Json::number(self.last_rate),
+    "frags": Json::number(self.frags.to_double()),
+    "chars": Json::number(self.chars.to_double()),
+  })
+}
+
+///|
+/// A request settled: the page can move its counter and show the final rate
+/// before the next one starts.
+async fn Progress::case_done(
+  self : Progress,
+  result : @harness.RunResult,
+) -> Unit {
+  // decode 速度：首正文之后的 token 除以首正文之后的时间。整段 e2e 速率把等
+  // 首 token 的时间也算进去，在「模型刚醒来」和「模型在吐字」这两种状态需要
+  // 分开看的时候就不够用了。
+  let rate = match result.ttfc_ms {
+    Some(ttfc) =>
+      if result.ok && result.total_ms > ttfc && result.completion_tokens > 0 {
+        result.completion_tokens.to_double() /
+        ((result.total_ms - ttfc) / 1000.0)
+      } else {
+        0.0
+      }
+    None => 0.0
+  }
+  self.event({
+    "event": Json::string("case_done"),
+    "t": Json::number(@env.now().to_double()),
+    "model": Json::string(result.model),
+    "case": Json::string(result.case_id),
+    "repeat": Json::number(result.repeat.to_double()),
+    "ok": Json::boolean(result.ok),
+    // 每条事件都自带身份与上限：页面不必记住上一条，也不会在 case 边界上
+    // 把进度条抖没了
+    "maxTokens": Json::number(self.max_tokens.to_double()),
+    "chars": Json::number(self.chars.to_double()),
+    "frags": Json::number(self.frags.to_double()),
+    "totalMs": Json::number(result.total_ms),
+    "completionTokens": Json::number(result.completion_tokens.to_double()),
+    "tokPerS": Json::number(rate),
+  })
+}
+
+///|
 /// Entry point.
 ///
 /// Either runs the suite, or — with `--from-json` — reloads a previous run log
@@ -81,6 +284,17 @@ async fn main {
         pace_ms: cli.pace_ms,
       }
       let cot : CotLine = { open: false, }
+      let progress = progress_open(cli.progress_path)
+      let planned = models.length() * cases.length() * cli.repeats
+      progress.event({
+        "event": Json::string("start"),
+        "t": Json::number(@env.now().to_double()),
+        "models": Json::array(models.map(fn(model) { Json::string(model) })),
+        "cases": Json::number(cases.length().to_double()),
+        "repeats": Json::number(cli.repeats.to_double()),
+        "total": Json::number(planned.to_double()),
+      })
+      let mut index = 0
       note(
         "\{models.length()} model(s) x \{cases.length()} case(s) x \{cli.repeats} repeat(s)",
       )
@@ -90,10 +304,23 @@ async fn main {
         cases,
         options,
         async fn(model, case_id, repeat) {
+          index = index + 1
+          progress.case_started(
+            model,
+            case_id,
+            repeat,
+            index,
+            planned,
+            cli.max_tokens,
+          )
           note("")
           note("> \{model}  \{case_id} #\{repeat + 1}")
         },
         async fn(part) {
+          match part {
+            @faceoff.Reasoning(text) => progress.part(text.length(), false)
+            @faceoff.Content(text) => progress.part(text.length(), true)
+          }
           if cli.show_cot {
             match part {
               @faceoff.Reasoning(text) =>
@@ -106,6 +333,7 @@ async fn main {
           }
         },
         async fn(result) {
+          progress.case_done(result)
           // 思考碎片是连续写出去的，没带换行。不先结掉这一行，进度行就会粘在
           // 思考的尾巴上（"weighing the question[mock-a] ..."）。
           if cot.open {

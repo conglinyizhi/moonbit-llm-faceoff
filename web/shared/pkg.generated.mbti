@@ -32,6 +32,8 @@ pub fn format_value(Double?, String) -> String
 
 pub fn int_field(Map[String, Json], String, Int) -> Int
 
+pub fn live_row(LiveProgress?) -> @html.Html
+
 pub fn metric_rows() -> Array[(String, String, String)]
 
 pub fn model_cards(PageData) -> @html.Html
@@ -39,6 +41,8 @@ pub fn model_cards(PageData) -> @html.Html
 pub fn number_field(Map[String, Json], String, Double) -> Double
 
 pub fn optional_field(Map[String, Json], String) -> String?
+
+pub fn parse_live(Json?, Double?) -> LiveProgress?
 
 pub fn parse_page_data(String) -> Result[PageData, String]
 
@@ -106,6 +110,24 @@ pub(all) struct CaseBlock {
 } derive(Eq)
 pub fn CaseBlock::equal(Self, Self) -> Bool
 pub fn CaseBlock::not_equal(Self, Self) -> Bool
+
+pub(all) struct LiveProgress {
+  event : String
+  model : String
+  case_id : String
+  repeat : Int
+  phase : String
+  tok_per_s : Double
+  chars : Int
+  tokens : Int
+  elapsed_ms : Double
+  max_tokens : Int
+  index : Int
+  total : Int
+  age_ms : Double
+} derive(Eq)
+pub fn LiveProgress::equal(Self, Self) -> Bool
+pub fn LiveProgress::not_equal(Self, Self) -> Bool
 
 pub(all) struct MetricStats {
   n : Int

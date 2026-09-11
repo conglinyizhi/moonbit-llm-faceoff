@@ -78,6 +78,11 @@ Breaking any of these produces a confusing failure, not a clean error.
   find the file specified". Four such call sites were found by the Windows job.
 - **Never commit a key,** and read `SECURITY.md` before writing anything that
   persists response bodies — an upstream error can echo the key back.
+- **Never commit user data.** `web/cases/`, `web/presets.json`, `web/runs/` and
+  `docs/real-gateway-run.md` are ignored on purpose: case sets, annotations and
+  real-gateway output belong to whoever ran them. Placeholder-looking content is
+  still user content. Adding a new path that holds any of it means adding it to
+  `.gitignore` and to the list in `SECURITY.md` in the same change.
 
 ## MoonBit notes
 

@@ -420,6 +420,7 @@ without paying for the calls again.
 | `--web-data <file>` | the page-data document the web module renders (schema in `bench/pagedata.mbt`) |
 | `--show-cot` | stream chain-of-thought text to stderr as it arrives |
 | `--show-output` | print each answer to stderr when the run settles |
+| `--progress <file>` | append live progress events (JSON Lines) while running — this is what the page reads to show a run in flight |
 
 Progress goes to stderr, the report to stdout.
 
@@ -484,6 +485,14 @@ From the page you can:
   was wrong. The verdict is saved the moment you click it, the note when you press
   存备注, and both live in that run's directory — so they show up in the Markdown
   copy and the static report too, and deleting a run takes its verdicts with it;
+- **watch a run while it happens**: the progress card carries a bar over the whole
+  suite plus a live line — which model, which case, whether it is still waiting
+  for the first token, how many characters have arrived, and the rate over the
+  last fraction of a second (`≈ 61 tok/s`). It is derived from the arrival times
+  of the stream fragments, so it moves at the speed of the model rather than at
+  the speed of the suite: a progress line per finished case leaves the page dead
+  for the seconds in between, which is the part a person actually stares at. Two
+  seconds without a fragment stops the pulse and says how long it has been quiet;
 - export the result — copy the report as Markdown, copy a shareable URL, or
   download `runs.jsonl`, `data.json`, or a self-contained `report.html`.
 

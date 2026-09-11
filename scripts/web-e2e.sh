@@ -56,7 +56,7 @@ trap cleanup EXIT
 build_mbtx scripts/mock_openai.mbtx "$MOCK_BIN" || fail "mock 编译失败"
 
 echo "==> 起 mock LLM 与评测服务"
-exec env MOCK_STREAM_DELAY=0.02 "$MOCK_BIN" >"$tmp/mock.port" 2>/dev/null &
+exec env MOCK_STREAM_DELAY=0.08 "$MOCK_BIN" >"$tmp/mock.port" 2>/dev/null &
 mock_pid=$!
 for _ in $(seq 1 200); do [ -s "$tmp/mock.port" ] && break; sleep 0.05; done
 mock_port=$(cat "$tmp/mock.port")
@@ -392,7 +392,24 @@ playground_probe='(async () => {
   await new Promise((r) => setTimeout(r, 600));
   out.rowsAfterAppend = document.querySelectorAll(".prompt-row").length;
   byText("开始试跑").click();
-  await new Promise((r) => setTimeout(r, 8000));
+  // 运行中盯实时行：整个卡片的「活着的证据」都在这一行里
+  out.liveSamples = 0;
+  out.liveStates = [];
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const live = document.querySelector(".progress-card .live-row");
+    if (live) {
+      out.liveSamples += 1;
+      out.liveWho = live.querySelector(".live-who")?.textContent || "";
+      const state = live.querySelector(".live-state")?.textContent || "";
+      if (state && !out.liveStates.includes(state)) { out.liveStates.push(state); }
+      out.liveBar = !!live.querySelector(".live-bar-flow");
+      out.pulse = getComputedStyle(live.querySelector(".pulse")).animationName;
+    }
+    const head = document.querySelector(".progress-head")?.textContent || "";
+    if (/已完成|失败/.test(head)) { break; }
+  }
+  await new Promise((r) => setTimeout(r, 1500));
   out.rows = document.querySelectorAll(".matrix-row").length;
   out.cells = document.querySelectorAll(".cell").length;
   const heights = Array.from(document.querySelectorAll(".cell")).map((c) => Math.round(c.getBoundingClientRect().height));
@@ -413,6 +430,14 @@ echo "$probe" | grep -qE '"checked":2' || fail "试跑台默认没勾上两个�
 echo "$probe" | grep -q '"hasImportBox":true' || fail "试跑台没有按行导入的输入框：$probe"
 echo "$probe" | grep -qE '"rowsAfterReplace":2' || fail "按行导入（替换）没得到 2 条：$probe"
 echo "$probe" | grep -qE '"rowsAfterAppend":3' || fail "按行导入（追加）没加到 3 条：$probe"
+echo "$probe" | grep -qE '"liveSamples":([1-9][0-9]*)' ||
+  fail "运行中没看到实时行（live-row）：$probe"
+echo "$probe" | grep -qE '"liveWho":"[^"]+·[^"]+"' ||
+  fail "实时行没说明正在跑哪个模型/哪条用例：$probe"
+echo "$probe" | grep -q '"liveBar":true' ||
+  fail "实时行里没有会动的 token 进度条：$probe"
+echo "$probe" | grep -q '"pulse":"live-pulse"' ||
+  fail "实时行里的脉冲点没有动画（两次轮询之间页面就是死的）：$probe"
 echo "$probe" | grep -qE '"rows":3' || fail "试跑台没渲染出三行（三条 prompt）：$probe"
 echo "$probe" | grep -qE '"cells":6' || fail "试跑台没渲染出 3×2 个单元格：$probe"
 echo "$probe" | grep -q '"uniformHeights":true' || fail "单元格高度不一致：$probe"

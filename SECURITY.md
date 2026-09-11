@@ -81,6 +81,29 @@ results. That is the same trust boundary as the rest of the server (loopback, no
 authentication — see below), not a new one, but it is worth knowing before you
 put this behind a proxy.
 
+## What never enters the repository
+
+This repository is public. The pages are built to be used with material that is
+not, and the boundary is drawn in `.gitignore`:
+
+- `web/cases/` — case sets. They hold the prompts you actually care about.
+- `web/presets.json` — model and parameter combinations.
+- `web/runs/` — every run directory: prompts sent, answers received, `runs.jsonl`,
+  and the annotations you typed while reading them.
+- `docs/real-gateway-run.md` — the output of the real-gateway smoke test, which
+  names your endpoint and quotes its replies.
+
+Ignore rules are the mechanism, but they are not the only reason these stay out:
+**these files are user data and are not meant to be committed even when they look
+harmless.** Placeholder text ("compute 17 x 23") reads fine in a screenshot and
+still has no business in a published history. If you add a path that holds
+personal material, add it here and to `.gitignore` in the same change, and check
+with `git status --ignored` that it is ignored rather than merely untracked.
+
+Before publishing anything that a run produced — a report, an excerpt, a
+screenshot — read it. A model's answer can echo the prompt, and the prompt is
+often the part you did not mean to share.
+
 ## Threat model
 
 This is a local developer tool, not a service. Deliberately:

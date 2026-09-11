@@ -210,6 +210,111 @@ pub fn answer_block(
 }
 
 ///|
+/// The "what is happening right now" line of a running benchmark.
+///
+/// A suite of 66 cases takes minutes, and one stderr line per finished case
+/// leaves the card looking dead for seconds at a time — which is exactly the
+/// part a person stares at. This is the piece that moves: which model, which
+/// case, whether it is still thinking, how fast, and how long since anything
+/// came out of the gateway.
+pub fn live_row(live : LiveProgress?) -> @html.Html {
+  let live = match live {
+    None => return @html.fragment([])
+    Some(live) => live
+  }
+  // 2 秒没有任何新分片就算安静下来了：可能是模型在长思考，也可能是上游卡住，
+  // 页面分不清，但能说清「多久没有输出了」——这就够人决定要不要再等。
+  let stalled = live.age_ms > 2000.0
+  let who = if live.case_id == "" {
+    live.model
+  } else {
+    "\{live.model} · \{live.case_id} #\{live.repeat + 1}"
+  }
+  // 等首 token 的那一秒是页面上最像死掉的一秒：请求发出去了，什么都没有。
+  // 把它单独标出来，比笼统写「生成中」有用得多。
+  let state = if live.event == "case_start" {
+    "等首 token"
+  } else if live.event == "case_done" {
+    if live.age_ms > 3000.0 {
+      ""
+    } else {
+      "刚返回"
+    }
+  } else if live.phase == "reasoning" {
+    "思考中"
+  } else {
+    "生成中"
+  }
+  let clock = if live.event == "case_start" {
+    ""
+  } else {
+    " \{fmt_number(live.elapsed_ms / 1000.0)}s"
+  }
+  let numbers = if live.chars > 0 { "\{live.chars} 字符" } else { "" }
+  let rate = if live.tok_per_s >= 0.5 {
+    "≈\{fmt_number(live.tok_per_s)} tok/s"
+  } else {
+    ""
+  }
+  el("div", if stalled { "live-row stalled" } else { "live-row" }, [
+    el("span", "pulse", []),
+    el("span", "live-who", [txt(who)]),
+    if state == "" {
+      @html.fragment([])
+    } else {
+      el("span", "live-state", [txt(state + clock)])
+    },
+    if numbers == "" {
+      @html.fragment([])
+    } else {
+      el("span", "live-nums", [txt(numbers)])
+    },
+    if rate == "" {
+      @html.fragment([])
+    } else {
+      el("span", "live-rate", [txt(rate)])
+    },
+    live_bar(live),
+    if stalled {
+      el("span", "live-stalled", [
+        txt("\{fmt_number(live.age_ms / 1000.0)}s 没有新输出"),
+      ])
+    } else {
+      @html.fragment([])
+    },
+  ])
+}
+
+///|
+/// 当前这条请求的 token 进度。
+///
+/// 分母是 `max_tokens`——那是**上限**不是目标，模型随时可能提前收尾，所以这条
+/// 只能当参考看，标签上写 `≤`。它动的速度是真正的分片速度，页面上最活跃的
+/// 就是它。
+fn live_bar(live : LiveProgress) -> @html.Html {
+  if live.max_tokens <= 0 {
+    return @html.fragment([])
+  }
+  let share = live.tokens.to_double() / live.max_tokens.to_double()
+  let percent = if share > 1.0 { 100 } else { (share * 100.0).to_int() }
+  // 分母是上限不是目标，所以宽度经常几乎为零（9 个 token 的短回答 vs 1024 的上限）。
+  // 光靠宽度会像是坏掉了，于是里面再叠一层流动纹样：有分片在进来它就在动，
+  // 停了它就停——「有没有数据在流」这件事不需要知道答案有多长。
+  el("span", "live-bar", [
+    @html.node(
+      "span",
+      @html.Attrs::build().class("live-bar-fill").style("width", "\{percent}%"),
+      ([] : Array[@html.Html]),
+    ),
+    @html.node(
+      "span",
+      @html.Attrs::build().class("live-bar-flow"),
+      ([] : Array[@html.Html]),
+    ),
+  ])
+}
+
+///|
 /// 人工判定与备注。没有标注就什么都不渲染，不占位。
 pub fn verdict_badge(answer : Answer) -> @html.Html {
   match answer.verdict {
