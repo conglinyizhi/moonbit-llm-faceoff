@@ -1,0 +1,773 @@
+///| 服务端 API 契约测试：不起浏览器，直接打 HTTP。
+///
+///   moon run --target native scripts/server-api.mbtx
+///
+/// 这是 scripts/server-api.sh 的 .mbtx 版，断言一一对应。换掉的理由：shell 版
+/// 靠 curl + grep + sed 拼字符串，既难读又只在 POSIX 上跑得起来；这里要的东西
+/// （HTTP 请求、JSON 解析、字符串断言）MoonBit 侧都有。
+///
+/// 三块内容：
+///   1. 请求体里的 baseUrl/apiKey 真的生效（服务端环境里那两个是故意设坏的）
+///   2. 密钥不落盘、不进响应
+///   3. 用例集 / 预设 / 运行历史这些新接口的契约与坏输入
+///
+/// 用例集、预设、运行目录全都指向临时目录：web/cases、web/presets.json 和
+/// web/runs 是你自己的数据，跑一次契约测试不该把它们清掉。
+import {
+  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.20.1/fs" @fs,
+  "moonbitlang/async@0.20.1/http" @http,
+  "moonbitlang/async@0.20.1/io" @io,
+  "moonbitlang/async@0.20.1/process" @process,
+  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/core/env" @env,
+  "moonbitlang/core/json" @json,
+  "moonbitlang/core/string" @string,
+}
+
+///|
+extern "c" fn c_exit(code : Int) -> Unit = "exit"
+
+// ---------------------------------------------------------------- 断言
+
+///|
+let results : Array[String] = []
+
+///|
+fn ok(name : String) -> Unit {
+  results.push("ok   " + name)
+  println("ok: " + name)
+}
+
+///|
+fn bad(name : String, detail : String) -> Unit {
+  results.push("FAIL " + name)
+  if detail == "" {
+    println("FAIL: " + name)
+  } else {
+    println("FAIL: " + name + "  ← " + one_line(detail))
+  }
+}
+
+///|
+fn expect(condition : Bool, name : String, detail : String) -> Unit {
+  if condition {
+    ok(name)
+  } else {
+    bad(name, detail)
+  }
+}
+
+///|
+fn one_line(text : String) -> String {
+  text.replace_all(old="\n", new=" ⏎ ")
+}
+
+///|
+async fn bail(message : String) -> Unit {
+  @stdio.stderr.write("server-api: " + message + "\n") catch { _ => () }
+  c_exit(1)
+}
+
+// ---------------------------------------------------------------- 工具
+
+///|
+fn trim(text : String) -> String {
+  text.trim(chars=" \t\r\n").to_owned()
+}
+
+
+///|
+fn text_of(data : &@io.Data) -> String {
+  data.text() catch { _ => "" }
+}
+
+///|
+async fn read_text(path : String) -> String {
+  let data = @fs.read_file(path) catch { _ => return "" }
+  text_of(data)
+}
+
+
+///|
+async fn copy_file(from : String, to : String) -> Bool {
+  let content = @fs.read_file(from) catch { _ => return false }
+  @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
+    _ => return false
+  }
+  true
+}
+
+
+///|
+/// 编译一个 .mbtx 并复制成独立文件（`moon run foo.mbtx &` 的 pid 是包装进程，
+/// 杀掉带不走真正的服务——见 scripts/lib.sh 里那段说明）。
+async fn build_mbtx(src : String, out : String) -> Bool {
+  let (code, _, err) = @process.collect_output(
+    "moon",
+    ["build", "--target", "native", src],
+    inherit_env=true,
+  ) catch {
+    err => {
+      @stdio.stderr.write(err.to_string() + "\n") catch { _ => () }
+      return false
+    }
+  }
+  if code != 0 {
+    @stdio.stderr.write(text_of(err) + "\n") catch { _ => () }
+    return false
+  }
+  let single = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single) catch { _ => false }) {
+    single
+  } else {
+    "scripts/_build/native/debug/build/single/single"
+  }
+  if !copy_file(single, out) {
+    return false
+  }
+  @fs.chmod(out, 0o755) catch { _ => () }
+  true
+}
+
+///|
+struct Output {
+  code : Int
+  err : String
+}
+
+///|
+async fn run(
+  bin : String,
+  args : Array[String],
+  env : Map[String, String],
+  cwd : String,
+) -> Output {
+  let (code, out, err) = @process.collect_output(
+    bin,
+    args,
+    extra_env=env,
+    inherit_env=true,
+    cwd=cwd,
+  ) catch {
+    err => return { code: -1, err: err.to_string() }
+  }
+  ignore(out)
+  { code, err: text_of(err) }
+}
+
+// ---------------------------------------------------------------- HTTP
+
+///|
+struct Reply {
+  code : Int
+  body : String
+  headers : Map[String, String]
+}
+
+///|
+async fn get(url : String) -> Reply {
+  let (response, data) = @http.get(url) catch {
+    _ => return { code: -1, body: "", headers: Map([]) }
+  }
+  { code: response.code, body: text_of(data), headers: response.headers }
+}
+
+///|
+/// 0.20.1 的 http 没有顶层 request：POST/PUT 有便利函数，DELETE 得自己用 Client 拼。
+async fn send(verb : @http.RequestMethod, url : String, body : String) -> Reply {
+  match verb {
+    @http.RequestMethod::Post => {
+      let (response, data) = @http.post(
+        url,
+        body,
+        headers={ "Content-Type": "application/json" },
+      ) catch {
+        _ => return { code: -1, body: "", headers: Map([]) }
+      }
+      { code: response.code, body: text_of(data), headers: response.headers }
+    }
+    @http.RequestMethod::Put => {
+      let (response, data) = @http.put(
+        url,
+        body,
+        headers={ "Content-Type": "application/json" },
+      ) catch {
+        _ => return { code: -1, body: "", headers: Map([]) }
+      }
+      { code: response.code, body: text_of(data), headers: response.headers }
+    }
+    _ => {
+      let (origin, path) = split_url(url)
+      let client = @http.Client(origin) catch {
+        _ => return { code: -1, body: "", headers: Map([]) }
+      }
+      defer client.close()
+      client.request(verb, path) catch {
+        _ => return { code: -1, body: "", headers: Map([]) }
+      }
+      let response = client.end_request() catch {
+        _ => return { code: -1, body: "", headers: Map([]) }
+      }
+      let data = client.read_all() catch { _ => return { code: -1, body: "", headers: Map([]) } }
+      { code: response.code, body: text_of(data), headers: response.headers }
+    }
+  }
+}
+
+///|
+async fn post(url : String, body : String) -> Reply {
+  send(@http.RequestMethod::Post, url, body)
+}
+
+///|
+async fn put(url : String, body : String) -> Reply {
+  send(@http.RequestMethod::Put, url, body)
+}
+
+///|
+async fn delete(url : String) -> Reply {
+  send(@http.RequestMethod::Delete, url, "")
+}
+
+///|
+/// 把 URL 拆成 origin 与 path：Client 的构造参数是前者。
+fn split_url(url : String) -> (String, String) {
+  let scheme_end = match url.find("://") {
+    Some(index) => index + 3
+    None => 0
+  }
+  let rest = url[scheme_end:].to_owned()
+  match rest.find("/") {
+    Some(index) => (url[:scheme_end + index].to_owned(), rest[index:].to_owned())
+    None => (url, "/")
+  }
+}
+
+///|
+/// 头部按不区分大小写查：请求/响应两侧的键类型就是这么定义的。
+fn header(reply : Reply, name : String) -> String {
+  let wanted = name.to_lower()
+  for key, value in reply.headers {
+    if key.to_lower() == wanted {
+      return value
+    }
+  }
+  ""
+}
+
+///|
+/// 从一个 JSON 对象里取字符串字段（拿 run id、状态这类）。
+fn json_string(text : String, key : String) -> String {
+  let parsed = @json.parse(text) catch { _ => return "" }
+  guard parsed is Object(obj) else { return "" }
+  match obj.get(key) {
+    Some(String(value)) => value
+    _ => ""
+  }
+}
+
+
+// ---------------------------------------------------------------- 请求体
+
+///|
+/// 几个请求体写成常量：`#|` 多行字符串当调用参数时解析不了，而且塞在调用里也难读。
+let body_bad_case : String =
+  #|{"cases":[{"id":"x"}]}
+
+///|
+let body_dup_ids : String =
+  #|{"cases":[{"id":"a","prompt":"p"},{"id":"a","prompt":"q"}]}
+
+///|
+let body_empty_cases : String =
+  #|{"cases":[]}
+
+///|
+let body_new_set : String =
+  #|{"cases":[{"prompt":"1+1=?"},{"id":"deck","prompt":"什么是甲板风？","max_tokens":512}]}
+
+///|
+let body_unknown_case : String =
+  #|{"models":["mock-a"],"caseSet":"math","cases":["not-a-case"]}
+
+///|
+let body_unknown_set : String =
+  #|{"models":["mock-a"],"caseSet":"nope","cases":["deck"]}
+
+///|
+let body_preset_ok : String =
+  #|{"presets":[{"name":"quick","models":["mock-a","mock-b"],"repeats":1,"maxTokens":256,"caseSet":"default"}]}
+
+///|
+let body_preset_no_model : String =
+  #|{"presets":[{"name":"x","models":[]}]}
+
+///|
+let body_preset_bad_name : String =
+  #|{"presets":[{"name":"a/b","models":["m"]}]}
+
+///|
+let body_preset_dup : String =
+  #|{"presets":[{"name":"x","models":["m"]},{"name":"x","models":["n"]}]}
+
+// ---------------------------------------------------------------- 主体
+
+///|
+/// 页面构建（web/build.sh 的最小版）：`GET /` 那条断言需要 out/index.html。
+/// 只做页面本身，不导出 data.json——交互页启动后会自己去问 /api/meta。
+async fn ensure_page(cwd : String) -> Bool {
+  if (@fs.exists(cwd + "/out/index.html") catch { _ => false }) {
+    return true
+  }
+  println("==> 构建页面（GET / 的断言需要它）")
+  for spec in [["build", "cmd/ssg", "--target", "native"],
+               ["build", "cmd/app", "--target", "js"]] {
+    let built = run("moon", spec, {}, cwd)
+    if built.code != 0 {
+      @stdio.stderr.write(built.err + "\n") catch { _ => () }
+      return false
+    }
+  }
+  let ssg = run("./_build/native/debug/build/cmd/ssg/ssg.exe", [], {}, cwd)
+  if ssg.code != 0 {
+    @stdio.stderr.write(ssg.err + "\n") catch { _ => () }
+    return false
+  }
+  if !copy_file(
+    cwd + "/_build/js/debug/build/cmd/app/app.js",
+    cwd + "/out/app.js",
+  ) {
+    return false
+  }
+  copy_file(cwd + "/shell/index.html", cwd + "/out/index.html")
+}
+
+///|
+async fn main {
+  guard @env.current_dir() is Some(root) else {
+    bail("拿不到当前目录")
+    return
+  }
+  println("==> 构建")
+  let built = run("moon", ["build", "--target", "native"], {}, root)
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    bail("moon build 失败")
+    return
+  }
+  let web_bin = run(
+    "moon",
+    ["build", "cmd/server", "--target", "native"],
+    {},
+    root + "/web",
+  )
+  if web_bin.code != 0 {
+    @stdio.stderr.write(web_bin.err + "\n") catch { _ => () }
+    bail("web 构建失败")
+    return
+  }
+  if !ensure_page(root + "/web") {
+    bail("页面构建失败")
+    return
+  }
+  let tmp = @fs.tmpdir(prefix="server-api") catch { _ => "" }
+  if tmp == "" {
+    bail("建不了临时目录")
+    return
+  }
+  @fs.mkdir(tmp, recursive=true) catch { _ => () }
+  if !build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
+    bail("mock 编译失败")
+    return
+  }
+
+  @async.with_task_group(async fn(group) {
+    // 假端点
+    let (mock_reader, mock_sink) = @process.read_from_process() catch {
+      _ => {
+        bail("建不了读取管道")
+        return
+      }
+    }
+    let mock = @process.spawn(
+      group,
+      tmp + "/mock-endpoint",
+      [],
+      extra_env={ "MOCK_STREAM_DELAY": "0.02" },
+      inherit_env=true,
+      stdout=mock_sink,
+      stderr=@process.redirect_to_file(
+        tmp + "/mock.log",
+        create_mode=@fs.CreateOrTruncate,
+      ),
+      cancel_handler=@process.graceful_cancel(timeout=2000),
+    ) catch {
+      _ => {
+        bail("起不了假端点")
+        return
+      }
+    }
+    let mock_port = read_line(mock_reader, 10000)
+    if mock_port == "" {
+      bail("假端点没报出端口")
+      return
+    }
+
+    // 服务端：环境里的网关地址不可达、密钥是错的。请求体里那份如果生效，
+    // 运行就会成功——不生效就会失败，一眼可判。
+    let (server_reader, server_sink) = @process.read_from_process() catch {
+      _ => {
+        bail("建不了读取管道")
+        return
+      }
+    }
+    let server = @process.spawn(
+      group,
+      "./_build/native/debug/build/cmd/server/server.exe",
+      [],
+      extra_env={
+        "MOONLLM_BASE_URL": "http://127.0.0.1:1/v1",
+        "MOONLLM_API_KEY": "env-key-that-would-fail",
+        "LLM_WEB_MODELS": "mock-a",
+        "LLM_WEB_PORT": "0",
+        "LLM_WEB_WORK": tmp + "/runs",
+        "LLM_WEB_CASES_DIR": tmp + "/cases",
+        "LLM_WEB_PRESETS": tmp + "/presets.json",
+      },
+      inherit_env=true,
+      cwd=root + "/web",
+      stdout=server_sink,
+      stderr=@process.redirect_to_file(
+        tmp + "/server.log",
+        create_mode=@fs.CreateOrTruncate,
+      ),
+      cancel_handler=@process.graceful_cancel(timeout=2000),
+    ) catch {
+      _ => {
+        bail("起不了服务端")
+        return
+      }
+    }
+    let port = read_line(server_reader, 15000)
+    if port == "" {
+      bail("服务端没报出端口：" + read_text(tmp + "/server.log"))
+      return
+    }
+    let base = "http://127.0.0.1:" + port
+
+    // 服务端的 out/ runs/ cases/ 都按当前工作目录解析，换句话说它必须从 web/
+    // 启动。README 里那段命令一度是错的（写成从仓库根启动），结果 /api 通、
+    // 页面全 404。这条断言守住「文档里写的启动方式是健康的」。
+    let server_log = read_text(tmp + "/server.log")
+    expect(
+      !server_log.contains("static directory"),
+      "从 web/ 启动，静态目录正常",
+      server_log,
+    )
+    let home = get(base + "/")
+    expect(home.code == 200, "GET / → 200（页面真的能被服务出来）", home.body)
+
+    // ---- 请求体覆盖服务端配置
+    println("==> 请求体覆盖服务端配置，且模型不在菜单里")
+    let body =
+      #|{"models":["mock-a","not-in-the-menu"],"cases":["math-short"],"repeats":1,"maxTokens":32,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
+    let body = body + mock_port + "/v1\",\"apiKey\":\"test-key\"}"
+    let started = post(base + "/api/runs", body)
+    let run_id = json_string(started.body, "id")
+    if run_id == "" {
+      bail("没拿到 run id：" + started.body)
+      return
+    }
+    let status = await_finished(base, run_id)
+    let run_dir = tmp + "/runs/" + run_id
+    expect(
+      // 服务端写的是 "0\n"，shell 版靠 $(cat) 吃掉换行，这里得自己 trim
+      trim(read_text(run_dir + "/exit_code")) == "0",
+      "运行成功 → 请求体的 baseUrl 与 apiKey 都生效了",
+      read_text(run_dir + "/stderr.log"),
+    )
+    let request_json = read_text(run_dir + "/request.json")
+    expect(
+      request_json.contains("not-in-the-menu"),
+      "模型菜单之外 id 也能发起",
+      request_json,
+    )
+    expect(
+      !request_json.contains("apiKey"),
+      "request.json 里没有 apiKey 字段",
+      request_json,
+    )
+    expect(
+      !any_file_contains(run_dir, "test-key"),
+      "运行目录里没有任何文件含这把密钥",
+      run_dir,
+    )
+    expect(
+      status.contains("\"failures\"") &&
+      status.contains("\"retried\"") &&
+      status.contains("\"truncated\""),
+      "状态响应含 failures/retried/truncated",
+      status,
+    )
+    expect(status.contains("\"tail\""), "状态响应含 tail", status)
+
+    // ---- 导出
+    println("==> 导出")
+    let runs_export = get(base + "/api/runs/" + run_id + "/runs.jsonl")
+    expect(
+      runs_export.code == 200 &&
+      header(runs_export, "content-disposition") != "" &&
+      runs_export.body != "",
+      "GET .../runs.jsonl → 200，带 Content-Disposition，有内容",
+      "\{runs_export.code}",
+    )
+    let data_export = get(base + "/api/runs/" + run_id + "/data.json")
+    expect(
+      data_export.code == 200 &&
+      header(data_export, "content-disposition") != "" &&
+      data_export.body != "",
+      "GET .../data.json → 200，带 Content-Disposition，有内容",
+      "\{data_export.code}",
+    )
+    expect(
+      runs_export.body == read_text(run_dir + "/runs.jsonl"),
+      "下载的 runs.jsonl 与磁盘一致",
+      "",
+    )
+    let report = get(base + "/api/runs/" + run_id + "/report.html")
+    expect(
+      report.code == 200 && report.body != "",
+      "GET .../report.html → 200（按需调用 ssg）",
+      "\{report.code}",
+    )
+    expect(
+      report.body.contains("<style>"),
+      "报告 HTML 内联了样式（单文件自包含）",
+      "",
+    )
+    expect(
+      report.body.contains("site-logo"),
+      "报告 HTML 里有真正渲染出来的内容",
+      "",
+    )
+
+    // ---- 用例集
+    println("==> 用例集")
+    let sets = get(base + "/api/cases")
+    expect(
+      sets.body.contains("\"name\":\"default\""),
+      "GET /api/cases 列出了从 LLM_WEB_CASES 播种的 default 集",
+      sets.body,
+    )
+    let meta = get(base + "/api/meta")
+    expect(
+      meta.body.contains("\"defaultCaseSet\":\"default\""),
+      "GET /api/meta 带 caseSets / defaultCaseSet（同时保留旧的 cases 字段）",
+      meta.body,
+    )
+    let created = put(base + "/api/cases/math", body_new_set)
+    expect(created.code == 200, "PUT /api/cases/math 新建一套", created.body)
+    let math = get(base + "/api/cases/math")
+    expect(
+      math.body.contains("\"id\":\"case-1\""),
+      "缺 id 的用例被补上 id（不然 bench 侧按 id 过滤会静默丢掉它）",
+      math.body,
+    )
+    expect(
+      math.body.contains("\"max_tokens\":512"),
+      "其余字段原样往返（编辑不会把 system / max_tokens 弄丢）",
+      math.body,
+    )
+    expect(
+      put(base + "/api/cases/bad", body_bad_case).code == 400,
+      "没有 prompt 的用例 → 400",
+      "",
+    )
+    expect(
+      put(base + "/api/cases/dup", body_dup_ids).code == 400,
+      "重复 id → 400",
+      "",
+    )
+    expect(
+      put(base + "/api/cases/..%2fescape", body_empty_cases).code == 400,
+      "用例集名字里的路径片段 → 400",
+      "",
+    )
+    expect(
+      get(base + "/api/cases/nope").code == 404,
+      "不存在的用例集 → 404",
+      "",
+    )
+
+    // 用刚建的那套跑一次：请求里的 caseSet 要真的决定读哪个文件
+    let set_body =
+      #|{"models":["mock-a"],"caseSet":"math","cases":["deck"],"repeats":1,"maxTokens":32,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
+    let set_body = set_body + mock_port + "/v1\",\"apiKey\":\"test-key\"}"
+    let set_started = post(base + "/api/runs", set_body)
+    let set_id = json_string(set_started.body, "id")
+    ignore(await_finished(base, set_id))
+    let run_cases = read_text(tmp + "/runs/" + set_id + "/cases.jsonl")
+    expect(
+      run_cases.contains("\"id\":\"deck\"") && !run_cases.contains("1+1"),
+      "caseSet 决定读哪套用例（跑的是 math 集里勾中的那条）",
+      run_cases,
+    )
+    expect(
+      read_text(tmp + "/runs/" + set_id + "/request.json").contains("\"caseSet\": \"math\""),
+      "request.json 记下解析后的 caseSet（历史重跑重放的是实际那一套）",
+      read_text(tmp + "/runs/" + set_id + "/request.json"),
+    )
+    expect(
+      post(base + "/api/runs", body_unknown_case).code == 400,
+      "勾选的 id 一个都不在集里 → 400（不再静默跑 0 条）",
+      "",
+    )
+    expect(
+      post(base + "/api/runs", body_unknown_set).code == 400,
+      "不存在的 caseSet → 400",
+      "",
+    )
+    let deleted_set = delete(base + "/api/cases/math")
+    expect(
+      deleted_set.code == 200 &&
+      !(@fs.exists(tmp + "/cases/math.jsonl") catch { _ => false }),
+      "DELETE /api/cases/math 删掉一个集",
+      deleted_set.body,
+    )
+
+    // ---- 预设
+    println("==> 预设")
+    expect(
+      put(base + "/api/presets", body_preset_ok).code == 200,
+      "PUT /api/presets 存下一条预设",
+      "",
+    )
+    expect(
+      read_text(tmp + "/presets.json") != "" &&
+      get(base + "/api/presets").body.contains("\"name\":\"quick\""),
+      "预设落盘且能读回",
+      "",
+    )
+    expect(
+      put(base + "/api/presets", body_preset_no_model).code == 400,
+      "没模型的预设 → 400",
+      "",
+    )
+    expect(
+      put(base + "/api/presets", body_preset_bad_name).code == 400,
+      "名字带路径片段的预设 → 400",
+      "",
+    )
+    expect(
+      put(base + "/api/presets", body_preset_dup).code == 400,
+      "重名预设 → 400（预设按名字取，留两份同名就是留个坑）",
+      "",
+    )
+
+    // ---- 运行历史
+    println("==> 运行历史")
+    let runs_json = get(base + "/api/runs").body
+    expect(
+      runs_json.contains("\"id\":\"" + run_id + "\""),
+      "GET /api/runs 列出了跑过的运行",
+      runs_json,
+    )
+    expect(
+      runs_json.contains("\"request\":{"),
+      "历史条目带磁盘上那份 request（重跑不用另造格式）",
+      "",
+    )
+    expect(runs_json.contains("\"status\":\"ok\""), "历史条目带状态与计数", "")
+    expect(
+      !runs_json.contains("apiKey"),
+      "历史里的 request 没有 apiKey",
+      "",
+    )
+
+    // ---- 越权与坏输入
+    println("==> 越权与坏输入")
+    expect(
+      get(base + "/api/runs/" + run_id + "/../../moon.mod").code != 200,
+      "路径穿越被挡住",
+      "",
+    )
+    expect(
+      get(base + "/api/runs/" + run_id + "/nope.txt").code == 404,
+      "不在导出清单里的文件名 → 404",
+      "",
+    )
+    expect(
+      get(base + "/api/runs/..%2f..%2fmoon.mod").code != 200,
+      "编码过的穿越路径也挡住",
+      "",
+    )
+
+    // ---- 删除运行（放最后：它会删掉上面导出断言用的目录）
+    println("==> 删除运行")
+    let deleted = delete(base + "/api/runs/" + run_id)
+    expect(
+      deleted.code == 200 &&
+      !(@fs.exists(tmp + "/runs/" + run_id) catch { _ => false }) &&
+      !get(base + "/api/runs").body.contains("\"id\":\"" + run_id + "\""),
+      "DELETE /api/runs/<id> 删掉运行目录，历史里也没了",
+      deleted.body,
+    )
+    expect(
+      delete(base + "/api/runs/..%2f..").code == 400,
+      "坏的 run id → 400",
+      "",
+    )
+
+    mock.cancel()
+    ignore(mock.wait() catch { _ => -1 })
+    server.cancel()
+    ignore(server.wait() catch { _ => -1 })
+  })
+
+  let failures = results.filter(fn(line) { line.has_prefix("FAIL") }).length()
+  println("")
+  println("server api：\{results.length() - failures} 项通过，\{failures} 项失败")
+  if failures > 0 {
+    c_exit(1)
+  }
+}
+
+///|
+/// 等一次运行结束（exit_code 出现），返回最后一次状态响应。
+async fn await_finished(base : String, id : String) -> String {
+  let mut status = ""
+  for attempt = 0; attempt < 200; attempt = attempt + 1 {
+    status = (get(base + "/api/runs/" + id)).body
+    if status.contains("\"status\":\"done\"") ||
+      status.contains("\"status\":\"failed\"") {
+      break
+    }
+    @async.sleep(150)
+  }
+  status
+}
+
+///|
+/// 目录里有没有哪个文件含这段文本（密钥检查用）。
+async fn any_file_contains(dir : String, needle : String) -> Bool {
+  let names = @fs.readdir(dir, sort=true) catch { _ => [] }
+  for name in names {
+    if read_text(dir + "/" + name).contains(needle) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// 从读者里读一行（含超时）。服务端与假端点都把「我起来了」写成 stdout 第一行。
+async fn read_line(reader : @process.ReadFromProcess, timeout_ms : Int) -> String {
+  let line = @async.with_timeout_opt(timeout_ms, async fn() {
+    reader.read_until("\n")
+  }) catch { _ => None }
+  match line {
+    Some(Some(text)) => text.trim(chars=" \t\r\n").to_owned()
+    _ => ""
+  }
+}

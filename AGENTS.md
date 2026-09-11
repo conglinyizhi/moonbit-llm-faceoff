@@ -13,7 +13,7 @@ the targets, and the Makefile sets `MOON_CC` for you.
 ```bash
 make ci                       # deps, check, tests, smoke, server API, page build
 make e2e                      # add the browser test (real Chromium; slow)
-bash scripts/server-api.sh    # server HTTP contract; asserts the key handling
+moon run --target native scripts/server-api.mbtx   # server HTTP contract; asserts the key handling
 bash scripts/real-gateway.sh  # the same probes against a real gateway; needs a key (not in CI)
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti

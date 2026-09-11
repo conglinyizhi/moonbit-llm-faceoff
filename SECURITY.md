@@ -16,7 +16,7 @@ between minor versions; see `CHANGELOG.md`.
 
 The claims below were checked by running the server with a canary key, exercising
 every path, and then searching the whole working tree for that key.
-`scripts/server-api.sh` asserts them.
+`scripts/server-api.mbtx` asserts them.
 
 A key reaches the server one of two ways, and both behave the same once it does:
 
@@ -74,7 +74,7 @@ the test fails if the masking stops working.
 directory: `runs.jsonl`, `data.json`, and a `report.html` generated on demand by
 the static-report generator. Nothing else — the name is matched against the list
 rather than joined onto a path, so `..` cannot escape it, and
-`scripts/server-api.sh` checks that.
+`scripts/server-api.mbtx` checks that.
 
 The consequence is that anything able to reach the server can read any run's
 results. That is the same trust boundary as the rest of the server (loopback, no

@@ -102,6 +102,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`server-api.sh` is now `server-api.mbtx`** (42 assertions, the same ones, and
+  what `make ci` runs). The shell version drove the HTTP contract with `curl`
+  plus `sed`/`grep` on the response text; the MoonBit version calls the endpoints
+  with `@http` and reads the JSON, so the assertions say what they mean. It also
+  builds the page itself when `web/out/` is missing (the `GET /` assertion needs
+  it), instead of assuming someone ran `make web` first.
+
+  One difference caught while porting: the shell version compared the run's
+  `exit_code` with `$(cat …)`, which strips the trailing newline for free. The
+  port kept the newline and compared `"0\n"` against `"0"`, so a *successful* run
+  looked like a failure until the comparison was trimmed — worth remembering when
+  porting any `$(cat)` into a language that does not trim for you.
+
+  0.20.1's `@http` has `get`/`post`/`put` helpers but no top-level `request`, so
+  `DELETE` goes through a `Client` (origin in the constructor, path in the call)
+  — noted in the script, because the newer async versions do have `@http.request`.
+
 - **`smoke.sh` is now `smoke.mbtx`** (16 checks, same assertions, and it is what
   `make ci` runs). The shell version needed `grep`, `sed`, `curl`, `seq`, `mktemp`
   and a `source`d `lib.sh`; the MoonBit version needs nothing but the language and

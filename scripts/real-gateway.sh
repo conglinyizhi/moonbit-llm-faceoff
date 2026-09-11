@@ -8,7 +8,7 @@
 #   bash scripts/real-gateway.sh
 #
 # 为什么单独一个脚本：仓库里其他测试全部跑在离线假端点上（demo.sh / smoke.mbtx
-# / server-api.sh / web-e2e.sh），它们证明不了对真实网关的适配。离线全绿和
+# / server-api.mbtx / web-e2e.sh），它们证明不了对真实网关的适配。离线全绿和
 # 「真实 API 能跑」是两件事，这个脚本就是那条缺掉的证据。
 #
 # key 只从环境变量读：不上命令行（否则会进 ps）、不写进留证文件

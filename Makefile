@@ -38,7 +38,7 @@ smoke:  ## the CLIs end to end, against a local mock endpoint
 	$(MOON) run --target native scripts/smoke.mbtx
 
 api:  ## the server HTTP contract: overrides, exports, traversal guards
-	bash scripts/server-api.sh
+	$(MOON) run --target native scripts/server-api.mbtx
 
 e2e:  ## browser end to end; needs chromium, and it is slow
 	bash scripts/web-e2e.sh
