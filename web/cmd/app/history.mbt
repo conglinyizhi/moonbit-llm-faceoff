@@ -41,6 +41,8 @@ struct ViewedRun {
   data : @shared.PageData?
   error : String?
   tail : String
+  /// 打开的那次运行如果还在跑，这里就有实时进度；跑完的历史运行没有。
+  live : @shared.LiveProgress?
 } derive(Eq)
 
 // ---------------------------------------------------------------- 读字段

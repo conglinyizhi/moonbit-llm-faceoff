@@ -268,6 +268,23 @@ fn header(reply : Reply, name : String) -> String {
 
 ///|
 /// 从一个 JSON 对象里取字符串字段（拿 run id、状态这类）。
+///|
+/// 从状态响应里取 `live` 对象的一个字段（都是字符串字段）。
+fn json_live_field(text : String, key : String) -> String {
+  let parsed = @json.parse(text) catch { _ => return "" }
+  guard parsed is Object(obj) else { return "" }
+  match obj.get("live") {
+    Some(Object(live)) =>
+      match live.get(key) {
+        Some(String(value)) => value
+        Some(Number(value, ..)) => value.to_string()
+        _ => ""
+      }
+    _ => ""
+  }
+}
+
+///|
 fn json_string(text : String, key : String) -> String {
   let parsed = @json.parse(text) catch { _ => return "" }
   guard parsed is Object(obj) else { return "" }
@@ -867,6 +884,96 @@ async fn main {
       "坏的 run id → 400",
       "",
     )
+
+    // ---- 实时进度：跑着的时候状态里要有 live
+    //
+    // 慢一点的假端点：默认 0.02s 的间隔下整次运行不到 300ms，两次轮询之间就
+    // 结束了，什么都测不到。0.6s 一个分片才够看清「运行中」这个状态里的字段。
+    println("==> 运行中的实时进度（live + liveAgeMs）")
+    let (slow_reader, slow_sink) = @process.read_from_process() catch {
+      _ => {
+        bail("建不了读取管道")
+        return
+      }
+    }
+    let slow = @process.spawn(
+      group,
+      mock_bin,
+      [],
+      extra_env={ "MOCK_STREAM_DELAY": "0.6" },
+      inherit_env=true,
+      stdout=slow_sink,
+      stderr=@process.redirect_to_file(
+        tmp + "/mock-slow.log",
+        create_mode=@fs.CreateOrTruncate,
+      ),
+      cancel_handler=@process.graceful_cancel(timeout=2000),
+    ) catch {
+      _ => {
+        bail("起不了慢速假端点")
+        return
+      }
+    }
+    let slow_port = read_line(slow_reader, 10000)
+    let slow_body =
+      #|{"models":["mock-a"],"inlineCases":[{"id":"q1","prompt":"甲板风是什么？"},{"id":"q2","prompt":"侧风是什么？"},{"id":"q3","prompt":"涌浪是什么？"}],"repeats":1,"maxTokens":64,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
+    let slow_started = post(
+      base + "/api/runs",
+      slow_body + slow_port + "/v1\",\"apiKey\":\"test-key\"}",
+    )
+    let slow_id = json_string(slow_started.body, "id")
+    let mut live_event = ""
+    let mut live_model = ""
+    let mut live_case = ""
+    let mut saw_rate = false
+    let mut saw_age = false
+    let mut slow_tail = ""
+    for attempt = 0; attempt < 80; attempt = attempt + 1 {
+      let probe = get(base + "/api/runs/" + slow_id)
+      slow_tail = probe.body
+      if probe.body.contains("\"liveAgeMs\"") {
+        saw_age = true
+      }
+      let event = json_live_field(probe.body, "event")
+      if event != "" {
+        live_event = event
+      }
+      let case = json_live_field(probe.body, "case")
+      if case != "" {
+        live_case = case
+      }
+      let model = json_live_field(probe.body, "model")
+      if model != "" {
+        live_model = model
+      }
+      let rate = json_live_field(probe.body, "tokPerS")
+      if rate != "" && rate != "0" {
+        saw_rate = true
+      }
+      if probe.body.contains("\"status\":\"done\"") {
+        break
+      }
+      @async.sleep(200)
+    }
+    expect(
+      live_event != "" &&
+      live_model == "mock-a" &&
+      live_case != "" &&
+      saw_age &&
+      saw_rate,
+      "运行中的状态带 live（哪条、多快）与 liveAgeMs（多久没输出）",
+      "event=\{live_event} model=\{live_model} case=\{live_case} age=\{saw_age} rate=\{saw_rate} body=\{slow_tail}",
+    )
+    // 跑完之后那一行不该继续冒充「现在」：旧运行的 live 只能是过去的残留
+    let after = await_finished(base, slow_id)
+    expect(
+      after.contains("\"status\":\"done\""),
+      "慢速运行能正常跑完（live 不挡路）",
+      after,
+    )
+    let _ = delete(base + "/api/runs/" + slow_id)
+    slow.cancel()
+    ignore(slow.wait() catch { _ => -1 })
 
     mock.cancel()
     ignore(mock.wait() catch { _ => -1 })

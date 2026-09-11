@@ -8,6 +8,8 @@ package "conglinyizhi/moonbit-llm-faceoff/cmd/bench"
 // Types and methods
 type CotLine
 
+type Progress
+
 // Type aliases
 
 // Traits

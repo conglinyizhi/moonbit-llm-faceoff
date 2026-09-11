@@ -65,6 +65,7 @@ pub let usage : String =
   #|      --show-output     print each answer to stderr when the run settles
   #|      --json <file>     write every raw attempt as JSON Lines
   #|      --web-data <f>    write the page data document (JSON) for the web module
+  #|      --progress <f>    append live progress events (JSON Lines) while running
   #|
   #|endpoint (also read from the environment, see faceoff):
   #|      --base-url <url>  --api-key <key>  --timeout-ms <n>  --no-key
@@ -87,6 +88,8 @@ pub(all) struct BenchCli {
   show_help : Bool
   from_json : String?
   web_data : String?
+  /// Where live progress events go. Absent means nobody is watching.
+  progress_path : String?
   retry : Int
   retry_backoff_ms : Int
   pace_ms : Int
@@ -113,6 +116,7 @@ pub fn BenchCli::parse(
   let mut no_key = false
   let mut from_json : String? = None
   let mut web_data : String? = None
+  let mut progress_path : String? = None
   let mut retry = 1
   let mut retry_backoff_ms = 2000
   let mut pace_ms = 0
@@ -175,6 +179,10 @@ pub fn BenchCli::parse(
       }
       "--web-data" => {
         web_data = Some(next_value(argv, i, "--web-data"))
+        i = i + 1
+      }
+      "--progress" => {
+        progress_path = Some(next_value(argv, i, "--progress"))
         i = i + 1
       }
       "--retry" => {
@@ -253,6 +261,7 @@ pub fn BenchCli::parse(
     show_help,
     from_json,
     web_data,
+    progress_path,
     retry,
     retry_backoff_ms,
     pace_ms,

@@ -64,6 +64,7 @@ pub(all) struct BenchCli {
   show_help : Bool
   from_json : String?
   web_data : String?
+  progress_path : String?
   retry : Int
   retry_backoff_ms : Int
   pace_ms : Int

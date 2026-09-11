@@ -497,7 +497,58 @@ async fn main {
       "code=\{truncated.code} log=\{truncated_log}",
     )
 
-    // 12. 状态行走 stderr，stdout 仍然只有回复本身
+    // 12. 进度事件流：页面靠它显示「正在生成、约 N tok/s」。
+    // 一次运行 66 条时，两次 case 之间会有好几秒什么都不动——那几秒的实时性
+    // 就来自这个文件，所以它得真的写出 tick，而不只是首尾两条。
+    let progress_jsonl = tmp + "/progress.jsonl"
+    let progress_run = run(
+      bench,
+      [
+        "--base-url", base, "--api-key", "test-key",
+        "--models", "mock-a",
+        "--prompt", "hello",
+        "--repeats", "1", "--max-tokens", "64",
+        "--progress", progress_jsonl,
+      ],
+      {},
+    )
+    let progress_log = read_text(progress_jsonl)
+    let mut starts = 0
+    let mut ticks = 0
+    let mut dones = 0
+    let mut fields_ok = true
+    for line in progress_log.split("\n") {
+      if line.contains("\"event\":\"case_start\"") {
+        starts = starts + 1
+      }
+      if line.contains("\"event\":\"tick\"") {
+        ticks = ticks + 1
+        // 有速率、字符数和身份字段才算数：页面上的动感就是这几个数
+        if !(line.contains("\"tokPerS\"") &&
+          line.contains("\"chars\"") &&
+          line.contains("\"model\"") &&
+          line.contains("\"case\"") &&
+          line.contains("\"maxTokens\"")) {
+          fields_ok = false
+        }
+      }
+      if line.contains("\"event\":\"case_done\"") {
+        dones = dones + 1
+      }
+    }
+    expect(
+      progress_run.code == 0 &&
+      progress_log.contains("\"event\":\"start\"") &&
+      progress_log.contains("\"total\":1") &&
+      starts == 1 &&
+      ticks >= 1 &&
+      dones == 1 &&
+      fields_ok,
+      "--progress 写出 start/case_start/tick/case_done，tick 自带速率与身份",
+      "code=\{progress_run.code} starts=\{starts} ticks=\{ticks} dones=\{dones} fields_ok=\{fields_ok}",
+    )
+
+    // 13. 状态行走 stderr，stdout 仍然只有回复本身
     let status = run(faceoff, ["hi there"], keyed)
     expect(
       trim(status.out) == expected &&
@@ -507,7 +558,7 @@ async fn main {
       "out=\{status.out}",
     )
 
-    // 13. --quiet 关掉状态行
+    // 14. --quiet 关掉状态行
     let quiet = run(faceoff, ["--quiet", "hi there"], keyed)
     expect(
       trim(quiet.out) == expected && trim(quiet.err) == "",
@@ -515,7 +566,7 @@ async fn main {
       "err=\{quiet.err}",
     )
 
-    // 14. 可见正文为空：告警 + 非零退出，而不是一个空行
+    // 15. 可见正文为空：告警 + 非零退出，而不是一个空行
     let empty = run(faceoff, ["--max-tokens", "64", "THINK_ONLY answer me"], keyed)
     expect(
       empty.code != 0 &&
@@ -526,7 +577,7 @@ async fn main {
       "code=\{empty.code} out=\{empty.out}",
     )
 
-    // 15. --show-cot 把思考走 stderr
+    // 16. --show-cot 把思考走 stderr
     let cot = run(faceoff, arg_append(flags, ["--stream", "--show-cot", "hi"]), {})
     expect(
       trim(cot.out) == expected && cot.err.contains("weighing the question"),

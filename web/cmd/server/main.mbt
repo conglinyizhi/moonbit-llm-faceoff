@@ -1096,6 +1096,10 @@ async fn build_argv(
     dir + "/runs.jsonl",
     "--web-data",
     dir + "/data.json",
+    // 页面靠这个文件里的 tick 行显示「正在生成、约 N tok/s」——没有它，
+    // 一次运行在两次 case 之间就什么都不动，看上去像卡住了。
+    "--progress",
+    dir + "/progress.jsonl",
   ]
   match request.prompt {
     Some(prompt) => {
@@ -1383,6 +1387,15 @@ async fn get_run(
     payload["exitCode"] = Json::string(exit_code)
   }
   payload["tail"] = Json::string(tail_text(dir + "/stderr.log", 12))
+  // 实时进度：文件最后一行的原样转发，外加「它有多旧」。页面据此区分
+  // 「正在吐字」和「模型卡住了」——只有服务端知道这两个时钟的差。
+  match last_progress(dir + "/progress.jsonl") {
+    Some((line, age_ms)) => {
+      payload["live"] = line
+      payload["liveAgeMs"] = Json::number(age_ms)
+    }
+    None => ()
+  }
   let counts = run_counts(dir + "/runs.jsonl")
   payload["failures"] = Json::number(counts.0.to_double())
   payload["retried"] = Json::number(counts.1.to_double())
@@ -1485,6 +1498,54 @@ async fn count_lines(path : String) -> Int {
 
 ///|
 /// 末尾 N 行，给页面显示进度和错误。
+
+///|
+/// 进度文件的最后一行，以及它是多久以前写的（毫秒）。
+///
+/// 只认最后一行：它是关于**当下**的唯一陈述，前面那些都属于已经过去的请求。
+/// 解析不出来就当没有——写入方可能正好写到一半，下一次轮询会补上。
+async fn last_progress(path : String) -> (Json, Double)? {
+  let text = @fs.read_file(path) catch { _ => return None }
+  let body = text.text() catch { _ => return None }
+  let mut last : String? = None
+  for line in body.split("\n") {
+    if line.trim(chars=" \t\r") != "" {
+      last = Some(line.to_owned())
+    }
+  }
+  match last {
+    None => None
+    Some(line) =>
+      match parse_json(line) {
+        None => None
+        Some(json) => {
+          // `t` 是 bench 侧写的 epoch 毫秒。两个进程同一台机器，可以直接比。
+          let written = number_field(json, "t")
+          let age = if written > 0.0 {
+            @env.now().to_double() - written
+          } else {
+            0.0
+          }
+          Some((json, if age < 0.0 { 0.0 } else { age }))
+        }
+      }
+  }
+}
+
+///|
+/// 从 Json 里取一个数字字段，缺失或类型不对都算 0。
+fn number_field(json : Json, key : String) -> Double {
+  match json {
+    Json::Object(obj) =>
+      match obj.get(key) {
+        Some(Json::Number(value, ..)) => value
+        _ => 0.0
+      }
+    _ => 0.0
+  }
+}
+
+///|
 async fn tail_text(path : String, lines : Int) -> String {
   let text = read_text(path)
   let all : Array[String] = []

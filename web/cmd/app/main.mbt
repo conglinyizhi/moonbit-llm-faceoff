@@ -57,6 +57,9 @@ struct RunStatus {
   done : Int
   total : Int
   data : Json?
+  /// 服务端转发的最后一条进度事件，以及它有多旧。
+  live : Json?
+  liveAgeMs : Double?
   error : String?
   tail : String?
   exitCode : String?
@@ -156,6 +159,8 @@ struct AppModel {
   busy_run : String?
   /// 运行中的实时信息：日志尾 + 失败/重试/截断计数。
   tail : String
+  /// 当下这条请求的实时进度（哪条、多快、多久没有输出了）。
+  live : @shared.LiveProgress?
   failures : Int
   retried : Int
   truncated : Int
@@ -204,6 +209,7 @@ fn initial_model() -> AppModel {
     compare_picks: [],
     compare: None,
     tail: "",
+    live: None,
     failures: 0,
     retried: 0,
     truncated: 0,
@@ -599,6 +605,7 @@ fn update(
             data,
             error: status.error,
             tail: status.tail.unwrap_or(""),
+            live: @shared.parse_live(status.live, status.liveAgeMs),
           }
           (
             { ..model, viewed: Some(viewed), busy_run: None, },
@@ -1311,6 +1318,7 @@ fn update(
             data,
             error: status.error,
             tail: status.tail.unwrap_or(""),
+            live: @shared.parse_live(status.live, status.liveAgeMs),
             failures: status.failures,
             retried: status.retried,
             truncated: status.truncated,
@@ -1320,7 +1328,7 @@ fn update(
             None => status.id
           }
           if status.status == "running" {
-            (next, @rabbita.delay(poll_run(id, emit), 700))
+            (next, @rabbita.delay(poll_run(id, emit), 250))
           } else {
             // 跑完了刷新一次历史：新记录要立刻出现在侧栏里，
             // 而不是等下次打开页面。顺带把这次运行的标注拿进来。
@@ -1905,6 +1913,7 @@ fn progress(model : AppModel) -> @html.Html {
         ([] : Array[@html.Html]),
       ),
     ]),
+    @shared.live_row(model.live),
     el("div", "progress-counts", [
       txt(
         "失败 \{model.failures} · 重试 \{model.retried} · 截断 \{model.truncated}",

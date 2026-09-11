@@ -47,3 +47,44 @@ test "page data written without a reasoning field still parses" {
     }
   }
 }
+
+///|
+/// 服务端转发的 live 行：字段名和 bench 写出来的完全一致，中间没有第二次
+/// 翻译——页面读错一个名字就会变成「实时行永远静止」。
+test "live progress decodes the event bench writes" {
+  let line =
+    #|{"event":"tick","t":1789116889397,"model":"mock-a","case":"stt-01","repeat":1,"maxTokens":512,"elapsedMs":1420,"phase":"content","tokPerS":61.25,"frags":44,"chars":187}
+  let decoded = @json.parse(line) catch { _ => fail("bad json") }
+  let live = match parse_live(Some(decoded), Some(240.0)) {
+    None => fail("live did not decode")
+    Some(live) => live
+  }
+  assert_eq(live.event, "tick")
+  assert_eq(live.model, "mock-a")
+  assert_eq(live.case_id, "stt-01")
+  assert_eq(live.repeat, 1)
+  assert_eq(live.phase, "content")
+  assert_eq(live.tok_per_s, 61.25)
+  assert_eq(live.chars, 187)
+  assert_eq(live.tokens, 44)
+  assert_eq(live.max_tokens, 512)
+  assert_eq(live.age_ms, 240.0)
+}
+
+///|
+/// case_done 少了 tick 才有的那几个字段，缺的按 0 算；完全没有 live 的老运行
+/// 也不能让页面崩掉。
+test "live progress tolerates a missing field and a missing payload" {
+  let done =
+    #|{"event":"case_done","model":"mock-a","case":"stt-01","repeat":0,"ok":true,"maxTokens":512,"totalMs":2000,"completionTokens":120,"tokPerS":96.0}
+  let decoded = @json.parse(done) catch { _ => fail("bad json") }
+  let live = match parse_live(Some(decoded), None) {
+    None => fail("live did not decode")
+    Some(live) => live
+  }
+  assert_eq(live.event, "case_done")
+  assert_eq(live.chars, 0)
+  assert_eq(live.age_ms, 0.0)
+  assert_eq(parse_live(None, None) is None, true)
+  assert_eq(parse_live(Some(Json::object({})), Some(1.0)) is None, true)
+}

@@ -102,6 +102,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A run shows what it is doing while it does it.** The progress card used to move
+  once per finished case — with a suite of 66 cases that is a line of stderr every
+  few seconds, and the seconds in between are the ones a person stares at. The
+  harness now appends progress events (`--progress <file>`), the server forwards
+  the newest one with its age, and both pages render a live line: which model,
+  which case, whether it is still waiting for the first token, characters
+  received, and the rate over a sliding window of stream fragments (`≈61 tok/s`)
+  — derived from the gaps between fragments, so it reacts at the speed of the
+  model. A pulse, a flowing token bar, and a stall notice after two quiet seconds
+  cover the stretches where the numbers legitimately do not change. Polling went
+  from 400/700 ms to 250 ms; a websocket would be faster on paper, but the browser
+  side of one needs a JS bridge into Rabbita's message loop, and at four updates a
+  second the CSS transitions already smooth the gaps.
+
 - **Import prompts a line at a time.** Both prompt lists — the playground's and the
   workbench's case editor — take a paste of raw text: one line becomes one case,
   blank lines and `#` comments are skipped, and 追加导入 / 替换为这些行 choose between
