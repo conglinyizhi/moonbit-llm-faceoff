@@ -196,11 +196,22 @@ async fn bin_path(path_without_suffix : String) -> String {
 }
 
 ///|
+/// 失败时补一句：Windows 上最常见的失败原因不是代码，而是「正在运行的 .mbtx
+/// 占着 `_build/.../single/single.exe`」——那个路径是所有 .mbtx 的公共输出，
+/// 而 Windows 不允许改写正在运行的 .exe（LNK1168）。绕法：先 build、复制成
+/// 别的名字、运行副本；CI 的 windows job 就是这么做的。
+let windows_hint : String =
+  "  提示：若在 Windows 上看到 LNK1168 / cannot open ... single.exe for writing，\n" +
+  "  那是当前脚本（也是 .mbtx）正占着 _build/.../single/single.exe。\n" +
+  "  先 build、复制成别的名字、再运行副本：见 .github/workflows/ci.yml 的 windows job。\n"
+
+///|
 /// 编译一个 .mbtx 并复制成独立文件（见文件头那段关于 moon 包装进程的说明）。
 async fn build_mbtx(src : String, out : String) -> Bool {
   let built = run("moon", ["build", "--target", "native", src], {})
   if built.code != 0 {
     @stdio.stderr.write(built.err + "\n") catch { _ => () }
+    @stdio.stderr.write(windows_hint) catch { _ => () }
     return false
   }
   let single = "scripts/_build/native/debug/build/single/single.exe"

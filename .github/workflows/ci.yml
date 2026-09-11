@@ -106,8 +106,28 @@ jobs:
           exit $LASTEXITCODE
 
       # The two end-to-end suites: no shell, no curl, no grep.
+      #
+      # Built, copied, then run — not `moon run`. Every .mbtx compiles to the same
+      # output path (`_build/.../single/single.exe`), and Windows refuses to
+      # overwrite an executable that is currently running (LNK1168). A .mbtx that
+      # is itself running therefore cannot build another one, which is exactly
+      # what these two do when they build the mock endpoint. Running a *copy*
+      # frees that path again. On Linux the same thing is only a "text file busy"
+      # hazard for `cp`, so `make smoke` gets away with `moon run`.
       - name: smoke end to end
-        run: moon run --target native scripts/smoke.mbtx
+        shell: pwsh
+        run: |
+          moon build --target native scripts/smoke.mbtx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/smoke.exe -Force
+          scripts/_build/smoke.exe
+          exit $LASTEXITCODE
 
       - name: server HTTP contract
-        run: moon run --target native scripts/server-api.mbtx
+        shell: pwsh
+        run: |
+          moon build --target native scripts/server-api.mbtx
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/server-api.exe -Force
+          scripts/_build/server-api.exe
+          exit $LASTEXITCODE
