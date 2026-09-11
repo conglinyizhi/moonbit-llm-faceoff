@@ -11,7 +11,8 @@ web/data.json
 web/runs/
 scripts/_build/
 
-# mktemp -d -p . 留下的临时目录（测试脚本调试时会生成）
+# 临时目录的兜底：e2e 现在把现场放在系统临时区（脚本里 tmp= 那行），这两行是
+# 防止哪天又有人改回 `mktemp -d -p .`——那会在仓库根目录堆一地 tmp.XXXX
 /tmp.*
 /web/tmp.*
 
