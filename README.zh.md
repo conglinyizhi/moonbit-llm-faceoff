@@ -102,6 +102,56 @@ $client --stream "写一首关于侧风的短诗"
 
 接下来：[模型对比](#2-模型对比)，或者[网页版](#3-网页版)。
 
+### 5. 从零到真实对比
+
+第 2–4 步走到一个 prompt 为止。这一步是完整的闭环——一套用例、两个真实
+模型、一份报告——也是本 README 里唯一需要网关的路径。第 2 步不动：不花钱
+验证改动是否可用，还是走那个离线演示。
+
+```bash
+# 1. 先构建一次（第 2 步的演示也会构建）
+make deps
+MOON_CC=gcc moon build --target native
+
+# 2. 指向你的网关——用 export，别写进任何会被提交的文件
+#    任何 OpenAI 兼容服务都行
+bench=./_build/native/debug/build/cmd/bench/bench.exe
+export MOONLLM_BASE_URL="https://<你的网关>/v1"
+export MOONLLM_API_KEY="sk-..."
+
+# 3. 写用例：JSON Lines，一行一条，只有 `prompt` 是必填
+#    （更完整的例子看 bench/cases.example.jsonl）
+mkdir -p my-run
+cat > my-run/cases.jsonl <<'JSONL'
+{"id": "math-short", "prompt": "计算 17 × 23。只输出数字。", "max_tokens": 512, "temperature": 0.0}
+{"id": "fact-zh", "prompt": "用一句话说明什么是航空母舰。"}
+JSONL
+
+# 4. 跑对比——同一套用例，一次只跑一个模型
+$bench \
+  --models <模型A>,<模型B> \
+  --cases my-run/cases.jsonl \
+  --repeats 3 --max-tokens 2048 --temperature 0.0 \
+  --pace-ms 1000 --retry 2 \
+  --json my-run/runs.jsonl
+
+# 5. 渲染成单文件页面——不需要服务器，也不需要 key
+bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+```
+
+两件第一次就该做对的事：
+
+- **`--json` 写到你自己的路径。** `bench/results-example.jsonl` 是一次真实运行的
+  提交样例，不是草稿纸。
+- **先看计数，再看延迟。** 每个模型那一块的头上就是 `failures` / `retried` /
+  `truncated`。被 `--max-tokens` 截断的回复不是「模型慢」，是预算不够：把预算
+  调大重跑，再去比 `tok/s`。进度行上的 `[truncated]` 标记，和
+  `runs.jsonl` 里的 `attempts > 1`，是同一件事在另外两层的样子。
+
+网关限流的话，`--pace-ms` 拉开尝试间隔，`--retry` 对 429/5xx 指数退避重试，
+见[限流](#限流)。密钥只在环境变量里（或者一次运行内待在页面内存里），
+不会写进运行目录，也不会进提交，见 [`SECURITY.md`](SECURITY.md)。
+
 ### 没接触过 MoonBit？
 
 读这个仓库前，五行速览：
@@ -147,14 +197,18 @@ $client --stream "写一首关于侧风的短诗"
 ## 1. 单次问答与流式输出
 
 ```bash
+# 构建产物在 _build/ 下；每个 shell 先给它们起个名字
+faceoff=./_build/native/debug/build/cmd/faceoff/faceoff.exe
+bench=./_build/native/debug/build/cmd/bench/bench.exe
+
 # 一次性
-faceoff "用一句话说明什么是航空母舰"
+$faceoff "用一句话说明什么是航空母舰"
 
 # 流式，碎片到达即打印
-faceoff --stream "写一首关于侧风的短诗"
+$faceoff --stream "写一首关于侧风的短诗"
 
 # 从 stdin 读 prompt
-echo "总结一下这段日志" | faceoff --stream
+echo "总结一下这段日志" | $faceoff --stream
 ```
 
 ### 参数
@@ -187,7 +241,7 @@ echo "总结一下这段日志" | faceoff --stream
 命令行参数优先于环境变量。错误写 stderr 并以非零码退出，可以放心放进管道：
 
 ```
-$ faceoff --api-key wrong "hi"
+$ $faceoff --api-key wrong "hi"
 error: http 401: {"error":{"message":"invalid api key"}}
 ```
 
@@ -198,19 +252,19 @@ error: http 401: {"error":{"message":"invalid api key"}}
 `bench` 把同一套用例串行跑在多个模型上，然后出对比报告。**串行是刻意的**——两个模型抢同一条连接，那就不叫对比了。
 
 ```bash
-bench \
+$bench \
   --base-url https://api.modelbest.cn/v1 --api-key "$MB_KEY" \
   --models MiniCPM5-1B,MiniCPM5-2B \
   --cases bench/cases.example.jsonl \
   --repeats 3 --max-tokens 2048 --temperature 0.0 \
   --pace-ms 3000 --retry 3 \
-  --json bench/results-example.jsonl
+  --json my-run/runs.jsonl
 ```
 
 也可以不写用例文件，直接问一句：
 
 ```bash
-bench --model MiniCPM5-1B --prompt "用一句话说明什么是航空母舰" --show-cot
+$bench --model MiniCPM5-1B --prompt "用一句话说明什么是航空母舰" --show-cot
 ```
 
 ### 用例格式
@@ -251,7 +305,7 @@ JSON Lines，一行一题——或者一个 JSON 数组。空行和以 `#` 开�
 
 ```bash
 # 无网络、不需要 key
-bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
+$bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
 ```
 
 改了报告想重渲染、或者想事后重新评分而不想再花钱调模型时很有用。
