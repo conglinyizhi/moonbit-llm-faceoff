@@ -284,6 +284,67 @@ echo "$probe" | grep -qE '"deltaCells":[1-9]' ||
   fail "指标表里没有 Δ 列：$probe"
 echo "ok: 勾两次运行能进对比视图（参数差异 / 指标差值 / 逐用例答案）"
 
+echo "==> 人工标注"
+# 打开历史里的一次运行 → 给第一条答案打「不行」+ 备注 → 徽章出现、写进磁盘、
+# 重新打开还在（这是「标注到底存没存下来」的分界线）。
+annotate_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  let captured = null;
+  try {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (text) => { captured = text; return Promise.resolve(); } },
+    });
+  } catch (e) { out.clipboardError = String(e); }
+  const item = document.querySelector(".history-item");
+  item.querySelectorAll(".history-actions button")[0].click();
+  await new Promise((r) => setTimeout(r, 2500));
+  out.editors = document.querySelectorAll(".annotate").length;
+  const ed = document.querySelector(".annotate");
+  if (!ed) { return out; }
+  Array.from(ed.querySelectorAll(".verdict-btn")).find((b) => b.textContent.includes("不行")).click();
+  await new Promise((r) => setTimeout(r, 1200));
+  const note = ed.querySelector(".note-input");
+  note.value = "e2e 备注：这条算错了";
+  note.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 300));
+  Array.from(ed.querySelectorAll("button")).find((b) => b.textContent === "存备注").click();
+  await new Promise((r) => setTimeout(r, 1500));
+  out.badges = Array.from(document.querySelectorAll(".verdict-badge")).map((b) => b.textContent);
+  out.notes = Array.from(document.querySelectorAll(".verdict-note")).map((b) => b.textContent);
+  const copy = byText("复制 Markdown 报告");
+  if (copy) { copy.click(); await new Promise((r) => setTimeout(r, 800)); }
+  out.markdownHasVerdict = captured ? captured.includes("不行") : null;
+  out.markdownHasNote = captured ? captured.includes("e2e 备注") : null;
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate.html" "$annotate_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/annotate.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -qE '"editors":[1-9]' || fail "答案下面没有标注编辑器：$probe"
+echo "$probe" | grep -q '不行' || fail "打了判定但徽章没出现：$probe"
+echo "$probe" | grep -q 'e2e 备注' || fail "备注没显示出来：$probe"
+echo "$probe" | grep -q '"markdownHasVerdict":true' || fail "复制的 Markdown 里没带判定：$probe"
+echo "$probe" | grep -q '"markdownHasNote":true' || fail "复制的 Markdown 里没带备注：$probe"
+grep -q 'e2e 备注' "$tmp/runs"/*/annotations.jsonl 2>/dev/null ||
+  fail "标注没落到运行目录里"
+
+# 重新打开一次：标注是存在磁盘上的，不是页面状态
+reload_probe='(async () => {
+  const item = document.querySelector(".history-item");
+  item.querySelectorAll(".history-actions button")[0].click();
+  await new Promise((r) => setTimeout(r, 2500));
+  return {
+    badges: Array.from(document.querySelectorAll(".verdict-badge")).map((b) => b.textContent),
+    notes: Array.from(document.querySelectorAll(".verdict-note")).map((b) => b.textContent),
+  };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/annotate2.html" "$reload_probe" 1500
+probe=$(grep -o 'SCRIPT .*' "$tmp/annotate2.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '不行' || fail "重新打开后判定丢了：$probe"
+echo "$probe" | grep -q 'e2e 备注' || fail "重新打开后备注丢了：$probe"
+echo "ok: 标注（判定 + 备注落盘、重开还在、导出带着走）"
+
 echo "==> 试跑台（单独的页面）"
 # 固定 system + 一组 prompt × 两个模型：跑完看矩阵、点开看对比与差异。
 dump_page "http://127.0.0.1:$PORT/playground.html" 6000 "$tmp/playground.html"

@@ -142,6 +142,12 @@ struct AppModel {
   compare : CompareState?
   /// 正在看的那次历史运行。None 表示看当前这次。
   viewed : ViewedRun?
+  /// 这条运行的人工标注（从 /api/runs/<id>/annotations 拿）。
+  annotations : Array[@shared.Annotation]
+  annotations_error : String?
+  /// 正在编辑哪一条答案的备注（"case\u0000model"），以及草稿。
+  note_key : String?
+  note_draft : String
   /// 正在删/正在重跑的 id：同一条上重复点击直接忽略（按钮不用 disabled，
   /// VDOM 从忙到闲不会把那个属性摘掉——见 action_row）。
   busy_run : String?
@@ -199,6 +205,10 @@ fn initial_model() -> AppModel {
     runs: None,
     runs_error: None,
     viewed: None,
+    annotations: [],
+    annotations_error: None,
+    note_key: None,
+    note_draft: "",
     busy_run: None,
   }
 }
@@ -355,6 +365,13 @@ enum Msg {
   SavePreset
   ApplyPreset(String)
   DeletePreset(String)
+  // 两次运行对比
+  // 人工标注
+  AnnotationsLoaded(String, Result[@shared.AnnotationResponse, Error])
+  SetVerdict(String, String, String)
+  NoteChanged(String, String, String)
+  SaveNote(String)
+  AnnotationsSaved(Result[Json, Error])
   // 两次运行对比
   ToggleComparePick(String)
   StartCompare
@@ -576,7 +593,11 @@ fn update(
             error: status.error,
             tail: status.tail.unwrap_or(""),
           }
-          ({ ..model, viewed: Some(viewed), busy_run: None, }, @cmd.none)
+          (
+            { ..model, viewed: Some(viewed), busy_run: None, },
+            // 历史运行的标注也要拉：它存在那次运行的目录里，不在当前这次里
+            fetch_annotations(id, emit),
+          )
         }
         Err(error) =>
           (
@@ -974,6 +995,89 @@ fn update(
             save_presets(presets.filter(fn(item) { item.name != name }), emit),
           )
       }
+    AnnotationsLoaded(_id, result) =>
+      match result {
+        Ok(response) =>
+          (
+            {
+              ..model,
+              annotations: response.annotations,
+              annotations_error: None,
+            },
+            @cmd.none,
+          )
+        Err(error) =>
+          ({ ..model, annotations_error: Some(error.to_string()), }, @cmd.none)
+      }
+    SetVerdict(case_id, answer_model, verdict) => {
+      // 这一轮运行的 id：优先看当前正在读的那次（历史），否则当前运行
+      let run_id = match model.viewed {
+        Some(viewed) => Some(viewed.id)
+        None => model.run_id
+      }
+      match run_id {
+        None => (model, @cmd.none)
+        Some(id) => {
+          let next = set_annotation(
+            model.annotations,
+            case_id,
+            answer_model,
+            verdict,
+            None,
+          )
+          (
+            { ..model, annotations: next, annotations_error: None, },
+            save_annotations(id, next, emit),
+          )
+        }
+      }
+    }
+    NoteChanged(case_id, answer_model, text) =>
+      (
+        {
+          ..model,
+          note_key: Some(case_id + "\u0000" + answer_model),
+          note_draft: text,
+        },
+        @cmd.none,
+      )
+    SaveNote(case_id) => {
+      let run_id = match model.viewed {
+        Some(viewed) => Some(viewed.id)
+        None => model.run_id
+      }
+      match run_id {
+        None => (model, @cmd.none)
+        Some(id) => {
+          // 草稿落在哪条答案上，由 note_key 说了算
+          let answer_model = match model.note_key {
+            Some(key) =>
+              match key.find("\u0000") {
+                Some(index) => key[index + 1:].to_owned()
+                None => ""
+              }
+            None => ""
+          }
+          let next = set_annotation(
+            model.annotations,
+            case_id,
+            answer_model,
+            "",
+            Some(model.note_draft),
+          )
+          (
+            { ..model, annotations: next, note_key: None, },
+            save_annotations(id, next, emit),
+          )
+        }
+      }
+    }
+    AnnotationsSaved(result) =>
+      match result {
+        Ok(_) => ({ ..model, annotations_error: None, }, @cmd.none)
+        Err(error) =>
+          ({ ..model, annotations_error: Some(error.to_string()), }, @cmd.none)
+      }
     ToggleComparePick(id) =>
       (
         { ..model, compare_picks: toggle_pick(model.compare_picks, id), },
@@ -1157,8 +1261,8 @@ fn update(
             (next, @rabbita.delay(poll_run(id, emit), 700))
           } else {
             // 跑完了刷新一次历史：新记录要立刻出现在侧栏里，
-            // 而不是等下次打开页面。
-            (next, fetch_runs(emit))
+            // 而不是等下次打开页面。顺带把这次运行的标注拿进来。
+            (next, @cmd.batch([fetch_runs(emit), fetch_annotations(id, emit)]))
           }
         }
         Err(error) =>
@@ -1343,10 +1447,19 @@ fn share_url(model : AppModel) -> String {
 ///|
 /// 复制 Markdown 报告，返回一句给用户看的反馈。
 fn copy_markdown(model : AppModel) -> String {
-  match model.data {
+  // 正在看历史运行时，屏幕上是那次运行的数据——导出必须跟着屏幕走，
+  // 否则「看着 A 复制出 B」，或者干脆说没有结果可复制（真的踩过）
+  let source = match model.viewed {
+    Some(viewed) => viewed.data
+    None => model.data
+  }
+  match source {
     None => "还没有结果可复制"
     Some(data) => {
-      let text = @shared.results_markdown(data)
+      // 带上人工判定：这份 Markdown 是留着以后翻的
+      let text = @shared.results_markdown(
+        @shared.with_annotations(data, model.annotations),
+      )
       if text == "" {
         "还没有结果可复制"
       } else if copy_text(text) {
@@ -1772,7 +1885,14 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           @html.fragment([
             viewed_banner(viewed, emit),
             match viewed.data {
-              Some(data) => @shared.results_section(data)
+              // 历史运行也一样能标注（标注在那次运行的目录里）
+              Some(data) =>
+                @shared.results_section(
+                  @shared.with_annotations(data, model.annotations),
+                  editor=fn(case_id, answer_model) {
+                    annotation_editor_for(model, case_id, answer_model, emit)
+                  },
+                )
               // 失败的运行没有 data.json，只有 stderr 尾巴：把那个拿出来，
               // 总比一片空白强。
               None =>
@@ -1796,7 +1916,13 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           ])
         None =>
           match model.data {
-            Some(data) => @shared.results_section(data)
+            Some(data) =>
+              @shared.results_section(
+                @shared.with_annotations(data, model.annotations),
+                editor=fn(case_id, answer_model) {
+                  annotation_editor_for(model, case_id, answer_model, emit)
+                },
+              )
             None => @html.fragment([])
           }
       }

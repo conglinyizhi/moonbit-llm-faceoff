@@ -47,6 +47,78 @@ pub(all) struct CaseBlock {
 } derive(Eq)
 
 ///|
+/// 一条人工标注：这次运行 × 这道题 × 这个模型 → 判定 + 备注。
+///
+/// `verdict` 三档：`pass` / `fail` / `unsure`。存的是稳定的英文标识，显示层
+/// （emoji、颜色）由 `verdict_label` 决定——以后换符号不该意味着改数据。
+pub(all) struct Annotation {
+  case_id : String
+  model : String
+  verdict : String
+  note : String
+} derive(Eq, FromJson)
+
+///|
+pub extend Annotation with Eq::{equal, not_equal}
+
+///|
+pub extend Annotation with FromJson::{from_json}
+
+///|
+pub(all) struct AnnotationResponse {
+  id : String
+  annotations : Array[Annotation]
+} derive(FromJson)
+
+///|
+pub extend AnnotationResponse with FromJson::{from_json}
+
+///|
+/// 判定在界面上的说法。
+pub fn verdict_label(verdict : String) -> String {
+  match verdict {
+    "pass" => "✅ 通过"
+    "fail" => "❌ 不行"
+    "unsure" => "🤔 拿不准"
+    _ => verdict
+  }
+}
+
+///|
+/// 把标注贴回页面数据：命中 (case_id, model) 的答案带上 verdict / note。
+///
+/// 渲染与 Markdown 导出都读这一份，所以只要贴一次；贴完就是一个普通的 PageData，
+/// 不需要在渲染层到处传标注表。
+pub fn with_annotations(
+  data : PageData,
+  annotations : Array[Annotation],
+) -> PageData {
+  if annotations.length() == 0 {
+    return data
+  }
+  let cases : Array[CaseBlock] = []
+  for block in data.cases {
+    let answers : Array[Answer] = []
+    for answer in block.answers {
+      let hit = annotations.filter(fn(entry) {
+        entry.case_id == block.id && entry.model == answer.model
+      })
+      match hit {
+        [] => answers.push(answer)
+        [entry, ..] =>
+          answers.push({
+            ..answer,
+            verdict: Some(entry.verdict),
+            note: Some(entry.note),
+          })
+      }
+    }
+    cases.push({ id: block.id, answers, })
+  }
+  { ..data, cases, }
+}
+
+///|
 /// 一次评测的完整结果数据。
 pub(all) struct PageData {
   source : String
