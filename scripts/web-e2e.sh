@@ -187,6 +187,60 @@ echo "$probe" | grep -q '"answers":[1-9]' ||
   fail "历史视图里没渲染出那次的结果：$probe"
 echo "ok: 侧栏列得出历史，点开能看历史结果（只读）"
 
+echo "==> 用例集与预设"
+# 页面改一条用例 + 存一条预设，然后回到磁盘上确认——页面说「已保存」不等于
+# 真的写进去了，这一条断言就是奔着那道口子去的。
+manage_probe='(async () => {
+  const out = {};
+  const setValue = (sel, value) => {
+    const el = document.querySelector(sel);
+    if (!el) { return false; }
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  };
+  const byText = (tag, text) =>
+    Array.from(document.querySelectorAll(tag)).find((el) => el.textContent === text);
+  out.hasSetSelect = !!document.querySelector(".set-select");
+  const edit = Array.from(document.querySelectorAll(".link-btn")).find((b) => b.textContent === "编辑用例");
+  if (edit) { edit.click(); }
+  await new Promise((r) => setTimeout(r, 1500));
+  out.drafts = document.querySelectorAll(".draft").length;
+  const prompt = document.querySelector(".draft-prompt");
+  if (prompt) {
+    prompt.value = "e2e 改过的 prompt：用一句话说明什么是甲板风。";
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  await new Promise((r) => setTimeout(r, 400));
+  const save = byText("button", "保存用例集");
+  if (save) { save.click(); }
+  await new Promise((r) => setTimeout(r, 1800));
+  out.saved = document.querySelector(".editor-actions .copied")
+    ? document.querySelector(".editor-actions .copied").textContent : null;
+  out.presetNameFilled = setValue("#preset-name", "e2e-preset");
+  await new Promise((r) => setTimeout(r, 400));
+  const savePreset = byText("button", "保存当前配置");
+  if (savePreset) { savePreset.click(); }
+  await new Promise((r) => setTimeout(r, 1800));
+  out.presets = Array.from(document.querySelectorAll(".preset-name")).map((e) => e.textContent);
+  return out;
+})()'
+dump_page_script "$run_url" 8000 "$tmp/manage.html" "$manage_probe" 2500
+probe=$(grep -o 'SCRIPT .*' "$tmp/manage.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"hasSetSelect":true' ||
+  fail "用例集的下拉没渲染出来：$probe"
+echo "$probe" | grep -qE '"drafts":[1-9]' ||
+  fail "编辑态里没有草稿：$probe"
+echo "$probe" | grep -q '已保存' ||
+  fail "保存用例集没有成功反馈：$probe"
+echo "$probe" | grep -q 'e2e-preset' ||
+  fail "预设没有出现在列表里：$probe"
+grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
+  fail "页面说保存了，但磁盘上的用例没变"
+grep -q 'e2e-preset' "$tmp/presets.json" ||
+  fail "页面说存了预设，但磁盘上没有"
+echo "ok: 页面上能用例集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
+
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
 # 这样拿到的正是应用要写进剪贴板的内容，且不依赖无头浏览器是否允许读剪贴板。

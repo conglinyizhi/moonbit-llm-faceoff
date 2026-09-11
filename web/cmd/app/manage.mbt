@@ -1,0 +1,499 @@
+///|
+/// 用例集与预设这两块的管理面：类型、命令、渲染。
+///
+/// 和 history.mbt 同一个理由分出来——main.mbt 是表单与结果，这两个是「我拿什么
+/// 去测」和「我怎么老是重填同一组参数」，各自独立。
+
+///|
+/// 一条用例的编辑态。
+///
+/// `raw` 是原始对象，保存时把编辑框覆盖过的键合并回去：页面没展示的字段
+/// （以后 bench 支持的、别人手写的）不会因为在页面上过了一遍就消失。
+struct CaseDraft {
+  raw : Json
+  id : String
+  prompt : String
+  system : String
+  max_tokens : String
+  temperature : String
+} derive(Eq)
+
+///|
+struct CaseSetResponse {
+  name : String
+  cases : Array[Json]
+} derive(FromJson)
+
+///|
+/// 一组「模型 + 参数」。字段全可省：存的时候只写你填过的。
+struct Preset {
+  name : String
+  models : Array[String]
+  caseSet : String?
+  repeats : Int?
+  maxTokens : Int?
+  temperature : Double?
+  paceMs : Int?
+  retry : Int?
+} derive(Eq, FromJson, ToJson)
+
+///|
+struct PresetsResponse {
+  presets : Array[Preset]
+} derive(FromJson)
+
+///|
+/// derive(ToJson) 生成的方法在调用点会被隐式提升（已弃用），显式接一下，
+/// 免得每次 `p.to_json()` 都跳一条警告。
+pub extend Preset with ToJson::{to_json}
+
+// ---------------------------------------------------------------- 草稿
+
+///|
+/// 把一条用例记录摊成可编辑的草稿。
+fn CaseDraft::of(json : Json) -> CaseDraft {
+  let obj = @shared.as_object(json)
+  {
+    raw: json,
+    id: @shared.string_field(obj, "id", ""),
+    prompt: @shared.string_field(obj, "prompt", ""),
+    system: @shared.string_field(obj, "system", ""),
+    max_tokens: number_text(obj, "max_tokens"),
+    temperature: number_text(obj, "temperature"),
+  }
+}
+
+///|
+/// 数值字段的文本形态：缺失就是空串，空串表示「不写这个字段」。
+fn number_text(obj : Map[String, Json], key : String) -> String {
+  match obj.get(key) {
+    Some(Number(value, ..)) =>
+      // 整数不显示小数点：max_tokens 写成 512.0 会被当成另一个值
+      if value == value.round() {
+        value.to_int().to_string()
+      } else {
+        value.to_string()
+      }
+    _ => ""
+  }
+}
+
+///|
+/// 草稿 → 用例记录。空字段不写，其余键沿用 `raw`。
+fn CaseDraft::to_json(self : CaseDraft) -> Json {
+  let out : Map[String, Json] = Map([])
+  @shared.as_object(self.raw).each(fn(key, value) {
+    if !["id", "prompt", "system", "max_tokens", "temperature"].contains(key) {
+      out[key] = value
+    }
+  })
+  if self.id != "" {
+    out["id"] = Json::string(self.id)
+  }
+  out["prompt"] = Json::string(self.prompt)
+  if self.system != "" {
+    out["system"] = Json::string(self.system)
+  }
+  if self.max_tokens != "" {
+    let value = @string.parse_int(self.max_tokens) catch { _ => 0 }
+    out["max_tokens"] = Json::number(value.to_double())
+  }
+  if self.temperature != "" {
+    let value = @string.parse_double(self.temperature) catch { _ => 0.0 }
+    out["temperature"] = Json::number(value)
+  }
+  Json::object(out)
+}
+
+///|
+fn drafts_to_json(drafts : Array[CaseDraft]) -> Json {
+  Json::object({
+    "cases": Json::array(drafts.map(fn(draft) { draft.to_json() })),
+  })
+}
+
+///|
+/// 空草稿给「新增」用：id 让服务端补，prompt 得自己写。
+fn blank_draft() -> CaseDraft {
+  {
+    raw: Json::object({}),
+    id: "",
+    prompt: "",
+    system: "",
+    max_tokens: "",
+    temperature: "",
+  }
+}
+
+///|
+/// 保存前的本地检查。服务端还会再查一遍——这里只是为了不用往返一次就知道
+/// 「第几条没写 prompt」。
+fn validate_drafts(drafts : Array[CaseDraft]) -> String? {
+  let seen : Array[String] = []
+  for i = 0; i < drafts.length(); i = i + 1 {
+    let draft = drafts[i]
+    if draft.prompt.trim(chars=" \t\r\n") == "" {
+      return Some("第 \{i + 1} 条没有 prompt")
+    }
+    if draft.id != "" {
+      if seen.contains(draft.id) {
+        return Some("id 重复：\{draft.id}")
+      }
+      seen.push(draft.id)
+    }
+    if draft.max_tokens != "" &&
+      (@string.parse_int(draft.max_tokens) catch { _ => -1 }) < 1 {
+      return Some("第 \{i + 1} 条的 max_tokens 不是正整数")
+    }
+    if draft.temperature != "" &&
+      (@string.parse_double(draft.temperature) catch { _ => -1.0 }) < 0.0 {
+      return Some("第 \{i + 1} 条的 temperature 不是非负数")
+    }
+  }
+  None
+}
+
+// ---------------------------------------------------------------- 命令
+
+///|
+fn fetch_case_set(name : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.get("/api/cases/" + name).expect_json(
+    emit.map(fn(result) { CaseSetLoaded(name, result) }),
+  )
+}
+
+///|
+fn save_case_set(
+  name : String,
+  drafts : Array[CaseDraft],
+  emit : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  @http.put("/api/cases/" + name)
+  .with_json(drafts_to_json(drafts))
+  .expect_json(emit.map(fn(result) { CaseSetSaved(name, result) }))
+}
+
+///|
+fn delete_case_set_cmd(name : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.delete("/api/cases/" + name).expect_json(
+    emit.map(fn(result) { CaseSetDeleted(name, result) }),
+  )
+}
+
+///|
+fn fetch_presets(emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.get("/api/presets").expect_json(
+    emit.map(fn(result) { PresetsLoaded(result) }),
+  )
+}
+
+///|
+fn save_presets(presets : Array[Preset], emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.put("/api/presets")
+  .with_json(
+    Json::object({ "presets": Json::array(presets.map(fn(p) { p.to_json() })) }),
+  )
+  .expect_json(emit.map(fn(result) { PresetsSaved(result) }))
+}
+
+// ---------------------------------------------------------------- 渲染：用例集
+
+///|
+/// 用例面板：选集、列用例、编辑、保存。
+///
+/// 编辑态和浏览态分开：浏览态是勾选用例去跑（每次跑都要做的事），编辑态是改
+/// 用例本身（偶尔做的事）。混在一起的话，改一个 prompt 的代价和跑一次一样高。
+fn case_panel(
+  meta : Meta,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  let head = el("div", "section-head", [
+    el("h2", "", [txt("用例集")]),
+    el("span", "muted", [
+      txt(
+        "\{model.available_cases.length()} 条 · 已选 \{model.selected_cases.length()}",
+      ),
+    ]),
+    @html.button(class="link-btn", on_click=emit(Msg::ToggleCaseEditor), [
+      txt(if model.editing_cases { "收起编辑" } else { "编辑用例" }),
+    ]),
+  ])
+  let body = if model.editing_cases {
+    editor_view(model, emit)
+  } else {
+    browse_view(model, emit)
+  }
+  el("section", "case-panel", [
+    head,
+    set_row(meta, model, emit),
+    body,
+    match model.cases_error {
+      Some(message) => el("p", "failed", [txt(message)])
+      None => txt("")
+    },
+  ])
+}
+
+///|
+/// 用例集选择行：下拉 + 新建 + 删除。
+fn set_row(meta : Meta, model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let options = meta.caseSets.map(fn(set) {
+    @html.option(value=set.name, selected=set.name == model.case_set, [
+      txt("\{set.name}（\{set.count}）"),
+    ])
+  })
+  let options = if options.length() > 0 {
+    options
+  } else {
+    [@html.option(value="", selected=true, [txt("（还没有用例集）")])]
+  }
+  el("div", "set-row", [
+    @html.select(
+      class="set-select",
+      on_change=emit.map(fn(name) { SelectCaseSet(name) }),
+      options,
+    ),
+    @html.input(
+      input_type=@html.InputType::Text,
+      class="set-name",
+      id="new-set-name",
+      value=model.new_set_name,
+      placeholder="新集名字",
+      on_input=emit.map(fn(text) { NewSetNameChanged(text) }),
+    ),
+    @html.button(class="ghost", on_click=emit(Msg::NewCaseSet), [
+      txt("另存为新集"),
+    ]),
+    @html.button(class="link-btn danger", on_click=emit(Msg::DeleteCaseSet), [
+      txt("删除这套"),
+    ]),
+  ])
+}
+
+///|
+/// 浏览态：勾选用例。跑一次要选的就是这里。
+fn browse_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  if model.available_cases.length() == 0 {
+    return el("p", "muted", [
+      txt("这套里还没有用例。点「编辑用例」加几条。"),
+    ])
+  }
+  let boxes = model.available_cases.map(fn(case) {
+    labelled_checkbox(
+      "case-" + case.id,
+      case.id,
+      model.selected_cases.contains(case.id),
+      emit.map(fn(_value) { ToggleCase(case.id) }),
+    )
+  })
+  el(
+    "div",
+    "picker-items",
+    [
+      el("div", "picker-all", [
+        @html.button(class="link-btn", on_click=emit(Msg::SelectAllCases), [
+          txt("全选"),
+        ]),
+        @html.button(class="link-btn", on_click=emit(Msg::SelectNoCases), [
+          txt("全不选"),
+        ]),
+      ]),
+      ..boxes,
+    ],
+  )
+}
+
+///|
+/// 编辑态：每条一行，prompt 是主输入，其余字段收在「更多」里。
+fn editor_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let rows = []
+  for i = 0; i < model.drafts.length(); i = i + 1 {
+    rows.push(draft_row(i, model.drafts[i], emit))
+  }
+  el(
+    "div",
+    "case-editor",
+    [
+      ..rows,
+      el("div", "editor-actions", [
+        @html.button(class="ghost", on_click=emit(Msg::AddDraft), [
+          txt("＋ 新增一条"),
+        ]),
+        @html.button(class="primary", on_click=emit(Msg::SaveCases), [
+          txt("保存用例集"),
+        ]),
+        match model.cases_saved {
+          Some(message) => el("span", "hint copied", [txt(message)])
+          None => txt("")
+        },
+      ]),
+    ],
+  )
+}
+
+///|
+fn draft_row(
+  index : Int,
+  draft : CaseDraft,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  let more = el("details", "draft-more", [
+    el("summary", "", [txt("更多字段")]),
+    el("div", "draft-extra", [
+      text_input(
+        "draft-system-" + index.to_string(),
+        draft.system,
+        "system（留空 = 用默认）",
+        emit.map(fn(text) { DraftFieldChanged(index, DraftField::System, text) }),
+      ),
+      text_input(
+        "draft-max-" + index.to_string(),
+        draft.max_tokens,
+        "max_tokens",
+        emit.map(fn(text) {
+          DraftFieldChanged(index, DraftField::MaxTokens, text)
+        }),
+      ),
+      text_input(
+        "draft-temp-" + index.to_string(),
+        draft.temperature,
+        "temperature",
+        emit.map(fn(text) {
+          DraftFieldChanged(index, DraftField::Temperature, text)
+        }),
+      ),
+    ]),
+  ])
+  el("article", "draft", [
+    el("div", "draft-head", [
+      el("span", "draft-index", [txt("#\{index + 1}")]),
+      text_input(
+        "draft-id-" + index.to_string(),
+        draft.id,
+        "id（留空则自动编号）",
+        emit.map(fn(text) { DraftFieldChanged(index, DraftField::Id, text) }),
+      ),
+      @html.button(
+        class="link-btn danger",
+        on_click=emit(Msg::RemoveDraft(index)),
+        [txt("删除")],
+      ),
+    ]),
+    @html.textarea(
+      class="draft-prompt",
+      id="draft-prompt-" + index.to_string(),
+      value=draft.prompt,
+      rows=3,
+      on_input=emit.map(fn(text) {
+        DraftFieldChanged(index, DraftField::Prompt, text)
+      }),
+      ([] : Array[@html.Html]),
+    ),
+    more,
+  ])
+}
+
+///|
+/// 表单里的小文本框。main.mbt 里有同名的东西但绑死了具体字段，这里要的是
+/// 「哪个草稿的哪个字段」，所以单独写一个薄的。
+fn text_input(
+  id_ : String,
+  value : String,
+  placeholder : String,
+  on_input : @cmd.Emit[String],
+) -> @html.Html {
+  @html.input(
+    input_type=@html.InputType::Text,
+    id=id_,
+    value~,
+    placeholder~,
+    on_input~,
+  )
+}
+
+// ---------------------------------------------------------------- 渲染：预设
+
+///|
+/// 预设面板：把「模型 + 参数」这组东西存下来，下次一键套用。
+fn preset_panel(
+  meta : Meta,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  let body = match model.presets {
+    None => [el("p", "muted", [txt("正在载入…")])]
+    Some(presets) =>
+      if presets.length() == 0 {
+        [
+          el("p", "muted", [
+            txt(
+              "还没有预设。填好参数后存一条，下次一键套用。",
+            ),
+          ]),
+        ]
+      } else {
+        presets.map(fn(preset) { preset_chip(meta, preset, emit) })
+      }
+  }
+  el("section", "preset-panel", [
+    el("div", "section-head", [
+      el("h2", "", [txt("预设")]),
+      el("span", "muted", [txt("模型 + 参数")]),
+    ]),
+    el("div", "preset-list", body),
+    el("div", "preset-actions", [
+      @html.input(
+        input_type=@html.InputType::Text,
+        class="set-name",
+        id="preset-name",
+        value=model.preset_name,
+        placeholder="预设名字",
+        on_input=emit.map(fn(text) { PresetNameChanged(text) }),
+      ),
+      @html.button(class="ghost", on_click=emit(Msg::SavePreset), [
+        txt("保存当前配置"),
+      ]),
+    ]),
+    match model.presets_error {
+      Some(message) => el("p", "failed", [txt(message)])
+      None => txt("")
+    },
+  ])
+}
+
+///|
+fn preset_chip(
+  meta : Meta,
+  preset : Preset,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
+  let parts : Array[String] = [preset.models.length().to_string() + " 模型"]
+  match preset.caseSet {
+    Some(name) => parts.push(name)
+    None => ()
+  }
+  match preset.maxTokens {
+    Some(tokens) => parts.push("max \{tokens}")
+    None => ()
+  }
+  match preset.repeats {
+    Some(repeats) => parts.push("× \{repeats}")
+    None => ()
+  }
+  ignore(meta)
+  el("div", "preset", [
+    el("span", "preset-name", [txt(preset.name)]),
+    el("span", "preset-meta", [txt(parts.join(" · "))]),
+    @html.button(
+      class="link-btn",
+      on_click=emit(Msg::ApplyPreset(preset.name)),
+      [txt("套用")],
+    ),
+    @html.button(
+      class="link-btn danger",
+      on_click=emit(Msg::DeletePreset(preset.name)),
+      [txt("删除")],
+    ),
+  ])
+}

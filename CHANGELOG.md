@@ -102,6 +102,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Case sets and presets are editable in the page.** The case panel lists the
+  sets under `web/cases/`, ticks the cases a run will use, and edits them in
+  place: `prompt` as the main text area, `id` beside it, and the per-case
+  `system` / `max_tokens` / `temperature` folded under a `更多字段` that only
+  opens when you need it. `另存为新集` forks the current set. A save round-trips
+  fields it never displayed — the editor carries the raw record and merges the
+  edited keys into it, so a hand-written field is not quietly dropped by a trip
+  through the UI.
+
+  Presets store a model list plus the run parameters (and the case set) so "the
+  usual two models, three repeats, 2048 tokens" is one click. Saving under an
+  existing name overwrites it; a preset with no name gets one derived from what
+  it holds. Applying one puts menu models back in the checkboxes and menu-outsiders
+  in the free-text field — otherwise a model that just got applied would be
+  running but invisible.
+
+  Two small things that make this usable rather than merely present: validation
+  runs locally first, so "第 3 条没有 prompt" arrives without a round trip, and
+  switching case sets drops selections that are not in the new set instead of
+  letting the next run fail with "none of the selected ids are in case set".
+
 - **The page is a workbench: the left column is the run history.** Every run that
   has happened is listed with its time, models, scale and counters; one click
   opens it read-only (the answer/chain-of-thought view, and the export links
