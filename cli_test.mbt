@@ -85,3 +85,20 @@ test "non-numeric value is rejected" {
     _ => fail("expected BadNumber")
   }
 }
+
+///|
+test "status lines are on by default" {
+  assert_false(parse_with_key(["hi"]).quiet)
+  assert_false(parse_with_key(["hi"]).show_cot)
+}
+
+///|
+test "quiet and show-cot parse, in both spellings" {
+  let cli = parse_with_key(["-q", "--show-cot", "-s", "hi"])
+  assert_true(cli.quiet)
+  assert_true(cli.show_cot)
+  assert_true(cli.stream)
+  // The long spelling of the same two flags.
+  let long = parse_with_key(["--quiet", "hi"])
+  assert_true(long.quiet)
+}

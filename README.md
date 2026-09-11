@@ -263,6 +263,8 @@ echo "总结一下这段日志" | $faceoff --stream
 | flag | meaning |
 | --- | --- |
 | `-s`, `--stream` | stream the reply as it is generated |
+| `--show-cot` | stream the chain of thought too — on stderr, so a pipe stays clean |
+| `-q`, `--quiet` | no status lines on stderr |
 | `--model <id>` | model id |
 | `--base-url <url>` | API base URL |
 | `--api-key <key>` | bearer token |
@@ -273,6 +275,32 @@ echo "总结一下这段日志" | $faceoff --stream
 | `--no-key` | allow an empty API key (local endpoints) |
 | `--` | treat every following argument as prompt text |
 | `-h`, `--help` | print the usage above |
+
+On stderr, `faceoff` reports what it is doing: one line before the request and one
+summary after it, because a one-shot request is otherwise silent until it is
+finished — which for a reasoning model can look like a hung terminal.
+
+```console
+$ faceoff --max-tokens 64 "用一句话说明什么是甲板风。"
+-> POST https://api.example.com/v1/chat/completions  model=some-model  max_tokens=64
+<- 3.2s  content 41 chars  reasoning 512 chars  tokens 21+64(reasoning 64)  finish_reason=length
+```
+
+That last line is the point: this reply hit the token budget with the budget
+spent on thinking, so there is no answer to print. An empty reply is reported as
+a warning on stderr **and exits non-zero** — it used to be a blank line and exit
+0, which a pipeline cannot tell apart from a model that said nothing.
+
+```console
+$ faceoff --max-tokens 64 "..." >answer.txt
+$ echo $?
+1
+```
+
+`--quiet` turns the status lines off (the empty-reply warning still fires: it is
+a diagnostic, not progress). `--stream --show-cot` prints the chain of thought to
+stderr as it arrives, which is how you watch a reasoning model think instead of
+staring at nothing.
 
 ### Environment variables
 
@@ -518,6 +546,11 @@ import {
 let settings = @faceoff.Settings::from_env(env)
 let reply = @faceoff.ask(settings, "用一句话说明什么是航空母舰")
 
+// the same request, keeping what the reply says about itself: an empty answer
+// is not a bug report, and the stop reason and token counts explain it
+let outcome = @faceoff.ask_outcome(settings, prompt)
+// outcome.content, outcome.reasoning, outcome.usage, outcome.finish_reason
+
 // streaming, with reasoning fragments separated from the answer
 let outcome = @faceoff.stream_parts(settings, prompt, async fn(part) {
   match part {
@@ -608,8 +641,8 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 
 | suite | covers |
 | --- | --- |
-| `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding, SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
-| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
+| `moon test` | settings resolution and precedence, flag parsing and error cases, request JSON shape, response decoding (one-shot outcome: content / reasoning / usage / stop reason), SSE framing (content / reasoning / usage / finish / `[DONE]` / CRLF / malformed), case-file parsing, statistics, throughput derivation, run round-trip, page-data contract, key masking in an upstream error body |
+| `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, **status lines on stderr with stdout left alone**, `--quiet`, `--show-cot`, **an empty reply warned about and non-zero instead of a blank line**, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
 | `scripts/real-gateway.sh` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |

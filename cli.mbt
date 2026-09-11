@@ -6,6 +6,11 @@ pub(all) struct Cli {
   prompt : String?
   /// Stream the reply token by token.
   stream : Bool
+  /// Stream the chain of thought too, on stderr, so it cannot pollute a pipe.
+  show_cot : Bool
+  /// Suppress the status lines. Errors and the empty-reply warning still go to
+  /// stderr: they are diagnostics, not progress.
+  quiet : Bool
   /// Print usage and exit.
   show_help : Bool
 }
@@ -20,6 +25,8 @@ pub let usage : String =
   #|
   #|options:
   #|  -s, --stream          stream the reply as it is generated
+  #|      --show-cot        stream the chain of thought too, on stderr
+  #|  -q, --quiet           no status lines on stderr (errors still go there)
   #|      --model <id>      model id        (env MOONLLM_MODEL / OPENAI_MODEL)
   #|      --base-url <url>  API base URL    (env MOONLLM_BASE_URL / OPENAI_BASE_URL)
   #|      --api-key <key>   API key         (env MOONLLM_API_KEY / OPENAI_API_KEY / LLM_API_KEY)
@@ -41,6 +48,8 @@ pub fn Cli::parse(
   let settings = Settings::from_env(env)
   let prompt_parts : Array[String] = []
   let mut stream = false
+  let mut show_cot = false
+  let mut quiet = false
   let mut show_help = false
   let mut no_key = false
   let mut literal = false
@@ -54,6 +63,8 @@ pub fn Cli::parse(
     }
     match arg {
       "-s" | "--stream" => stream = true
+      "--show-cot" => show_cot = true
+      "-q" | "--quiet" => quiet = true
       "-h" | "--help" => show_help = true
       "--no-key" => no_key = true
       "--" => literal = true
@@ -110,6 +121,8 @@ pub fn Cli::parse(
       Some(prompt_parts.join(" "))
     },
     stream,
+    show_cot,
+    quiet,
     show_help,
   }
 }

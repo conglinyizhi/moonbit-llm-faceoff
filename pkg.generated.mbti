@@ -8,6 +8,8 @@ import {
 // Values
 pub async fn ask(Settings, String) -> String raise ClientError
 
+pub async fn ask_outcome(Settings, String) -> AskOutcome raise ClientError
+
 pub let default_base_url : String
 
 pub let default_model : String
@@ -21,6 +23,8 @@ pub fn parse_sse_line(String) -> SseEvent?
 pub async fn read_prompt_from_stdin() -> String
 
 pub fn request_body(Settings, String, stream? : Bool) -> Json
+
+pub fn response_outcome(Json) -> AskOutcome raise ClientError
 
 pub fn response_text(Json) -> String raise ClientError
 
@@ -49,10 +53,19 @@ pub(all) suberror ConfigError {
 pub fn ConfigError::to_string(Self) -> String
 
 // Types and methods
+pub(all) struct AskOutcome {
+  content : String
+  reasoning : String
+  usage : TokenUsage?
+  finish_reason : String?
+}
+
 pub(all) struct Cli {
   settings : Settings
   prompt : String?
   stream : Bool
+  show_cot : Bool
+  quiet : Bool
   show_help : Bool
 }
 pub fn Cli::parse(Map[String, String], Array[String]) -> Self raise ConfigError

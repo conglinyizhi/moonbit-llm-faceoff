@@ -6,6 +6,7 @@ package "conglinyizhi/moonbit-llm-faceoff/cmd/faceoff"
 // Errors
 
 // Types and methods
+type Report
 
 // Type aliases
 
