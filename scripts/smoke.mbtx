@@ -207,24 +207,34 @@ let windows_hint : String =
 
 ///|
 /// 编译一个 .mbtx 并复制成独立文件（见文件头那段关于 moon 包装进程的说明）。
-async fn build_mbtx(src : String, out : String) -> Bool {
+/// 编译一个 .mbtx 并复制成独立文件，返回**实际可执行的路径**。
+///
+/// 返回路径而不是 Bool：Windows 上可执行文件必须带 .exe，而复制过来的副本
+/// 名字是我们起的——不带后缀的话 spawn 会找不到它（真的这么踩过）。
+async fn build_mbtx(src : String, out_base : String) -> String? {
   let built = run("moon", ["build", "--target", "native", src], {})
   if built.code != 0 {
     @stdio.stderr.write(built.err + "\n") catch { _ => () }
     @stdio.stderr.write(windows_hint) catch { _ => () }
-    return false
+    return None
   }
-  let single = "scripts/_build/native/debug/build/single/single.exe"
-  let single = if (@fs.exists(single) catch { _ => false }) {
-    single
+  let single_exe = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single_exe) catch { _ => false }) {
+    single_exe
   } else {
     "scripts/_build/native/debug/build/single/single"
   }
-  if !copy_file(single, out) {
-    return false
+  // 平台怎么命名构建产物，副本就怎么命名：Windows 上必须是 .exe
+  let target = if single.has_suffix(".exe") {
+    out_base + ".exe"
+  } else {
+    out_base
   }
-  @fs.chmod(out, 0o755) catch { _ => () }
-  true
+  if !copy_file(single, target) {
+    return None
+  }
+  @fs.chmod(target, 0o755) catch { _ => () }
+  Some(target)
 }
 
 // ---------------------------------------------------------------- 主体
@@ -258,16 +268,23 @@ async fn main {
     return
   }
   @fs.mkdir(tmp, recursive=true) catch { _ => () }
-  if !build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
-    bail("mock 编译失败")
-    return
+  let mock_bin = match build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
+    Some(path) => path
+    None => {
+      bail("mock 编译失败")
+      return
+    }
   }
-  if !build_mbtx("scripts/check_incremental.mbtx", tmp + "/check-incremental") {
-    bail("check_incremental 编译失败")
-    return
+  let incremental_check = match build_mbtx(
+    "scripts/check_incremental.mbtx",
+    tmp + "/check-incremental",
+  ) {
+    Some(path) => path
+    None => {
+      bail("check_incremental 编译失败")
+      return
+    }
   }
-  let mock_bin = tmp + "/mock-endpoint"
-
   @async.with_task_group(async fn(group) {
     // 假端点挂在 group 上：脚本退出时它跟着结束，不会漏在后台监听端口。
     let spawned = spawn_reading(
@@ -325,7 +342,7 @@ async fn main {
 
     // 4. 流式真的是增量投递，不是攒完再吐
     let incremental = run(
-      tmp + "/check-incremental",
+      incremental_check,
       [abs_path(root, faceoff), base],
       {},
     )

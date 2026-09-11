@@ -102,7 +102,11 @@ async fn copy_file(from : String, to : String) -> Bool {
 ///|
 /// 编译一个 .mbtx 并复制成独立文件（`moon run foo.mbtx &` 的 pid 是包装进程，
 /// 杀掉带不走真正的服务——见 scripts/lib.sh 里那段说明）。
-async fn build_mbtx(src : String, out : String) -> Bool {
+/// 编译一个 .mbtx 并复制成独立文件，返回**实际可执行的路径**。
+///
+/// 返回路径而不是 Bool：Windows 上可执行文件必须带 .exe，而复制过来的副本
+/// 名字是我们起的——不带后缀的话 spawn 会找不到它（真的这么踩过）。
+async fn build_mbtx(src : String, out_base : String) -> String? {
   let (code, _, err) = @process.collect_output(
     "moon",
     ["build", "--target", "native", src],
@@ -110,24 +114,30 @@ async fn build_mbtx(src : String, out : String) -> Bool {
   ) catch {
     err => {
       @stdio.stderr.write(err.to_string() + "\n") catch { _ => () }
-      return false
+      return None
     }
   }
   if code != 0 {
     @stdio.stderr.write(text_of(err) + "\n") catch { _ => () }
-    return false
+    return None
   }
-  let single = "scripts/_build/native/debug/build/single/single.exe"
-  let single = if (@fs.exists(single) catch { _ => false }) {
-    single
+  let single_exe = "scripts/_build/native/debug/build/single/single.exe"
+  let single = if (@fs.exists(single_exe) catch { _ => false }) {
+    single_exe
   } else {
     "scripts/_build/native/debug/build/single/single"
   }
-  if !copy_file(single, out) {
-    return false
+  // 平台怎么命名构建产物，副本就怎么命名：Windows 上必须是 .exe
+  let target = if single.has_suffix(".exe") {
+    out_base + ".exe"
+  } else {
+    out_base
   }
-  @fs.chmod(out, 0o755) catch { _ => () }
-  true
+  if !copy_file(single, target) {
+    return None
+  }
+  @fs.chmod(target, 0o755) catch { _ => () }
+  Some(target)
 }
 
 ///|
@@ -377,9 +387,12 @@ async fn main {
     return
   }
   @fs.mkdir(tmp, recursive=true) catch { _ => () }
-  if !build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
-    bail("mock 编译失败")
-    return
+  let mock_bin = match build_mbtx("scripts/mock_openai.mbtx", tmp + "/mock-endpoint") {
+    Some(path) => path
+    None => {
+      bail("mock 编译失败")
+      return
+    }
   }
 
   @async.with_task_group(async fn(group) {
@@ -392,7 +405,7 @@ async fn main {
     }
     let mock = @process.spawn(
       group,
-      tmp + "/mock-endpoint",
+      mock_bin,
       [],
       extra_env={ "MOCK_STREAM_DELAY": "0.02" },
       inherit_env=true,
