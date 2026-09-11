@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`moonbitlang/async` 0.20.1 → 0.21.3** in the library, the CLIs and the
+  `.mbtx` scripts (the web module was already on 0.21.x). The old version's
+  `moon.mod` uses a deprecated `exclude` field, and every `moon` command printed
+  a warning about it that no amount of local editing could fix. Two API changes
+  came with it: request headers are now keyed by a case-insensitive string
+  (`@http.Headers`), and the mock endpoint reads them the same way. The version
+  split between the library and the page is gone, which is what the note in
+  `web/moon.mod` said would have to happen before the two could share a
+  workspace.
+
+### Changed
+
 - **Breaking:** renamed from `llm_client` to `moonbit-llm-faceoff`. The old name
   described a client; the point of the project is comparing models. The module
   path is now `conglinyizhi/moonbit-llm-faceoff`.
@@ -101,6 +113,14 @@ All notable changes to this project are documented here. The format follows
   and renames it into place.
 
 ### Added
+
+- **Layout no longer shifts while a run is going.** The live line always renders
+  every slot and shows `0 字符` / `≈— tok/s` when the number is not there yet,
+  instead of dropping the element and letting its neighbours slide over. The
+  model cards put the label and P50 on one line with the three percentiles on the
+  next, in three equal columns, instead of wrapping both the label and the values
+  as the card narrows. The form got a divider between "who you are talking to"
+  and the rest, and the preset panel moved above the run history as its own card.
 
 - **The workbench form is organised around what a run is.** The gateway address and
   API key moved to the top (they say *who you are talking to*; the model picker says

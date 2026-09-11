@@ -160,6 +160,18 @@ fn fetch_viewed(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
+/// 轮询一条「打开着」的运行。
+///
+/// 和 `fetch_viewed` 只差发出的消息：首次打开要走 `ViewedLoaded`（那才是「换一条
+/// 运行」），后面每 400ms 走 `ViewedProgress`——用前者会把「换运行才该发生的
+/// 重置」每 400ms 做一遍，对话框之类跟着被清掉
+fn poll_viewed(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+  @http.get("/api/runs/" + id).expect_json(
+    emit.map(fn(result) { ViewedProgress(id, result) }),
+  )
+}
+
+///|
 fn delete_run_cmd(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.delete("/api/runs/" + id).expect_json(
     emit.map(fn(result) { RunDeleted(id, result) }),
@@ -225,6 +237,8 @@ fn history_panel(
     None => txt("")
   }
   el("aside", "history", [
+    // 预设在上：它是「准备跑之前先定下来」的东西，比翻历史更靠前一步
+    preset_panel(meta, model, emit),
     el("div", "section-head", [
       el("h2", "", [txt("运行记录")]),
       // 勾满两个就把「刷新」换成「对比」——头部只有一格，而这两个动作
@@ -241,9 +255,6 @@ fn history_panel(
     ]),
     el("div", "history-list", body),
     error,
-    // 预设也在侧栏：它和运行记录是同一类东西——「这次运行怎么配的」，
-    // 一个是跑过的、一个是准备跑的。
-    preset_panel(meta, model, emit),
   ])
 }
 

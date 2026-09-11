@@ -83,32 +83,54 @@ pub fn stat_list(summary : ModelSummary) -> @html.Html {
     let (label, key, unit) = row
     stat(label, summary.metric_stats(key), unit)
   })
-  el("dl", "stat-list", rows)
+  el("div", "stat-list", rows)
+}
+
+///|
+
+///|
+/// 分位数那几格里单位跟在数字后面；有些指标没有单位（token 数），别留一堆空格
+fn unit_suffix(unit : String) -> String {
+  if unit == "" {
+    ""
+  } else {
+    " " + unit
+  }
 }
 
 ///|
 pub fn stat(label : String, stats : MetricStats?, unit : String) -> @html.Html {
-  let values : Array[@html.Html] = []
+  let cells : Array[@html.Html] = [el("span", "stat-label", [txt(label)])]
   match stats {
-    None => values.push(txt("—"))
+    None => cells.push(el("span", "stat-value", [txt("—")]))
     Some(stats) => {
       // 主值是 P50，副行把另外三个分位排出来：卡片不跟着对比表的分位切换走，
       // 一张卡上就能看全「顺的时候多快、通常多快、最差的那次多慢」。
       // 副行给分位数而不是 min~max：极值被一两次抖动就带跑了，P10–P99 这段
       // 才是「它平时在哪」。
-      values.push(txt(format_value(Some(stats.p50), unit)))
+      cells.push(
+        el("span", "stat-value", [txt(format_value(Some(stats.p50), unit))]),
+      )
       if stats.n > 1 {
-        values.push(
-          el("span", "stat-range", [
-            txt(
-              "  P10 \{fmt_number(stats.p10)} · P20 \{fmt_number(stats.p20)} · P99 \{fmt_number(stats.p99)}",
-            ),
+        // 三格等宽：数字长短不一时，P10/P20/P99 在竖直方向仍然对齐；
+        // 整行占满两列，所以标签和值始终在同一行，不会被挤下去
+        cells.push(
+          el("span", "stat-pcts", [
+            el("span", "", [
+              txt("P10 \{fmt_number(stats.p10)}\{unit_suffix(unit)}"),
+            ]),
+            el("span", "", [
+              txt("P20 \{fmt_number(stats.p20)}\{unit_suffix(unit)}"),
+            ]),
+            el("span", "", [
+              txt("P99 \{fmt_number(stats.p99)}\{unit_suffix(unit)}"),
+            ]),
           ]),
         )
       }
     }
   }
-  @html.fragment([@html.dt([txt(label)]), @html.dd(values)])
+  el("div", "stat", cells)
 }
 
 ///|
@@ -621,30 +643,23 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
   } else {
     " \{fmt_number(live.elapsed_ms / 1000.0)}s"
   }
-  let numbers = if live.chars > 0 { "\{live.chars} 字符" } else { "" }
+  // 空的时候不留空节点、也不隐藏：一律渲染，内容用占位。隐藏元素会让后面的
+  // 元素顶上来，数字一变就来回跳——这跟「数字宽度在变」是同一类闪动。
+  let numbers = if live.chars > 0 { "\{live.chars} 字符" } else { "0 字符" }
   let rate = if live.tok_per_s >= 0.5 {
     "≈\{fmt_number(live.tok_per_s)} tok/s"
   } else {
-    ""
+    "≈—  tok/s"
   }
   el("div", if stalled { "live-row stalled" } else { "live-row" }, [
     el("span", "pulse", []),
     el("span", "live-who", [txt(who)]),
-    if state == "" {
-      @html.fragment([])
-    } else {
-      el("span", "live-state", [txt(state + clock)])
-    },
-    if numbers == "" {
-      @html.fragment([])
-    } else {
-      el("span", "live-nums", [txt(numbers)])
-    },
-    if rate == "" {
-      @html.fragment([])
-    } else {
-      el("span", "live-rate", [txt(rate)])
-    },
+    // state 为空（刚返回且已经过时）时也给个占位：这一格不能塌
+    el("span", "live-state", [
+      txt(if state == "" { "—" } else { state + clock }),
+    ]),
+    el("span", "live-nums", [txt(numbers)]),
+    el("span", "live-rate", [txt(rate)]),
     live_bar(live),
     if stalled {
       el("span", "live-stalled", [

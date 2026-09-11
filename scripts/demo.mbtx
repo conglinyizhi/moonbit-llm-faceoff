@@ -7,11 +7,11 @@
 ///
 /// 这是 scripts/demo.sh 的 .mbtx 版。想换成真实网关，见 README 的 Quick start。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/fs" @fs,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs" @fs,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
 }
 

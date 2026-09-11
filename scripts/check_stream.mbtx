@@ -17,10 +17,10 @@
 /// 足够长的 prompt；回复太短时这个量本身就不成立，STREAM_MIN_GAP_MS 可以调低，
 /// 但调低之前先确认是回复短、而不是客户端在缓冲。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/string" @string,
 }

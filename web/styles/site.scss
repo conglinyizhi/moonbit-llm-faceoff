@@ -147,28 +147,50 @@ body.page {
   border-color: rgba(248, 81, 73, 0.4);
 }
 
+// 一个指标一块：第一行「标签 …… P50 主值」，第二行三个分位
+//
+// 之前是 dt/dd 各一格、分位数跟在主值后面同一行——卡片一窄，标签被折成两行
+// （「首 token」变成「首 / token」）、分位数被挤到第二行，整张卡看起来是乱的
 .stat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.stat {
   display: grid;
+  gap: 0.1rem 0.6rem;
+  grid-template-areas:
+    "label value"
+    "pcts pcts";
   grid-template-columns: 1fr auto;
-  gap: 0.35rem 1rem;
-  margin: 0;
+}
 
-  dt {
-    color: $muted;
-    font-size: 0.85rem;
-  }
+.stat-label {
+  color: $muted;
+  font-size: 0.85rem;
+  grid-area: label;
+  white-space: nowrap;
+}
 
-  dd {
-    @include value-text;
-    margin: 0;
-    color: $title;
-    text-align: right;
-  }
+.stat-value {
+  @include value-text;
+  color: $title;
+  font-size: 1rem;
+  grid-area: value;
+  text-align: right;
+}
 
-  .stat-range {
-    color: $muted;
-    font-size: 0.82rem;
-  }
+.stat-pcts {
+  color: $muted;
+  display: grid;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  gap: 0.5rem;
+  grid-area: pcts;
+  // 三格等宽：数字长短不一时，P10/P20/P99 在竖直方向仍然对齐
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  text-align: right;
 }
 
 .section-title {
@@ -1325,6 +1347,13 @@ button.ghost {
     font-size: 0.72rem;
     padding: 0.1rem 0.5rem;
   }
+}
+
+// 表单里的分组分界线
+.form-divider {
+  border: 0;
+  border-top: 1px solid $border;
+  margin: 1.1rem 0;
 }
 
 // 「这次跑什么」面板的两页

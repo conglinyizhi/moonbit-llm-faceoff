@@ -821,7 +821,7 @@ fn update(
               // 写进 hash：刷新之后还能回到这一条，也能把链接发给别人
               @cmd.effect(fn() { set_hash("run=" + id) }),
               // 打开的可能还在跑：先接上轮询，跑完自己会停
-              @rabbita.delay(fetch_viewed(id, emit), 400),
+              @rabbita.delay(poll_viewed(id, emit), 400),
             ]),
           )
         }
@@ -866,7 +866,7 @@ fn update(
           }
           if status.status == "running" {
             // 打开一条还在跑的运行：接着看它的进度，而不是停在打开那一刻
-            (next, @rabbita.delay(fetch_viewed(id, emit), 400))
+            (next, @rabbita.delay(poll_viewed(id, emit), 400))
           } else {
             (next, @cmd.batch([fetch_runs(emit), fetch_annotations(id, emit)]))
           }
@@ -2076,6 +2076,8 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         // 以前在参数行下面，和「重复几次」混在一起。
         gateway_row(model, emit),
         model_picker(meta, model, emit),
+        // 分界：上面是「对着谁说话」（网关 + 模型），下面是「跑什么 / 怎么跑」
+        el("hr", "form-divider", []),
         system_field(model, emit),
         case_panel(meta, model, emit),
         param_row(model, emit),

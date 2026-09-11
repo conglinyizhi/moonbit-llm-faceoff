@@ -26,5 +26,5 @@ preferred_target = "native"
 description = "OpenAI-compatible LLM client plus a harness that compares multiple models on the same case set, written in MoonBit."
 
 import {
-  "moonbitlang/async@0.20.1",
+  "moonbitlang/async@0.21.3",
 }

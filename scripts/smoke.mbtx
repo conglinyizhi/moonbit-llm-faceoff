@@ -12,12 +12,12 @@
 /// 那是 moon 包装进程，真正的服务是它 spawn 出来的子进程，杀包装带不走服务。
 /// 所以先 build 再复制成独立文件，之后 $! 才是服务本身。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/fs" @fs,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/socket" @socket,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs" @fs,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/socket" @socket,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/json" @json,
   "moonbitlang/core/string" @string,

@@ -26,11 +26,11 @@
 ///     usage（choices 为空数组）、[DONE]
 ///   - 否则 → 一次性 JSON
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/http" @http,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/socket" @socket,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/http" @http,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/socket" @socket,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/json" @json,
   "moonbitlang/core/string" @string,
@@ -381,10 +381,11 @@ async fn read_body(body : &@io.Reader) -> String {
 
 ///|
 /// 头部查找不区分大小写：客户端可能发 Authorization / authorization。
-fn header(headers : Map[String, String], name : String) -> String {
+// 0.21 起 http 的 header 表用大小写不敏感的键；这里仍然按名字查，兼容两种写法
+fn header(headers : @http.Headers, name : String) -> String {
   let wanted = name.to_lower()
   for key, value in headers {
-    if key.to_lower() == wanted {
+    if key.to_string().to_lower() == wanted {
       return value
     }
   }

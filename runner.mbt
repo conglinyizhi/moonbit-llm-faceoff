@@ -40,6 +40,13 @@ fn mask_key(key : String) -> String {
 }
 
 ///|
+/// Header 名。0.21 起 http 用大小写不敏感的键，而字面量里放不下函数调用，
+/// 包一层省得每处都写一遍完整类型名。
+fn header_name(name : String) -> @http.CaseInsensitiveString {
+  @http.CaseInsensitiveString(name)
+}
+
+///|
 /// Strip the configured key out of text that came from upstream.
 ///
 /// A non-2xx body is surfaced verbatim as `http <code>: <body>`, and that
@@ -134,9 +141,11 @@ pub async fn ask_outcome(
   settings : Settings,
   prompt : String,
 ) -> AskOutcome raise ClientError {
-  let headers : Map[String, String] = { "Content-Type": "application/json" }
+  // 0.21 起 header 名是大小写不敏感的键，而字面量里塞不下函数调用，逐个塞进去
+  let headers : @http.Headers = Map([])
+  headers[header_name("Content-Type")] = "application/json"
   if settings.api_key != "" {
-    headers["Authorization"] = "Bearer " + settings.api_key
+    headers[header_name("Authorization")] = "Bearer " + settings.api_key
   }
   let body = request_body(settings, prompt).stringify()
   let url = settings.chat_completions_url()
@@ -213,12 +222,11 @@ pub async fn stream_parts(
   on_part : async (StreamPart) -> Unit,
 ) -> StreamOutcome raise ClientError {
   let body = request_body(settings, prompt, stream=true).stringify()
-  let headers : Map[String, String] = {
-    "Content-Type": "application/json",
-    "Accept": "text/event-stream",
-  }
+  let headers : @http.Headers = Map([])
+  headers[header_name("Content-Type")] = "application/json"
+  headers[header_name("Accept")] = "text/event-stream"
   if settings.api_key != "" {
-    headers["Authorization"] = "Bearer " + settings.api_key
+    headers[header_name("Authorization")] = "Bearer " + settings.api_key
   }
   let client = @http.post_stream(settings.chat_completions_url(), headers~) catch {
     err => raise Transport(err.to_string())

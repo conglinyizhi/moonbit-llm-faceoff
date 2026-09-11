@@ -14,12 +14,12 @@
 /// 测试集、预设、运行目录全都指向临时目录：web/cases、web/presets.json 和
 /// web/runs 是你自己的数据，跑一次契约测试不该把它们清掉。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/fs" @fs,
-  "moonbitlang/async@0.20.1/http" @http,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs" @fs,
+  "moonbitlang/async@0.21.3/http" @http,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/json" @json,
   "moonbitlang/core/string" @string,
@@ -172,7 +172,7 @@ async fn run(
 struct Reply {
   code : Int
   body : String
-  headers : Map[String, String]
+  headers : @http.Headers
 }
 
 ///|
@@ -259,7 +259,7 @@ fn split_url(url : String) -> (String, String) {
 fn header(reply : Reply, name : String) -> String {
   let wanted = name.to_lower()
   for key, value in reply.headers {
-    if key.to_lower() == wanted {
+    if key.to_string().to_lower() == wanted {
       return value
     }
   }
@@ -1129,7 +1129,7 @@ async fn main {
 
 ///|
 /// playground 那个请求体要把假端点的地址填进去，写法跟别处一致：拼字符串。
-fn inline_run_body(base_url : String, mock_port : String) -> String {
+fn inline_run_body(_base_url : String, mock_port : String) -> String {
   let prefix =
     #|{"models":["mock-a","mock-b"],"system":"你是一个只说一个词的助手。","inlineCases":[{"id":"q1","prompt":"甲板风是什么？"},{"prompt":"侧风是什么？","system":"只用五个字回答。"}],"repeats":1,"maxTokens":32,"paceMs":0,"retry":0,"baseUrl":"http://127.0.0.1:
   prefix + mock_port + "/v1\",\"apiKey\":\"test-key\"}"

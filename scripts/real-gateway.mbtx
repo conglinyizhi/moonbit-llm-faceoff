@@ -33,11 +33,11 @@
 ///   REAL_ONE_SHOT_MAX_TOKENS=256  one-shot 探针的 token 预算
 ///   REAL_TRUNCATE_MAX_TOKENS=8    截断探针的 token 预算
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/fs" @fs,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs" @fs,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/string" @string,
 }

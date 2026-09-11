@@ -9,10 +9,10 @@
 /// 只比对输出，区分不出「流式」和「攒完再吐」。所以这里量的是
 /// **首字节到达时刻相对于进程退出时刻**——缓冲式实现的首字节会贴着退出时刻。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env" @env,
   "moonbitlang/core/string" @string,
 }

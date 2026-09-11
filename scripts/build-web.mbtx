@@ -13,11 +13,11 @@
 /// 这是 web/build.sh 的 .mbtx 版，逻辑一一对应；放在 scripts/ 而不是 web/ 里，
 /// 是因为它属于根模块（web/ 自己的模块钉的是另一套 async 版本）。
 import {
-  "moonbitlang/async@0.20.1",
-  "moonbitlang/async@0.20.1/fs" @fs,
-  "moonbitlang/async@0.20.1/io" @io,
-  "moonbitlang/async@0.20.1/process" @process,
-  "moonbitlang/async@0.20.1/stdio" @stdio,
+  "moonbitlang/async@0.21.3",
+  "moonbitlang/async@0.21.3/fs" @fs,
+  "moonbitlang/async@0.21.3/io" @io,
+  "moonbitlang/async@0.21.3/process" @process,
+  "moonbitlang/async@0.21.3/stdio" @stdio,
   "moonbitlang/core/env",
 }
 

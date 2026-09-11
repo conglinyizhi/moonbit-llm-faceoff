@@ -30,11 +30,12 @@ you should not reach for a real endpoint to do it.
 
 Breaking any of these produces a confusing failure, not a clean error.
 
-- **`web/` must not depend on the root module.** The library pins
-  `moonbitlang/async` 0.20.1 and Rabbita requires 0.21.x; one workspace can hold
-  only one version, so merging them forces an `async` upgrade. `web/` reads
-  `bench`'s exported `data.json` instead, which also keeps the statistics in one
-  implementation.
+- **`web/` does not depend on the root module.** The two used to be pinned to
+  different `moonbitlang/async` versions; that gap closed (both are on 0.21.x
+  now), so merging them is possible — but `web/` still reads `bench`'s exported
+  `data.json` rather than calling into it. That boundary is what keeps the
+  statistics in one implementation, so treat merging them as a design decision,
+  not cleanup.
 - **No Python.** Test utilities are `.mbtx` scripts run with
   `moon run <file>.mbtx --target native` — the default target is wasm and cannot
   open a socket.

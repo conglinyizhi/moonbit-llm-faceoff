@@ -16,6 +16,7 @@
 #   --script-wait MS  探针跑完后再等多久才转储，默认 1500
 #   --shot FILE       额外存一张截图
 #   --seed            先 POST 一次小运行（1 用例 × 2 模型），让页面有历史记录
+#   --seed-repeats N  预置运行重复几次，默认 1（想看分位数就设 3：n > 1 才显示）
 #   --delay S         假端点每个分片之间的停顿，默认 0.05
 #   --system TEXT     给服务端设 LLM_WEB_SYSTEM（页面上的 system 会预填它）
 #   --keep            保留临时目录（默认删掉；失败时也保留）
@@ -31,12 +32,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
 
+# 原生构建需要一个 C 工具链：`make` 里也是这么设的。不设的话 moon 会去找
+# /usr/bin/lib.exe 这种不存在的归档器，报一条看不懂的错
+export MOON_CC="${MOON_CC:-gcc}"
+
 script=""
 url_path="/"
 wait_ms=6000
 script_wait=1500
 shot=""
 seed=0
+seed_repeats=1
 delay=0.05
 system_text=""
 keep=0
@@ -48,6 +54,7 @@ while [ $# -gt 0 ]; do
     --script-wait) script_wait="$2"; shift 2 ;;
     --shot) shot="$2"; shift 2 ;;
     --seed) seed=1; shift ;;
+    --seed-repeats) seed_repeats="$2"; shift 2 ;;
     --delay) delay="$2"; shift 2 ;;
     --system) system_text="$2"; shift 2 ;;
     --keep) keep=1; shift ;;
@@ -87,9 +94,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mock_bin="$root/scripts/_build/mock-endpoint"
 server_bin="$root/web/_build/native/debug/build/cmd/server/server.exe"
-[ -x "$mock_bin" ] || { echo "先建假端点：moon run --target native scripts/smoke.mbtx（或 build_mbtx）" >&2; exit 2; }
+
+# 假端点：复用 web-e2e 那套 build_mbtx（先 build 再复制成独立名字，否则 $! 拿到的是
+# moon 包装进程，kill 不掉真正的服务）
+# shellcheck source=lib.sh
+. "$root/scripts/lib.sh"
+if [ ! -x "$root/$MOCK_BIN" ]; then
+  build_mbtx scripts/mock_openai.mbtx "$MOCK_BIN" ||
+    { echo "假端点编译失败" >&2; exit 2; }
+fi
+mock_bin="$root/$MOCK_BIN"
 [ -x "$server_bin" ] || { echo "先建服务端：cd web && moon build cmd/server --target native" >&2; exit 2; }
 
 mkdir -p "$tmp/home" "$tmp/cases"
@@ -119,14 +134,14 @@ port=$(head -1 "$tmp/web.port")
 [ -n "$port" ] || { echo "服务端没起来（见 $tmp/server.log）" >&2; exit 1; }
 
 if [ "$seed" -eq 1 ]; then
-  python3 - "$port" "$mock_port" <<'PY'
+  python3 - "$port" "$mock_port" "$seed_repeats" <<'PY'
 import json, sys, time, urllib.request
 port, mock = sys.argv[1], sys.argv[2]
 body = json.dumps({
     "models": ["mock-a", "mock-b"],
     "caseSet": "default",
     "cases": ["math-short"],
-    "repeats": 1,
+    "repeats": int(sys.argv[3]),
     "maxTokens": 64,
     "temperature": 0.0,
     "paceMs": 0,
