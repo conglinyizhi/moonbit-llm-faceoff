@@ -286,10 +286,14 @@ async fn scan_runs(work_dir : String) -> Array[Json] {
     let models = string_array_of(request, "models")
     let cases = string_array_of(request, "cases")
     let repeats = int_of(request, "repeats", 1)
-    let case_count = if request.get("prompt") is Some(_) {
-      1
-    } else {
-      cases.length()
+    let case_count = match request.get("prompt") {
+      Some(_) => 1
+      None =>
+        match request.get("inlineCases") {
+          // playground 的运行：一组临时 prompt，没有 cases 字段
+          Some(Array(items)) => items.length()
+          _ => cases.length()
+        }
     }
     let total = models.length() * case_count * repeats
     // 外层 sh 最后写 exit_code，所以「文件在不在」就是跑完没跑完，

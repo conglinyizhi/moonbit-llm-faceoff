@@ -90,10 +90,14 @@ extern "js" fn format_time(seconds : Double) -> String = "(s) => { if (!s) retur
 ///|
 fn RunInfo::case_count(self : RunInfo) -> Int {
   if request_string(self, "prompt") is Some(_) {
-    1
-  } else {
-    request_strings(self, "cases").length()
+    return 1
   }
+  // playground 的运行把用例内联在请求里，没有 cases 字段
+  let inline_cases = @shared.array_field(request_obj(self), "inlineCases")
+  if inline_cases.length() > 0 {
+    return inline_cases.length()
+  }
+  request_strings(self, "cases").length()
 }
 
 ///|
