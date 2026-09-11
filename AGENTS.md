@@ -14,14 +14,17 @@ the targets, and the Makefile sets `MOON_CC` for you.
 make ci                       # deps, check, tests, smoke, server API, page build
 make e2e                      # add the browser test (real Chromium; slow)
 bash scripts/server-api.sh    # server HTTP contract; asserts the key handling
+bash scripts/real-gateway.sh  # the same probes against a real gateway; needs a key (not in CI)
 moon test --target native     # 54 tests
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 bash scripts/smoke.sh         # the CLIs end to end against a local mock endpoint
 bash scripts/demo.sh          # zero-API-key demo
 ```
 
-Every one of those scripts starts its own mock endpoint. You do not need an API
-key, and you should not reach for a real endpoint to verify a change.
+Every one of those scripts starts its own mock endpoint — except
+`real-gateway.sh`, which needs a real endpoint and a key and writes its result to
+`docs/real-gateway-run.md`. You do not need an API key to verify a change, and
+you should not reach for a real endpoint to do it.
 
 ## Load-bearing constraints
 

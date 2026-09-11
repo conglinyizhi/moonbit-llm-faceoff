@@ -6,6 +6,7 @@
 /// 端口文件，等文件非空）。端口固定写 0，由内核分配。
 ///
 /// 环境变量 MOCK_STREAM_DELAY：流式分片之间的停顿，单位秒，默认 0.15。
+/// 环境变量 MOCK_ALLOW_ANY_KEY=1：不校验 Authorization，用来模拟「本地无鉴权端点」
 ///
 /// 行为与 scripts/smoke.sh、scripts/web-e2e.sh 的断言一一对应：
 ///   - 鉴权失败 401
@@ -16,6 +17,8 @@
 ///     会在结果里留下 attempts > 1
 ///   - 指令里含 TRUNCATE → 回复正常，但 finish_reason 是 length，
 ///     用来验证截断计数不是摆设
+///   - 请求里的 max_tokens 小于本端点的回复长度（9 个 token）→ 同样报 length。
+///     真实网关就是这么干的，所以真实网关的验证脚本可以拿这个假端点试跑
 ///   - stream: true → chunked SSE：角色块、思考碎片、正文碎片、finish、
 ///     usage（choices 为空数组）、[DONE]
 ///   - 否则 → 一次性 JSON
@@ -114,7 +117,7 @@ async fn handle(
     return
   }
   let auth = header(request.headers, "Authorization")
-  if auth != "Bearer " + expected_key {
+  if !auth_ok(auth) {
     send_json_error(conn, 401, "bad authorization: " + auth)
     return
   }
@@ -157,7 +160,17 @@ async fn handle(
     send_body(conn, 429, "application/json; charset=utf-8", rate_limit_body)
     return
   }
-  let finish = if truncated(prompt) { "length" } else { "stop" }
+  // 真实的 token 预算：预算比回复本身还小，就是被截断了。
+  // TRUNCATE 开关仍然保留，它是不看 token 数的显式覆盖。
+  let budget = match obj.get("max_tokens") {
+    Some(Number(value, ..)) => value.to_int()
+    _ => 0
+  }
+  let finish = if truncated(prompt) || (budget > 0 && budget < completion_tokens) {
+    "length"
+  } else {
+    "stop"
+  }
   if obj.get("stream") is Some(True) {
     stream_reply(conn, model, finish)
   } else {
@@ -305,6 +318,26 @@ fn usage_object() -> Json {
 }
 
 // ---------------------------------------------------------------- 工具
+
+///|
+/// 这个请求的 Authorization 能不能过。
+///
+/// MOCK_ALLOW_ANY_KEY=1 时一律放行——真实世界里有不校验密钥的本地端点
+/// （ollama 之类），验证脚本得能对这种端点做出正确判断。
+fn auth_ok(auth : String) -> Bool {
+  if allow_any_key() {
+    return true
+  }
+  auth == "Bearer " + expected_key
+}
+
+///|
+fn allow_any_key() -> Bool {
+  match @env.get_env_var("MOCK_ALLOW_ANY_KEY") {
+    Some(value) => value == "1" || value == "true"
+    None => false
+  }
+}
 
 ///|
 async fn send_json_error(conn : @http.ServerConnection, code : Int, message : String) -> Unit {

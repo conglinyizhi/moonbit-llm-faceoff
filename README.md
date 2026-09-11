@@ -150,6 +150,9 @@ $bench \
 
 # 5. render it as a self-contained page — no server, no key
 bash web/build.sh my-run/runs.jsonl        # → web/out/report.html
+
+# 6. the same loop again, with assertions and a written record
+bash scripts/real-gateway.sh               # → docs/real-gateway-run.md
 ```
 
 Two things to get right the first time:
@@ -167,6 +170,24 @@ If the gateway rate-limits you, `--pace-ms` spaces the attempts out and
 [Rate limits](#rate-limits). The key lives in the environment (or in the page's
 memory for one run); it is never written to a run directory or a commit, see
 [`SECURITY.md`](SECURITY.md).
+
+`scripts/real-gateway.sh` (step 6 above, or `make real-gateway`) is the one
+script here that talks to a real endpoint. It runs four probes and writes down
+what it saw:
+
+| probe | question it answers |
+| --- | --- |
+| one-shot | does the endpoint return a real answer at all |
+| streaming | do fragments really arrive incrementally — first byte vs process exit, the same measurement the offline tests use |
+| bad key | is an auth failure reported as 4xx, and is the key kept out of the error |
+| truncation | does a reply cut off by `--max-tokens` land in the truncation counter instead of passing as a success |
+
+Each probe gets its own verdict, so a failure tells you which part of the
+contract the gateway does not honour. The key is read from the environment only,
+never from the command line, and the script deletes its own output rather than
+leave a file behind if the key turns up in it. Add `--compare` with
+`REAL_MODEL_B=<second model>` and it also runs the step-4 comparison and keeps
+`docs/real-gateway-runs.jsonl` — the whole loop, with evidence.
 
 ### New to MoonBit?
 
@@ -584,6 +605,7 @@ bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
 | `scripts/smoke.sh` | one-shot via env and via flags, streaming, stdin prompts, **incremental delivery**, non-ASCII error-body decoding, auth failures, that a failing auth does not echo the key, and the bench harness against the same mock: **a 429 that clears is retried for real** (`attempts: 2`), `--retry n` means n extra HTTP attempts, and a `finish_reason: length` reply lands in the truncation counter instead of passing as a success |
 | `scripts/server-api.sh` | a run whose `baseUrl`/`apiKey` come from the request body while the server's own are deliberately broken, model ids outside the menu, the live counters, all three exports, **that the key never lands in the run directory or the response**, and that path traversal is refused |
 | `scripts/web-e2e.sh` | a real headless browser: the form renders from `/api/meta` (including the model / gateway / key inputs), an `?autorun` link actually completes a run and renders its results, eight parallel `POST /api/runs` come back with eight distinct ids, the start button is usable again once the run finishes, and the export row yields a Markdown report and a share link that carries no key |
+| `scripts/real-gateway.sh` | **the one suite that is not offline and not in CI.** Four probes against a real endpoint: one-shot, incremental streaming, a bad key reported as 4xx without echoing it, and a reply cut off by `--max-tokens` counted as truncated. Writes `docs/real-gateway-run.md`. Needs `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` exported |
 
 Four of these exist because the obvious version would pass on a broken
 implementation:
@@ -611,10 +633,14 @@ real time. It deliberately does **not** use `--virtual-time-budget`: virtual
 time races the page's own `fetch`, and dumps a half-loaded page. Set
 `CHROME=/path/to/chrome` to use another browser binary.
 
-It is also the one suite CI does **not** run. Driving a real browser and waiting
-in real time makes it the flakiest thing here, and a timing hiccup failing
-unrelated pull requests is worse than the coverage is worth. Run it with
+It is also the one browser suite CI does **not** run. Driving a real browser and
+waiting in real time makes it the flakiest thing here, and a timing hiccup
+failing unrelated pull requests is worse than the coverage is worth. Run it with
 `make e2e` before touching the page.
+
+The other thing CI does not run is `scripts/real-gateway.sh`, for a different
+reason: it needs a key and it costs money. Run it by hand when you want evidence
+that the client works against a real endpoint, and commit what it writes.
 
 ---
 
