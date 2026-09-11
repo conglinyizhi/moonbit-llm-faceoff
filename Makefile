@@ -46,7 +46,7 @@ e2e:  ## browser end to end; needs chromium, and it is slow
 # The one target that needs a real endpoint: export MOONLLM_BASE_URL,
 # MOONLLM_API_KEY and MOONLLM_MODEL first. Deliberately not part of `make ci`.
 real-gateway:  ## probes against a real gateway; needs a key, not in CI
-	bash scripts/real-gateway.sh
+	$(MOON) run --target native scripts/real-gateway.mbtx
 
 # `moon install` copies the built main packages into a bin directory. The default
 # is the MoonBit toolchain's own ~/.moon/bin: a **per-user** directory, no sudo,
