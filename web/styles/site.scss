@@ -642,25 +642,34 @@ button.primary {
 }
 
 // 导出那一排：复用 .actions 的布局，只是按钮换成次级样式
+// 一排里混着 <button> 和 <a> 时统一盒模型。
+//
+// 浏览器默认不给 button 继承字体，所以同一个字号下两者的行高与字宽都不一样，
+// 排在一起就会错开——「轻微的没对齐」就是这么来的。
+.chip {
+  align-items: center;
+  background: $panel-2;
+  border: 1px solid $border;
+  border-radius: 0.35rem;
+  color: $text;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  padding: 0.35rem 0.8rem;
+  text-decoration: none;
+
+  &:hover {
+    border-color: $accent;
+    color: $title;
+  }
+}
+
 .export-row {
   flex-wrap: wrap;
   margin-bottom: 1.6rem;
   margin-top: 1.2rem;
-
-  a {
-    background: $panel-2;
-    border: 1px solid $border;
-    border-radius: 0.35rem;
-    color: $text;
-    font-size: 0.85rem;
-    padding: 0.35rem 0.8rem;
-    text-decoration: none;
-
-    &:hover {
-      border-color: $accent;
-      color: $title;
-    }
-  }
 
   .copied {
     color: $accent-2;
@@ -712,20 +721,33 @@ button.ghost {
   .live-who {
     color: $title;
     font-weight: 600;
+    // 每格给个下限：数字在变，宽度不能跟着变，否则整行会左右抖
+    min-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .live-state {
     color: $accent;
+    min-width: 8rem;
+    white-space: nowrap;
   }
 
   .live-nums,
   .live-rate {
     color: $muted;
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .live-nums {
+    min-width: 6rem;
   }
 
   .live-rate {
     color: $title;
+    min-width: 7rem;
   }
 
   // 当前这条请求的 token 进度。分母是 max_tokens：那是上限，不是目标，
@@ -1302,6 +1324,62 @@ button.ghost {
     color: $muted;
     font-size: 0.72rem;
     padding: 0.1rem 0.5rem;
+  }
+}
+
+// 「这次跑什么」面板的两页
+.panel-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0.7rem;
+}
+
+.prompt-tab {
+  .prompt-input {
+    width: 100%;
+  }
+
+  .notice,
+  .hint {
+    margin: 0.45rem 0 0;
+  }
+}
+
+// 从文本文件建测试集
+.import-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+
+  .set-name {
+    flex: 1 1 18rem;
+  }
+
+  .hint {
+    flex-basis: 100%;
+    margin: 0;
+  }
+}
+
+// 预设搬进侧栏之后：窄列里要能读
+.history .preset-panel {
+  border-top: 1px solid $border;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+
+  .hint {
+    margin: 0 0 0.6rem;
+  }
+
+  .preset-list {
+    flex-direction: column;
+  }
+
+  .preset-actions {
+    flex-direction: column;
+    gap: 0.4rem;
   }
 }
 

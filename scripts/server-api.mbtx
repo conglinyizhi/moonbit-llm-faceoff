@@ -9,9 +9,9 @@
 /// 三块内容：
 ///   1. 请求体里的 baseUrl/apiKey 真的生效（服务端环境里那两个是故意设坏的）
 ///   2. 密钥不落盘、不进响应
-///   3. 用例集 / 预设 / 运行历史这些新接口的契约与坏输入
+///   3. 测试集 / 预设 / 运行历史这些新接口的契约与坏输入
 ///
-/// 用例集、预设、运行目录全都指向临时目录：web/cases、web/presets.json 和
+/// 测试集、预设、运行目录全都指向临时目录：web/cases、web/presets.json 和
 /// web/runs 是你自己的数据，跑一次契约测试不该把它们清掉。
 import {
   "moonbitlang/async@0.20.1",
@@ -616,8 +616,8 @@ async fn main {
       "",
     )
 
-    // ---- 用例集
-    println("==> 用例集")
+    // ---- 测试集
+    println("==> 测试集")
     let sets = get(base + "/api/cases")
     expect(
       sets.body.contains("\"name\":\"default\""),
@@ -655,12 +655,12 @@ async fn main {
     )
     expect(
       put(base + "/api/cases/..%2fescape", body_empty_cases).code == 400,
-      "用例集名字里的路径片段 → 400",
+      "测试集名字里的路径片段 → 400",
       "",
     )
     expect(
       get(base + "/api/cases/nope").code == 404,
-      "不存在的用例集 → 404",
+      "不存在的测试集 → 404",
       "",
     )
 
@@ -901,8 +901,8 @@ async fn main {
     // 用例级 system 覆盖全局——这条规则 bench 里有、服务端必须原样照搬，
     // 否则页面上显示的「实际发出的内容」就是假的
     let override_set = tmp + "/cases/override.jsonl"
-    // 目录通常已经被前面的用例集测试建出来了：已存在不算错误
-    // 目录通常已经被前面的用例集测试建出来了：已存在不算错误
+    // 目录通常已经被前面的测试集测试建出来了：已存在不算错误
+    // 目录通常已经被前面的测试集测试建出来了：已存在不算错误
     @fs.mkdir(tmp + "/cases", recursive=true) catch {
       _ => ()
     }
@@ -913,7 +913,7 @@ async fn main {
       create_mode=@fs.CreateOrTruncate,
     ) catch {
       err => {
-        bail("写不进用例集文件：\{override_set}：\{err}")
+        bail("写不进测试集文件：\{override_set}：\{err}")
         return
       }
     }
@@ -952,6 +952,43 @@ async fn main {
       "",
     )
     let _ = delete(base + "/api/runs/" + context_id)
+
+    // ---- 从纯文本文件建测试集
+    println("==> 从纯文本文件导入测试集")
+    let source_txt = tmp + "/source.txt"
+    @fs.write_file(
+      source_txt,
+      "# 注释行会被跳过\n第一行 prompt\n\n第二行 prompt\n第三行 prompt\n",
+      create_mode=@fs.CreateOrTruncate,
+    ) catch {
+      _ => ()
+    }
+    let imported = post(
+      base + "/api/cases/from-txt/import",
+      "{\"path\":\"" + source_txt + "\"}",
+    )
+    expect(
+      imported.code == 200 &&
+      imported.body.contains("\"count\":3") &&
+      imported.body.contains("\"name\":\"from-txt\""),
+      "POST /api/cases/<名字>/import 从文本文件建集（行数对得上）",
+      "code=\{imported.code} body=\{imported.body}",
+    )
+    let imported_set = get(base + "/api/cases/from-txt")
+    expect(
+      imported_set.code == 200 &&
+      imported_set.body.contains("第一行 prompt") &&
+      imported_set.body.contains("第三行 prompt"),
+      "导入出来的集能读回来，内容就是文件里的那几行",
+      imported_set.body,
+    )
+    expect(
+      post(base + "/api/cases/nope/import", "{\"path\":\"/no/such/file.txt\"}")
+        .code == 404,
+      "文件不存在 → 404",
+      "",
+    )
+    let _ = delete(base + "/api/cases/from-txt")
 
     // ---- 实时进度：跑着的时候状态里要有 live
     //

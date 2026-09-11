@@ -15,8 +15,8 @@
 ///   LLM_WEB_STATIC  静态目录（默认 out）
 ///   LLM_WEB_WORK    运行目录（默认 runs）
 ///   LLM_WEB_CASES   旧的单文件用例（默认 ../bench/cases.example.jsonl）；
-///                   只在用例集目录为空时当种子读一次
-///   LLM_WEB_CASES_DIR  用例集目录，每个集一个 <名字>.jsonl（默认 cases）
+///                   只在测试集目录为空时当种子读一次
+///   LLM_WEB_CASES_DIR  测试集目录，每个集一个 <名字>.jsonl（默认 cases）
 ///   LLM_WEB_PRESETS    预设文件（默认 presets.json）
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
 ///   LLM_WEB_SSG    静态报告生成器（默认 ../web/_build/.../ssg.exe）
@@ -106,9 +106,9 @@ async fn main {
 struct ServerConfig {
   static_dir : String
   work_dir : String
-  /// 旧的单文件用例路径：只在用例集目录为空时当种子读一次。
+  /// 旧的单文件用例路径：只在测试集目录为空时当种子读一次。
   cases_path : String
-  /// 用例集目录，一个集一个 `<名字>.jsonl`。
+  /// 测试集目录，一个集一个 `<名字>.jsonl`。
   cases_dir : String
   /// 预设文件（模型 + 参数组合）。
   presets_path : String
@@ -219,7 +219,7 @@ async fn handle(
       delete_run(config, path[10:].to_owned(), conn)
     (Get, _) if path.has_prefix("/api/runs/") =>
       get_run_route(config, path[10:].to_owned(), conn)
-    // 用例集
+    // 测试集
     (Get, "/api/cases") =>
       send_json(
         conn,
@@ -230,6 +230,8 @@ async fn handle(
       get_case_set(config, path[11:].to_owned(), conn)
     (Put, _) if path.has_prefix("/api/cases/") =>
       put_case_set(config, path[11:].to_owned(), body, conn)
+    (Post, _) if path.has_prefix("/api/cases/") && path.has_suffix("/import") =>
+      import_case_set(config, path[11:path.length() - 7].to_owned(), body, conn)
     (Delete, _) if path.has_prefix("/api/cases/") =>
       delete_case_set(config, path[11:].to_owned(), conn)
     // 预设
@@ -326,10 +328,10 @@ async fn meta_json(config : ServerConfig) -> Json {
   })
 }
 
-// ---------------------------------------------------------------- 用例集
+// ---------------------------------------------------------------- 测试集
 
 ///|
-/// 用例集列表：[{name, count}]。
+/// 测试集列表：[{name, count}]。
 ///
 /// 直接返回数组而不是包好的 Json 对象：调用点都是把它塞进自己的响应里，
 /// 包一层之后取出来还得再拆。
@@ -349,7 +351,7 @@ async fn case_sets(config : ServerConfig) -> Array[Json] {
 }
 
 ///|
-/// 默认用例集：有 `default` 就用它，否则第一个，一个都没有就是空串。
+/// 默认测试集：有 `default` 就用它，否则第一个，一个都没有就是空串。
 ///
 /// 不记住「上次选了哪个」：那是页面的状态（URL 参数），服务端不该有第二份。
 async fn default_case_set(config : ServerConfig) -> String {
@@ -452,6 +454,108 @@ async fn put_case_set(
 }
 
 ///|
+/// 从一个纯文本文件建测试集（`POST /api/cases/<name>/import`，body: `{"path"}`）。
+///
+/// 这个服务端跑在你自己的机器上，路径也是你自己填的，所以由它去读文件，而不是
+/// 让浏览器把文件内容读进来再传一遍。风险边界没有变化——能连上这个服务端的人
+/// 本来就能让它跑任意 benchmark，见 SECURITY.md。
+///
+/// 一行一条 prompt，空行与 `#` 开头跳过；如果某一行本身是个带 `prompt` 的 JSON
+/// 对象（也就是测试集文件），就按那条用例收，system / maxTokens 一起带上。
+async fn import_case_set(
+  config : ServerConfig,
+  name : String,
+  body : &@io.Reader,
+  conn : @http.ServerConnection,
+) -> Unit {
+  if !is_safe_name(name) {
+    send_text(conn, 400, bad_name_message())
+    return
+  }
+  let obj = match read_json_body(body, conn) {
+    Some(obj) => obj
+    None => return
+  }
+  let path = str_field(obj, "path").trim(chars=" \t\r\n").to_owned()
+  if path == "" {
+    send_text(conn, 400, "body needs a `path`")
+    return
+  }
+  if !(@fs.exists(path) catch { _ => false }) {
+    send_text(conn, 404, "no such file: " + path)
+    return
+  }
+  // 别拿它当通用文件读取器：只收文本文件，且有大小上限
+  let size = @fs.file_size(path) catch { _ => -1L }
+  if size < 0L {
+    send_text(conn, 500, "cannot stat: " + path)
+    return
+  }
+  if size > max_import_bytes {
+    send_text(
+      conn,
+      400,
+      "file is too large (\{size} bytes, limit \{max_import_bytes})",
+    )
+    return
+  }
+  let text = read_text(path)
+  if text == "" {
+    send_text(conn, 400, "file is empty or not readable as UTF-8 text")
+    return
+  }
+  let cases : Array[Json] = []
+  let mut counter = 0
+  for raw in text.split("\n") {
+    let line = raw.trim(chars=" \t\r").to_owned()
+    if line == "" || line.has_prefix("#") {
+      continue
+    }
+    if cases.length() >= max_cases_per_set {
+      send_text(conn, 400, "at most \{max_cases_per_set} cases per set")
+      return
+    }
+    counter = counter + 1
+    // 测试集文件本身就长这样：能直接吃（system / maxTokens 一起带过来）
+    match parse_json(line) {
+      Some(json) =>
+        match json {
+          Object(entry) =>
+            if entry.get("prompt") is Some(String(_)) {
+              cases.push(json)
+              continue
+            }
+          _ => ()
+        }
+      None => ()
+    }
+    cases.push(
+      Json::object({
+        "id": Json::string("\{name}-\{counter}"),
+        "prompt": Json::string(line),
+      }),
+    )
+  }
+  if cases.length() == 0 {
+    send_text(conn, 400, "no usable lines in the file")
+    return
+  }
+  write_text(case_set_path(config.cases_dir, name), serialize_case_set(cases))
+  note("case set '\{name}' imported from \{path} (\{cases.length()} case(s))")
+  send_json(
+    conn,
+    200,
+    Json::object({
+      "name": Json::string(name),
+      "count": Json::number(cases.length().to_double()),
+      "source": Json::string(path),
+      "sets": Json::array(case_sets(config)),
+      "defaultCaseSet": Json::string(default_case_set(config)),
+    }),
+  )
+}
+
+///|
 async fn delete_case_set(
   config : ServerConfig,
   name : String,
@@ -505,7 +609,7 @@ fn with_id(json : Json, id : String) -> Json {
 // ---------------------------------------------------------------- 预设
 
 ///|
-/// 预设的最大条数。超了说明该改用例集或分几次跑，而不是往这里堆。
+/// 预设的最大条数。超了说明该改测试集或分几次跑，而不是往这里堆。
 let max_presets : Int = 50
 
 ///|
@@ -832,11 +936,11 @@ fn run_env(config : ServerConfig, request : RunRequest) -> Map[String, String] {
 /// 拼进 shell 命令。
 struct RunRequest {
   models : Array[String]
-  /// 解析后的用例集名字（不是请求里那个可选的字符串）。
+  /// 解析后的测试集名字（不是请求里那个可选的字符串）。
   case_set : String
   case_ids : Array[String]
-  /// 请求里内联带过来的用例（一组临时 prompt，不走用例集文件）。非空时优先于 `case_ids`：
-  /// 它们不进用例集文件，直接写进这次运行目录的 cases.jsonl。
+  /// 请求里内联带过来的用例（一组临时 prompt，不走测试集文件）。非空时优先于 `case_ids`：
+  /// 它们不进测试集文件，直接写进这次运行目录的 cases.jsonl。
   inline_cases : Array[Json]
   /// 这次运行的全局 system prompt。每条用例自己的 system 仍然可以覆盖它。
   system : String?
@@ -917,7 +1021,7 @@ async fn parse_run_request(
   if prompt is None && case_ids.is_empty() && raw_inline.length() == 0 {
     return Err("pick at least one case, or type a prompt")
   }
-  // 用例集：请求里给了就用它，没给就用默认集。
+  // 测试集：请求里给了就用它，没给就用默认集。
   let case_set = match optional_string(obj, "caseSet") {
     Some(name) =>
       if is_safe_name(name) {
@@ -927,7 +1031,7 @@ async fn parse_run_request(
       }
     None => default_case_set(config)
   }
-  // 内联用例：跟用例集 / 单条 prompt 三者互斥，
+  // 内联用例：跟测试集 / 单条 prompt 三者互斥，
   // 同时给两个只会让人不确定到底跑了什么。
   if raw_inline.length() > 0 {
     if prompt is Some(_) || !case_ids.is_empty() {
@@ -1005,7 +1109,7 @@ async fn parse_run_request(
 }
 
 ///|
-/// 请求的公共部分（数值范围、网关覆盖）只写一遍：内联用例与用例集两条路径
+/// 请求的公共部分（数值范围、网关覆盖）只写一遍：内联用例与测试集两条路径
 /// 走同一套校验，不然它们会慢慢长歪。
 fn finish_run_request(
   obj : Map[String, Json],
@@ -1118,7 +1222,7 @@ async fn build_argv(
     None => {
       let path = dir + "/cases.jsonl"
       if request.inline_cases.length() > 0 {
-        // 内联用例：不进用例集文件，直接落进这次运行目录。
+        // 内联用例：不进测试集文件，直接落进这次运行目录。
         // bench 侧只认文件，所以这里就是把它们写成文件。
         let lines = StringBuilder()
         for entry in request.inline_cases {

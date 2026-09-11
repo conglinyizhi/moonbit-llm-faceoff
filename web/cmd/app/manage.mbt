@@ -1,5 +1,5 @@
 ///|
-/// 用例集与预设这两块的管理面：类型、命令、渲染。
+/// 测试集与预设这两块的管理面：类型、命令、渲染。
 ///
 /// 和 history.mbt 同一个理由分出来——main.mbt 是表单与结果，这两个是「我拿什么
 /// 去测」和「我怎么老是重填同一组参数」，各自独立。
@@ -163,6 +163,23 @@ fn validate_drafts(drafts : Array[CaseDraft]) -> String? {
 // ---------------------------------------------------------------- 命令
 
 ///|
+/// 让服务端从一个纯文本文件建测试集。
+///
+/// 走服务端读文件而不是浏览器选文件：这个服务端就跑在你自己的机器上，路径也是
+/// 你自己填的；而浏览器读本地文件要先把内容读进页面、再 POST 传回来——多一道
+/// 没有意义的搬运。文件里一行一条 prompt，空行与 `#` 开头跳过；JSONL 用例文件
+/// 也能直接吃。
+fn import_case_file(
+  name : String,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
+  @http.post("/api/cases/" + name + "/import")
+  .with_json(Json::object({ "path": Json::string(model.import_path) }))
+  .expect_json(emit.map(fn(result) { CaseFileImported(result) }))
+}
+
+///|
 fn fetch_case_set(name : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.get("/api/cases/" + name).expect_json(
     emit.map(fn(result) { CaseSetLoaded(name, result) }),
@@ -203,38 +220,80 @@ fn save_presets(presets : Array[Preset], emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   .expect_json(emit.map(fn(result) { PresetsSaved(result) }))
 }
 
-// ---------------------------------------------------------------- 渲染：用例集
+// ---------------------------------------------------------------- 渲染：测试集
 
 ///|
-/// 用例面板：选集、列用例、编辑、保存。
+/// 「这次跑什么」：要么跑一套测试集，要么只跑一条临时 prompt。
 ///
-/// 编辑态和浏览态分开：浏览态是勾选用例去跑（每次跑都要做的事），编辑态是改
-/// 用例本身（偶尔做的事）。混在一起的话，改一个 prompt 的代价和跑一次一样高。
+/// 两者做成同一个面板的两页，因为它们**互斥**——请求里只能二选一。以前是上下
+/// 两个面板加一个「只用下面这一条指令」的勾选框：勾选框和输入框分开在屏幕两端，
+/// 填了字却忘了勾，就会对着一整列结果发愣「我说的话怎么没生效」。
 fn case_panel(
   meta : Meta,
   model : AppModel,
   emit : @cmd.Emit[Msg],
 ) -> @html.Html {
+  let prompt_mode = model.uses_prompt()
+  // 开在哪一页由用户说了算。之前这里被「prompt 有没有内容」强行决定，结果填了
+  // 一条 prompt 之后就再也点不回测试集那一页——想改勾选都没法看。
+  let tab = model.panel_tab
+  let tab_button = fn(id : String, label : String) {
+    @html.button(
+      class=if tab == id { "view-btn active" } else { "view-btn" },
+      on_click=emit(Msg::SetPanelTab(id)),
+      [txt(label)],
+    )
+  }
   let head = el("div", "section-head", [
-    el("h2", "", [txt("用例集")]),
+    el("h2", "", [txt("这次跑什么")]),
     el("span", "muted", [
       txt(
-        "\{model.available_cases.length()} 条 · 已选 \{model.selected_cases.length()}",
+        if prompt_mode {
+          "临时 prompt 一条"
+        } else {
+          "\{model.available_cases.length()} 条 · 已选 \{model.selected_cases.length()}"
+        },
       ),
     ]),
-    @html.button(class="link-btn", on_click=emit(Msg::ToggleCaseEditor), [
-      txt(if model.editing_cases { "收起编辑" } else { "编辑用例" }),
-    ]),
+    if tab == "set" {
+      @html.button(class="link-btn", on_click=emit(Msg::ToggleCaseEditor), [
+        txt(if model.editing_cases { "收起编辑" } else { "编辑用例" }),
+      ])
+    } else {
+      @html.fragment([])
+    },
   ])
-  let body = if model.editing_cases {
-    editor_view(model, emit)
+  let tabs = el("div", "panel-tabs", [
+    tab_button("set", "测试集"),
+    tab_button("prompt", "临时 First User Prompt"),
+  ])
+  let body = if tab == "prompt" {
+    prompt_tab(model, emit)
   } else {
-    browse_view(model, emit)
+    el("div", "", [
+      set_row(meta, model, emit),
+      if model.editing_cases {
+        editor_view(model, emit)
+      } else {
+        browse_view(model, emit)
+      },
+      import_row(model, emit),
+    ])
   }
   el("section", "case-panel", [
     head,
-    set_row(meta, model, emit),
+    tabs,
     body,
+    // 在测试集这一页也把后果说清楚：填了 prompt 就等于不看勾选
+    if tab == "set" && prompt_mode {
+      el("p", "notice", [
+        txt(
+          "下面那条临时 prompt 里有内容，所以这次只跑它——测试集不参与。清空它才会回到跑测试集。",
+        ),
+      ])
+    } else {
+      @html.fragment([])
+    },
     match model.cases_error {
       Some(message) => el("p", "failed", [txt(message)])
       None => txt("")
@@ -243,7 +302,57 @@ fn case_panel(
 }
 
 ///|
-/// 用例集选择行：下拉 + 新建 + 删除。
+/// 临时 prompt 那一页：一条 user prompt，填了就算启用。
+fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let filled = model.uses_prompt()
+  el("div", "prompt-tab", [
+    @html.textarea(
+      class="prompt-input",
+      id="prompt",
+      value=model.prompt,
+      rows=4,
+      placeholder="例如：把下面这段口语文本整理成书面表达。",
+      on_input=emit.map(fn(text) { PromptChanged(text) }),
+      ([] : Array[@html.Html]),
+    ),
+    el("p", if filled { "notice" } else { "hint" }, [
+      txt(
+        if filled {
+          "填了内容 = 这次只跑这一条：模型、system 与参数照用，上面那套测试集不参与。"
+        } else {
+          "留空 = 跑上面那套测试集。这里填上内容就只跑这一条。"
+        },
+      ),
+    ]),
+  ])
+}
+
+///|
+/// 从纯文本文件建测试集：一行一条 prompt。服务端读这个路径（它就在你机器上）。
+fn import_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  el("div", "import-row", [
+    el("span", "muted", [txt("从纯文本文件新建")]),
+    @html.input(
+      input_type=@html.InputType::Text,
+      class="set-name",
+      id="import-path",
+      value=model.import_path,
+      placeholder="文件路径，例如 /home/you/text.txt",
+      on_input=emit.map(fn(text) { ImportPathChanged(text) }),
+    ),
+    @html.button(class="ghost", on_click=emit(Msg::ImportCaseFile), [
+      txt("导入为新集"),
+    ]),
+    el("span", "hint", [
+      txt(
+        "一行一条 prompt，空行与 # 跳过；集名用上面的「新集名字」，留空就用文件名",
+      ),
+    ]),
+  ])
+}
+
+///|
+/// 测试集选择行：下拉 + 新建 + 删除。
 fn set_row(meta : Meta, model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let options = meta.caseSets.map(fn(set) {
     @html.option(value=set.name, selected=set.name == model.case_set, [
@@ -253,7 +362,7 @@ fn set_row(meta : Meta, model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let options = if options.length() > 0 {
     options
   } else {
-    [@html.option(value="", selected=true, [txt("（还没有用例集）")])]
+    [@html.option(value="", selected=true, [txt("（还没有测试集）")])]
   }
   el("div", "set-row", [
     @html.select(
@@ -388,7 +497,7 @@ fn editor_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           txt("＋ 新增一条"),
         ]),
         @html.button(class="primary", on_click=emit(Msg::SaveCases), [
-          txt("保存用例集"),
+          txt("保存测试集"),
         ]),
         match model.cases_saved {
           Some(message) => el("span", "hint copied", [txt(message)])
@@ -504,10 +613,13 @@ fn preset_panel(
         presets.map(fn(preset) { preset_chip(meta, preset, emit) })
       }
   }
-  el("section", "preset-panel", [
-    el("div", "section-head", [
-      el("h2", "", [txt("预设")]),
-      el("span", "muted", [txt("模型 + 参数")]),
+  el("div", "preset-panel", [
+    el("div", "section-head", [el("h2", "", [txt("预设")])]),
+    // 说明它到底动哪些东西：用户点「套用」之前得知道会覆盖什么
+    el("p", "hint", [
+      txt(
+        "一条预设 = 模型 + 测试集 + system prompt + 网关地址 + 参数（重复次数 / max tokens / temperature / 间隔 / 重试）。套用它＝把这些一次性写回表单；API key 不在里面，也不会被动。",
+      ),
     ]),
     el("div", "preset-list", body),
     el("div", "preset-actions", [

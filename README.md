@@ -451,13 +451,25 @@ From the page you can:
 - pick models from the server's menu **or type model ids directly**, set repeats /
   `max_tokens` / temperature / pacing / retries, type a one-off prompt, and start
   a run;
-- set the **gateway address and API key** for that one run (they sit right under
-  the model picker), so a local `ollama` or a second provider does not need a
-  server restart. Both fields are optional and fall back to the server's
-  environment;
+- set the **gateway address and API key** for that one run (they sit at the top of
+  the form, above the model picker), so a local `ollama` or a second provider does
+  not need a server restart. Both fields are optional and fall back to the
+  server's environment;
 - write one **system prompt** for the run and let the cases be nothing but user
   prompts — the fixed half and the varying half in separate places. A case that
   carries its own `system` overrides it, and 请求上下文 marks which ones did;
+- choose what to run in one panel with two tabs: a **test set** (tick the cases) or
+  a single **临时 First User Prompt**. Typing anything into the prompt box is what
+  selects it — there is no checkbox to forget — and both tabs say so out loud,
+  because "I filled in a prompt and got results for 33 other questions" is a
+  confusing thing to debug;
+- **create a test set from a plain text file** (one prompt per line, blank lines
+  and `#` skipped); a `.jsonl` case set works too. The server reads the path you
+  give it — it is running on your machine anyway;
+- **presets** live in the sidebar next to the run history, where they belong: both
+  are "how a run was configured", one already run and one ready to go. A preset
+  covers models, test set, system prompt, gateway and the parameters, and the
+  panel says exactly that before you apply one;
 - watch progress, the live failure/retry/truncation counts, and a collapsible
   tail of the run's `stderr`;
 - **go back to any earlier run**: the left column lists every run with its time,
@@ -509,6 +521,12 @@ From the page you can:
   head at once. The diff aligns lines, collapses the identical stretches, and
   pairs a line that only changed a little — highlighting the few characters that
   actually differ, which for Chinese prose is usually one comma;
+- **come back to a run at any address**: the run you are looking at is in the URL
+  fragment (`#run=<id>`), so a refresh — or a link sent to someone else — lands on
+  the same run. A run still in progress shows up in the sidebar with a 看进度
+  button, which is the only way back if you opened something else while it ran;
+  deleting a run asks twice, and an id that does not exist says so instead of
+  showing an empty page;
 - **watch a run while it happens**: the progress card carries a bar over the whole
   suite plus a live line — which model, which case, whether it is still waiting
   for the first token, how many characters have arrived, and the rate over the
@@ -553,6 +571,7 @@ and waits for you to fill the key in and press **开始评测**.
 | `POST /api/runs` | start a run → `{id, total}`. Three mutually exclusive ways to say what to run: `caseSet` + `cases` (ids from a set on disk), a single `prompt`, or `inlineCases` (an array of case objects, written into that run's `cases.jsonl`). `system` sets the system prompt for the whole run; a case may override it with its own |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
 | `DELETE /api/runs/<id>` | remove that run's directory (its annotations go with it) |
+| `POST /api/cases/<name>/import` | create a set from a text file: `{"path": "..."}`, one prompt per line (a `.jsonl` case set is accepted as-is) |
 | `GET /api/runs/<id>/context` | what the run actually sent: the request document plus each case's effective `system` / `maxTokens` / `temperature` (`systemOverridden` marks a case-set prompt that beat the global one) |
 | `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}` — the human verdicts, `verdict` being `pass` / `fail` / `unsure` |
 | `PUT /api/runs/<id>/annotations` | whole-list write; one entry per (case, model), duplicates are a 400 |

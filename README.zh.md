@@ -402,16 +402,23 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 页面上可以：
 
 - 从服务端菜单里勾模型，**也可以直接手填模型 id**；调重复次数 / `max_tokens` / 温度 / 间隔 / 重试，填一次性指令，然后点开始；
-- 为这一次运行**填网关地址和 API key**（就在模型选择的下面），切本地 `ollama` 或换一家 provider 不用重启服务端。两项都可留空，留空就用服务端环境里的；
+- 为这一次运行**填网关地址和 API key**（在表单最上面，模型选择之上），切本地 `ollama` 或换一家 provider 不用重启服务端。两项都可留空，留空就用服务端环境里的；
 - 写**一条运行级 system prompt**，让用例就只是 user prompt——固定的那一半和变动的
   那一半分开放。用例自己带 `system` 时会盖掉它，「请求上下文」会标出是哪几条；
+- 「这次跑什么」一个面板两页：**测试集**（勾用例）或**一条临时 First User Prompt**。
+  在输入框里打字本身就是选择——没有勾选框可以忘——而且两页都把后果写在脸上：
+  「填了内容 = 这次只跑这一条，测试集不参与」；
+- **从纯文本文件建测试集**（一行一条，空行与 `#` 跳过；`.jsonl` 用例文件也能直接吃）。
+  路径由服务端去读——它本来就跑在你机器上；
+- **预设**搬到侧栏、挨着运行记录：两者都是「这次运行怎么配的」，一个跑过了、一个
+  准备跑。一条预设包含模型、测试集、system prompt、网关与参数，面板上写明了这一点；
 - 看进度、实时的失败/重试/截断计数，以及可展开的运行 `stderr` 尾部；
 - **回到任何一次历史运行**：左栏列出跑过的每一次（时间、模型、规模、计数）。
   点开可以看那次的结果（只读，导出也跟着那一次），也可以用一模一样的参数重跑，
   或者删掉它；
 - **成批的文本一行一条贴进来**：用例编辑器里有导入框——一行一条，
   空行与 `#` 注释跳过，`追加导入` / `替换为这些行` 决定接在后面还是全部替换；
-- **用例就在页面上管**：用例面板切换用例集（`web/cases/<名字>.jsonl`）、勾选本次
+- **用例就在页面上管**：用例面板切换测试集（`web/cases/<名字>.jsonl`）、勾选本次
   要跑的用例、就地编辑——prompt、id，以及每条自己的 `system` / `max_tokens` /
   `temperature`（收在折起的「更多字段」里）。保存会写文件，且不会动它从未展示
   过的字段；
@@ -432,7 +439,7 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 **在页面上填的密钥只活在标签页内存里**，走环境变量交给子进程（不走命令行，所以 `ps` 里看不到），并且写 `request.json` 之前会被摘掉。**服务端持有的密钥从不下发给浏览器**。两种情况下一旦上游错误把密钥回显回来，正文在到达页面或磁盘之前就已经遮蔽了，见 [`SECURITY.md`](SECURITY.md)。
 
 - **看清到底问了什么**：每条用例旁边有个「请求上下文」按钮，点开就是模型收到
-  的东西——先是参数，然后是这条用例实际生效的 `system` 与 `user` 消息。用例集里
+  的东西——先是参数，然后是这条用例实际生效的 `system` 与 `user` 消息。测试集里
   自带 system 时它会盖掉全局的，这种覆盖对话框会标出来（「为什么答成这样」多数
   时候的答案在这里，而不在答案里）。接口返回的是已经洗过的请求文档，
   **密钥从来不在里面**；
@@ -447,6 +454,10 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
   提示、把只改了几个字的行配成一对并把那几个字标出来——中文长回答里那个
   「几个字」往往就是一个逗号。长回答是这里唯一的理由：竖着堆下来就是两堵墙，
   读的人得同时在脑子里装两份；
+- **换地址也能回到那次运行**：正在看的那条写进了地址栏的 hash（`#run=<id>`），
+  刷新、或者把链接发给别人，落到的是同一次运行。还在跑的那条会出现在侧栏，带一个
+  「看进度」按钮——跑 bench 的时候点开了别的运行，这是唯一的回路；删除要按两次；
+  传入一个不存在的 id 会直接说找不到，而不是给你一个空页面；
 - **看着它跑**：进度卡上除了整套的进度条，还有一行实时信息——哪个模型、哪条
   用例、是不是还在等首 token、已经收到多少字符、以及最近这一小段时间的速率
   （`≈61 tok/s`）。速率是按流分片的到达间隔现算的，所以它变化的节奏跟着模型走，
@@ -457,7 +468,7 @@ LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
 也能直接标注。
 
 它和工作台走同一个 `POST /api/runs`（带 `inlineCases` + `system`），所以这些运行
-也会进历史、能重跑。`存成用例集` 把当前的 system + prompts 写进 `web/cases/`——
+也会进历史、能重跑。`存成测试集` 把当前的 system + prompts 写进 `web/cases/`——
 某个 prompt 试出意思之后，就是这么变成可重复测试的。
 
 ### URL 本身就是配置
@@ -481,7 +492,8 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 | `POST /api/runs` | 建一次运行 → `{id, total}`。要跑什么有三种互斥的写法：`caseSet` + `cases`（磁盘上某套用例的 id）、单条 `prompt`、或 `inlineCases`（一组用例对象，直接写进这次运行的 `cases.jsonl`）。`system` 是整轮的 system prompt，单条用例可以自己覆盖 |
 | `GET /api/runs/<id>` | `{status, done, total, exitCode?, tail, failures, retried, truncated, data?, error?}` |
 | `DELETE /api/runs/<id>` | 删掉那次运行的目录（它的标注跟着走） |
-| `GET /api/runs/<id>/context` | 这次运行实际发了什么：请求文档，加上每条用例生效的 `system` / `maxTokens` / `temperature`（`systemOverridden` 标出被用例集覆盖的那条） |
+| `POST /api/cases/<名字>/import` | 从一个文本文件建集：`{"path": "..."}`，一行一条 prompt（`.jsonl` 用例文件可以直接吃） |
+| `GET /api/runs/<id>/context` | 这次运行实际发了什么：请求文档，加上每条用例生效的 `system` / `maxTokens` / `temperature`（`systemOverridden` 标出被测试集覆盖的那条） |
 | `GET /api/runs/<id>/annotations` | `{id, annotations: [{case_id, model, verdict, note}]}`——人工判定，`verdict` 取 `pass` / `fail` / `unsure` |
 | `PUT /api/runs/<id>/annotations` | 整表覆盖；一条答案只能有一条标注，重复是 400 |
 | `GET /api/runs/<id>/runs.jsonl` | 逐次原始记录，直接下载 |
@@ -494,19 +506,19 @@ http://127.0.0.1:8137/?models=mock-a,mock-b&cases=math-short,fact-zh&repeats=3
 | `GET /api/presets` | `{presets: [...]}` |
 | `PUT /api/presets` | 整表覆盖写（`{presets: [...]}`） |
 
-**用例集**就是 `LLM_WEB_CASES_DIR` 下的一个 `<名字>.jsonl`；名字只允许
+**测试集**就是 `LLM_WEB_CASES_DIR` 下的一个 `<名字>.jsonl`；名字只允许
 `[A-Za-z0-9._-]`，因为它会变成路径片段。**预设**是一个名字加一组模型与运行
 参数，把「老是回到的那个组合」变成一次点击而不是重填一遍。两者都由服务端
 直接读写文件——`web/cases/` 与 `web/presets.json`，两个都在 gitignore 里，
 因为那是你的数据，而 prompt 可能是私人的。`LLM_WEB_CASES` 只是种子：服务端
-第一次启动、而用例集目录为空时，把那个文件拷成 `cases/default.jsonl`。
+第一次启动、而测试集目录为空时，把那个文件拷成 `cases/default.jsonl`。
 
 `data` 和静态报告消费的是同一份文档。一次运行是一个**子进程**（`bench --json … --web-data …`），全部状态落在 `web/runs/<id>/` 里的文件：
 
 ```
 web/runs/<id>/
   request.json     这次请求的参数
-  cases.jsonl      过滤后的用例集（选了具体用例时）
+  cases.jsonl      过滤后的测试集（选了具体用例时）
   runs.jsonl       bench 的原始输出，运行中不断增长——进度就是它的行数
   stdout.log       bench 的 stdout（渲染出的报告）
   stderr.log       bench 的进度日志
@@ -693,15 +705,15 @@ web/                前端（独立模块：Rabbita + precss）
   cmd/app/          交互页（js，Rabbita TEA）
     main.mbt        表单、运行中的进度、结果
     history.mbt     左栏的运行记录
-    manage.mbt      用例集与预设
+    manage.mbt      测试集与预设
     compare.mbt     两次运行并排
   cmd/server/       静态文件 + API 服务（native）
     main.mbt        路由与处理函数
-    store.mbt       用例集 / 预设 / 运行历史——文件与 JSON
+    store.mbt       测试集 / 预设 / 运行历史——文件与 JSON
   cmd/ssg/          静态报告（native）
   styles/           site.scss → precss → site.css
 
-web/cases/          你的用例集（一套一个 <名字>.jsonl）——在 gitignore 里
+web/cases/          你的测试集（一套一个 <名字>.jsonl）——在 gitignore 里
 web/presets.json    你的「模型 + 参数」组合——在 gitignore 里
 web/runs/           一次运行一个目录——在 gitignore 里
   shell/            交互页的 index.html 外壳

@@ -23,7 +23,7 @@
 ///   REAL_MODEL_B=<模型B>          配合 --compare 跑双模型对比
 ///   REAL_EVIDENCE=<路径>          留证文件，默认 docs/real-gateway-run.md
 ///   REAL_RUNS_OUT=<路径>          --compare 的原始 runs.jsonl
-///   REAL_CASES=<路径>             --compare 的用例集
+///   REAL_CASES=<路径>             --compare 的测试集
 ///   REAL_REPEATS=<n>              --compare 的 repeats，默认 1
 ///   REAL_SHOW_FULL_URL=1          留证里写完整端点（默认只写 scheme://host）
 ///   STREAM_MIN_GAP_MS=300         流式判定的最小间隔（见 check_stream.mbtx）
@@ -575,7 +575,7 @@ async fn main {
       return
     }
     if !(@fs.exists(cases) catch { _ => false }) {
-      bail("找不到用例集 \{cases}（REAL_CASES 可以指定别的）", 2)
+      bail("找不到测试集 \{cases}（REAL_CASES 可以指定别的）", 2)
       return
     }
     ev.section(

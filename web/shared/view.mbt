@@ -531,7 +531,7 @@ fn context_params(context : RunContext) -> @html.Html {
       },
     ),
     (
-      "用例集",
+      "测试集",
       {
         let name = string_field(fields, "caseSet", "")
         if name == "" {

@@ -102,6 +102,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The workbench form is organised around what a run is.** The gateway address and
+  API key moved to the top (they say *who you are talking to*; the model picker says
+  *which one*); "what to run" is one panel with two tabs — a test set, or a single
+  临时 First User Prompt — where typing in the prompt box *is* the switch, so there
+  is no checkbox to forget, and both tabs state the consequence. 用例集 is now
+  测试集 throughout, because 用例 / 用例集 one character apart was asking for
+  confusion. A test set can be created from a plain text file
+  (`POST /api/cases/<name>/import`, one prompt per line; the server reads the path,
+  it runs on your machine), and presets moved to the sidebar next to the run
+  history with a line saying exactly what they cover.
+- **A run can be found again.** Its id lives in the URL fragment (`#run=<id>`), so a
+  refresh or a shared link lands on the same run and an unknown id says so. A run
+  that is still going appears in the sidebar with 看进度 and keeps polling when
+  opened — before this, opening anything else while a benchmark ran lost the live
+  view for good. Delete now asks twice.
+
 - **The run-level system prompt is in the workbench, and the playground is gone.**
   The two pages had converged: the workbench grew columns, a diff view, the
   annotation editor and the line import, so the second page was a duplicate that

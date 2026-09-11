@@ -44,7 +44,7 @@ fn toggle_pick(picks : Array[String], id : String) -> Array[String] {
 /// 会被拿出来比一比的请求字段。顺序就是展示顺序。
 let compared_params : Array[(String, String)] = [
   ("models", "模型"),
-  ("caseSet", "用例集"),
+  ("caseSet", "测试集"),
   ("cases", "用例"),
   ("prompt", "一次性指令"),
   ("repeats", "重复次数"),

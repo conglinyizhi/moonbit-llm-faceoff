@@ -1,12 +1,12 @@
 ///|
-/// 用例集、预设、运行历史的文件层。
+/// 测试集、预设、运行历史的文件层。
 ///
 /// 只做文件和 JSON，不碰 HTTP：路由与响应在 main.mbt。
 /// 分出来的理由很直接——main.mbt 快一千行，而「扫描 runs/」「读写 cases/」
 /// 跟请求处理没有关系。
 
 ///|
-/// 用例集和预设的名字会变成路径片段，所以必须严格：只允许
+/// 测试集和预设的名字会变成路径片段，所以必须严格：只允许
 /// `[A-Za-z0-9._-]`，不许以点开头，不许出现 `..`。
 fn is_safe_name(name : String) -> Bool {
   if name.length() == 0 || name.length() > 64 {
@@ -31,7 +31,7 @@ fn case_set_path(dir : String, name : String) -> String {
 }
 
 ///|
-/// 目录里所有用例集的名字，按名字排序。
+/// 目录里所有测试集的名字，按名字排序。
 async fn list_case_sets(dir : String) -> Array[String] {
   let names : Array[String] = []
   let files = @fs.readdir(dir, sort=true) catch { _ => [] }
@@ -48,7 +48,7 @@ async fn list_case_sets(dir : String) -> Array[String] {
 }
 
 ///|
-/// 读一个用例集，逐条原样返回。
+/// 读一个测试集，逐条原样返回。
 ///
 /// 「原样」是有意的：页面上编辑要能往返，不能只认识 id 和 prompt 就把
 /// system / max_tokens / temperature 丢掉。
@@ -67,9 +67,14 @@ async fn read_case_set(path : String) -> Array[Json] {
 }
 
 ///|
-/// 一个用例集的条数上限。本地工具，超过这个数说明用错地方了，
+/// 一个测试集的条数上限。本地工具，超过这个数说明用错地方了，
 /// 而不是说明这里该支持更大的集合。
 let max_cases_per_set : Int = 500
+
+///|
+/// 从文件导入测试集时的大小上限：这是给人手写 / 导出的文本文件用的，不是数据
+/// 管道。顺手把「拿这个接口读一个几百 MB 的文件」挡在外面。
+let max_import_bytes : Int64 = 4L * 1024L * 1024L
 
 ///|
 /// 一条用例的上限，跟 20 万字符的 prompt 说拜拜。
@@ -109,7 +114,7 @@ fn case_id_of(json : Json, index : Int) -> Result[String, String] {
 }
 
 ///|
-/// 把一个用例集序列化成 JSON Lines —— 和 `bench --cases` 读的、手写的
+/// 把一个测试集序列化成 JSON Lines —— 和 `bench --cases` 读的、手写的
 /// 文件是同一种东西，所以 CLI 和页面看到的是同一份数据。
 fn serialize_case_set(entries : Array[Json]) -> String {
   let out = StringBuilder()

@@ -202,7 +202,11 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
 ///|
 /// 左侧的历史面板。放在表单旁边而不是折叠起来：管理测试的时候，
 /// 「之前跑过什么」和「这次要跑什么」是同一个视线里的两件事。
-fn history_panel(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+fn history_panel(
+  meta : Meta,
+  model : AppModel,
+  emit : @cmd.Emit[Msg],
+) -> @html.Html {
   let body = match model.runs {
     None => [el("p", "muted", [txt("正在载入…")])]
     Some(runs) =>
@@ -237,6 +241,9 @@ fn history_panel(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ]),
     el("div", "history-list", body),
     error,
+    // 预设也在侧栏：它和运行记录是同一类东西——「这次运行怎么配的」，
+    // 一个是跑过的、一个是准备跑的。
+    preset_panel(meta, model, emit),
   ])
 }
 
@@ -275,6 +282,7 @@ fn run_item(
   if busy {
     badges.push(el("span", "badge", [txt("处理中…")]))
   }
+  let running = info.status == "running"
   el("article", classes, [
     el("div", "history-row", [
       el("span", "history-time", [txt(format_time(info.startedAt))]),
@@ -284,7 +292,16 @@ fn run_item(
     el("div", "history-scale", [txt(info.summary())]),
     el("div", "history-actions", [
       @html.button(class="link-btn", on_click=emit(Msg::OpenRun(info.id)), [
-        txt(if active { "正在看" } else { "打开" }),
+        txt(
+          if active {
+            "正在看"
+          } else if running {
+            // 跑着的那条也能点回来：不然点了别的运行、或者刷新一下，就找不到它了
+            "看进度"
+          } else {
+            "打开"
+          },
+        ),
       ]),
       @html.button(class="link-btn", on_click=emit(Msg::Rerun(info.id)), [
         txt("重跑"),
@@ -295,11 +312,27 @@ fn run_item(
         on_click=emit(Msg::ToggleComparePick(info.id)),
         [txt(if picked { "✓对比" } else { "对比" })],
       ),
-      @html.button(
-        class="link-btn danger",
-        on_click=emit(Msg::DeleteRun(info.id)),
-        [txt("删除")],
-      ),
+      if model.confirm_delete == Some(info.id) {
+        // 第二次点击才真的删。删除是不可逆的，而这一列的按钮挨得很近
+        @html.button(
+          class="link-btn danger",
+          on_click=emit(Msg::DeleteRun(info.id)),
+          [txt("确认删除")],
+        )
+      } else {
+        @html.button(
+          class="link-btn danger",
+          on_click=emit(Msg::DeleteRun(info.id)),
+          [txt("删除")],
+        )
+      },
+      if model.confirm_delete == Some(info.id) {
+        @html.button(class="link-btn", on_click=emit(Msg::CancelDeleteRun), [
+          txt("取消"),
+        ])
+      } else {
+        @html.fragment([])
+      },
     ]),
   ])
 }

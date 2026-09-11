@@ -38,7 +38,7 @@ struct Defaults {
 struct Meta {
   models : Array[String]
   cases : Array[CaseInfo]
-  /// 用例集列表（round 3 的切换器用它；现在只需要知道名字与条数）。
+  /// 测试集列表（round 3 的切换器用它；现在只需要知道名字与条数）。
   caseSets : Array[CaseSetInfo]
   defaultCaseSet : String
   defaults : Defaults
@@ -80,6 +80,15 @@ extern "js" fn current_search() -> String = "() => window.location.search"
 ///|
 /// 复制到剪贴板。优先用异步 Clipboard API（需要 secure context，127.0.0.1
 /// 算），拿不到就退到 execCommand 的老路子。返回是否已经发出复制指令。
+
+///|
+/// 把「正在看的那次运行」写进地址栏的 hash。
+///
+/// hash 而不是 query：hash 的变化不会让浏览器重新请求页面，所以刷新能找回它、
+/// 却不会因为一次点击就整页重载。空串 = 清掉。
+extern "js" fn set_hash(hash : String) -> Unit = "(hash) => { try { const next = hash ? '#' + hash : window.location.pathname + window.location.search; history.replaceState(null, '', next) } catch (e) {} }"
+
+///|
 extern "js" fn copy_text(text : String) -> Bool = "(text) => { try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text); return true } const a = document.createElement('textarea'); a.value = text; a.style.position = 'fixed'; a.style.opacity = '0'; document.body.appendChild(a); a.select(); const ok = document.execCommand('copy'); document.body.removeChild(a); return ok } catch (e) { return false } }"
 
 ///|
@@ -95,12 +104,20 @@ struct AppModel {
   selected_models : Array[String]
   selected_cases : Array[String]
   prompt : String
-  use_prompt : Bool
   repeats : Int
   max_tokens : Int
   temperature : Double
   pace_ms : Int
   retry : Int
+  /// 已经点过一次「删除」、正在等第二次确认的那条运行。
+  confirm_delete : String?
+  /// 打开页面时要从 hash 里恢复的那条运行（恢复过就清掉，只做一次）。
+  pending_run : String?
+  /// 「从文本文件建测试集」的路径输入（服务端上的路径，服务端去读）。
+  import_path : String
+  /// 「这次跑什么」面板开在哪一页：set（测试集）/ prompt（临时 prompt）。
+  /// 只是视图状态——真正决定跑什么的是上面那个输入框里有没有内容。
+  panel_tab : String
   /// 本次运行的 system prompt：所有用例共用。用例自带的会覆盖它。
   system : String
   run_id : String?
@@ -125,12 +142,12 @@ struct AppModel {
   api_key : String
   /// 上一次复制操作的反馈文字。
   copied : String?
-  /// 当前选的用例集（来自 meta.defaultCaseSet 或 ?caseSet=）。
+  /// 当前选的测试集（来自 meta.defaultCaseSet 或 ?caseSet=）。
   case_set : String
   /// 运行历史（`GET /api/runs`）。None = 还没拉到。
   runs : Array[RunInfo]?
   runs_error : String?
-  /// 当前用例集里的用例。选中集、编辑保存之后会变，所以不能每次去读 meta。
+  /// 当前测试集里的用例。选中集、编辑保存之后会变，所以不能每次去读 meta。
   available_cases : Array[CaseInfo]
   /// 用例编辑态：草稿 + 反馈。
   editing_cases : Bool
@@ -182,6 +199,99 @@ struct AppModel {
 } derive(Eq)
 
 ///|
+/// 导入文本文件时新建的那个集叫什么：优先用手填的「新集名字」，否则用文件名
+/// （去掉目录与扩展名，把不适合出现在文件名里的字符换掉）。
+fn import_set_name(model : AppModel) -> String {
+  let typed = model.new_set_name.trim(chars=" \t\r\n").to_owned()
+  if typed != "" {
+    return typed
+  }
+  let path = model.import_path.trim(chars=" \t\r\n").to_owned()
+  if path == "" {
+    return ""
+  }
+  // 只取文件名那一段：按 `/` 切开，最后一段是非空的
+  let mut base = ""
+  for part in path.split("/") {
+    if part != "" {
+      base = part.to_owned()
+    }
+  }
+  // 去掉扩展名：点号切开，第一段就是主体
+  let mut stem = base
+  for part in base.split(".") {
+    stem = part.to_owned()
+    break
+  }
+  // 集名会变成文件名：只留字母数字、连字符、下划线和非 ASCII（中文等），
+  // 其余换成连字符。服务端也会校验，但让用户在这里就得到个能用的名字更好。
+  let out = StringBuilder()
+  for ch in stem {
+    let code = ch.to_int()
+    let safe = code >= 0x80 ||
+      (code >= 0x30 && code <= 0x39) ||
+      (code >= 0x41 && code <= 0x5A) ||
+      (code >= 0x61 && code <= 0x7A) ||
+      ch == '-' ||
+      ch == '_'
+    out.write_char(if safe { ch } else { '-' })
+  }
+  out.to_string().trim(chars="-.\t\r\n").to_owned()
+}
+
+///|
+/// 保存/导入接口返回里的集名。
+fn json_name(json : Json) -> String {
+  match json {
+    Object(fields) =>
+      match fields.get("name") {
+        Some(String(name)) => name
+        _ => ""
+      }
+    _ => ""
+  }
+}
+
+///|
+/// 地址栏 hash 里的那次运行：`#run=<id>`。
+fn hash_run_id() -> String? {
+  let hash = current_hash()
+  if hash == "" {
+    return None
+  }
+  let body = if hash.has_prefix("#") { hash[1:].to_owned() } else { hash }
+  for part in body.split("&") {
+    let mut key = ""
+    let mut value = ""
+    let mut first = true
+    for piece in part.split("=") {
+      if first {
+        key = piece.to_owned()
+        first = false
+      } else if value == "" {
+        value = piece.to_owned()
+      }
+    }
+    if key == "run" && value != "" {
+      return Some(value)
+    }
+  }
+  None
+}
+
+///|
+extern "js" fn current_hash() -> String = "() => window.location.hash"
+
+///|
+/// 这次跑「临时 First User Prompt」还是跑测试集。
+///
+/// 没有开关：输入框里填了非空内容就是前者。多一个勾选框的代价是——用户填了
+/// 一条 prompt、忘了勾那个框，然后对着 33 道测试题的结果发愣。
+fn AppModel::uses_prompt(self : AppModel) -> Bool {
+  self.prompt.trim(chars=" \t\r\n") != ""
+}
+
+///|
 fn initial_model() -> AppModel {
   let query = parse_query(current_search())
   {
@@ -193,13 +303,20 @@ fn initial_model() -> AppModel {
     selected_models: [],
     selected_cases: [],
     prompt: "",
-    use_prompt: false,
     repeats: 3,
     max_tokens: 2048,
     temperature: 0.0,
     pace_ms: 3000,
     retry: 3,
     system: query.get("system").unwrap_or(""),
+    confirm_delete: None,
+    pending_run: hash_run_id(),
+    import_path: "",
+    panel_tab: if query.get("prompt") is Some(_) {
+      "prompt"
+    } else {
+      "set"
+    },
     run_id: None,
     status: "idle",
     done: 0,
@@ -353,10 +470,13 @@ enum Msg {
   ToggleModel(String)
   ToggleCase(String)
   SelectAllCases
-  UsePrompt(Bool)
   PromptChanged(String)
   RepeatsChanged(String)
   SystemChanged(String)
+  SetPanelTab(String)
+  ImportPathChanged(String)
+  ImportCaseFile
+  CaseFileImported(Result[Json, Error])
   MaxTokensChanged(String)
   TemperatureChanged(String)
   PaceChanged(String)
@@ -375,9 +495,11 @@ enum Msg {
   ViewedLoaded(String, Result[RunStatus, Error])
   CloseRun
   DeleteRun(String)
+  CancelDeleteRun
+  ViewedProgress(String, Result[RunStatus, Error])
   RunDeleted(String, Result[Json, Error])
   Rerun(String)
-  // 用例集
+  // 测试集
   ToggleCaseEditor
   SelectCaseSet(String)
   CaseSetLoaded(String, Result[CaseSetResponse, Error])
@@ -461,10 +583,21 @@ fn app() -> @rabbita.App {
   @rabbita.new(fn() {
     let (model, emit) = @rabbita.create_state_with_init(
       init=fn(emit) {
-        (
-          initial_model(),
-          @cmd.batch([fetch_meta(emit), fetch_runs(emit), fetch_presets(emit)]),
-        )
+        let model = initial_model()
+        // 地址栏 hash 里带着一条运行（#run=xxx）就直接打开它：刷新、把链接发给
+        // 别人、或者从浏览器历史里退回来，都会走到这里。id 不存在时那次请求会
+        // 404，页面按「找不到这次运行」处理。
+        let opening = match model.pending_run {
+          Some(id) =>
+            @cmd.batch([
+              fetch_viewed(id, emit),
+              fetch_runs(emit),
+              fetch_presets(emit),
+            ])
+          None =>
+            @cmd.batch([fetch_meta(emit), fetch_runs(emit), fetch_presets(emit)])
+        }
+        ({ ..model, pending_run: None, }, opening)
       },
       update~,
     )
@@ -541,8 +674,7 @@ fn update(
               Some(text) => text
               None => model.prompt
             },
-            use_prompt: query_prompt is Some(_),
-            // query 里能指定用例集；否则用服务端的默认集。
+            // query 里能指定测试集；否则用服务端的默认集。
             case_set: if model.case_set == "" {
               meta.defaultCaseSet
             } else {
@@ -591,8 +723,20 @@ fn update(
           )
         None => (model, @cmd.none)
       }
-    UsePrompt(value) => ({ ..model, use_prompt: value, }, @cmd.none)
-    PromptChanged(text) => ({ ..model, prompt: text, }, @cmd.none)
+    // 开始打字就把面板跟到临时那一页：用户的动作说明了他要看哪一页
+    PromptChanged(text) =>
+      (
+        {
+          ..model,
+          prompt: text,
+          panel_tab: if text.trim(chars=" \t\r\n") == "" {
+            "set"
+          } else {
+            "prompt"
+          },
+        },
+        @cmd.none,
+      )
     ExtraModelsChanged(text) => ({ ..model, extra_models: text, }, @cmd.none)
     BaseUrlChanged(text) => ({ ..model, base_url: text, }, @cmd.none)
     ApiKeyChanged(text) => ({ ..model, api_key: text, }, @cmd.none)
@@ -645,18 +789,40 @@ fn update(
             tail: status.tail.unwrap_or(""),
             live: @shared.parse_live(status.live, status.liveAgeMs),
           }
+          // 换了一条运行才把上下文作废；同一条的重复加载（轮询、刷新列表）不动它
+          let same = match model.viewed {
+            Some(previous) => previous.id == id
+            None => false
+          }
           (
             {
               ..model,
               viewed: Some(viewed),
               busy_run: None,
-              // 换了一条运行，上一次的上下文作废
-              context: None,
-              context_case: None,
-              context_error: None,
+              context: if same {
+                model.context
+              } else {
+                None
+              },
+              context_case: if same {
+                model.context_case
+              } else {
+                None
+              },
+              context_error: if same {
+                model.context_error
+              } else {
+                None
+              },
             },
-            // 历史运行的标注也要拉：它存在那次运行的目录里，不在当前这次里
-            fetch_annotations(id, emit),
+            @cmd.batch([
+              // 历史运行的标注也要拉：它存在那次运行的目录里，不在当前这次里
+              fetch_annotations(id, emit),
+              // 写进 hash：刷新之后还能回到这一条，也能把链接发给别人
+              @cmd.effect(fn() { set_hash("run=" + id) }),
+              // 打开的可能还在跑：先接上轮询，跑完自己会停
+              @rabbita.delay(fetch_viewed(id, emit), 400),
+            ]),
           )
         }
         Err(error) =>
@@ -669,13 +835,67 @@ fn update(
             @cmd.none,
           )
       }
-    CloseRun => ({ ..model, viewed: None, }, @cmd.none)
+    ViewedProgress(id, result) =>
+      match result {
+        Ok(status) => {
+          let data = match status.data {
+            Some(json) =>
+              match @shared.parse_page_data_json(json) {
+                Ok(data) => Some(data)
+                Err(_) => None
+              }
+            None => model.viewed.bind(fn(viewed) { viewed.data })
+          }
+          let viewed : ViewedRun = {
+            id,
+            status: status.status,
+            data,
+            error: status.error,
+            tail: status.tail.unwrap_or(""),
+            live: @shared.parse_live(status.live, status.liveAgeMs),
+          }
+          // 轮询的是同一条运行时，别把「请求上下文」对话框的状态清掉。清掉的
+          // 话它开了就关——每 400ms 关一次，表现成「点了没反应」。
+          let next = {
+            ..model,
+            viewed: Some(viewed),
+            runs_error: None,
+            context_case: model.context_case,
+            context: model.context,
+            context_error: model.context_error,
+          }
+          if status.status == "running" {
+            // 打开一条还在跑的运行：接着看它的进度，而不是停在打开那一刻
+            (next, @rabbita.delay(fetch_viewed(id, emit), 400))
+          } else {
+            (next, @cmd.batch([fetch_runs(emit), fetch_annotations(id, emit)]))
+          }
+        }
+        Err(error) =>
+          (
+            {
+              ..model,
+              viewed: None,
+              // 404 在这里落地：hash 里的 id 不存在（删掉了，或者从来就没有）
+              runs_error: Some("找不到这次运行（\{id}）：\{error}"),
+            },
+            @cmd.none,
+          )
+      }
+    CloseRun => ({ ..model, viewed: None, }, @cmd.effect(fn() { set_hash("") }))
+    // 删除要按两次：第一次只把按钮变成「确认删除」，第二次才真的删。
     DeleteRun(id) =>
       if model.busy_run == Some(id) {
         (model, @cmd.none)
+      } else if model.confirm_delete == Some(id) {
+        (
+          { ..model, busy_run: Some(id), confirm_delete: None, },
+          delete_run_cmd(id, emit),
+        )
       } else {
-        ({ ..model, busy_run: Some(id), }, delete_run_cmd(id, emit))
+        ({ ..model, confirm_delete: Some(id), runs_error: None, }, @cmd.none)
       }
+    CancelDeleteRun => ({ ..model, confirm_delete: None, }, @cmd.none)
     RunDeleted(id, result) =>
       match result {
         Ok(_) => {
@@ -797,7 +1017,7 @@ fn update(
             {
               ..model,
               cases_error: Some(
-                "读不到用例集 \{name}：" + error.to_string(),
+                "读不到测试集 \{name}：" + error.to_string(),
               ),
             },
             @cmd.none,
@@ -936,7 +1156,7 @@ fn update(
       }
     ImportTextChanged(text) => ({ ..model, import_text: text, }, @cmd.none)
     ImportLines(replace) => {
-      // 上限按「已有 + 新导入」算：用例集那边也有 500 的上限
+      // 上限按「已有 + 新导入」算：测试集那边也有 500 的上限
       let existing = if replace {
         0
       } else {
@@ -1019,7 +1239,7 @@ fn update(
           {
             ..model,
             cases_error: Some(
-              "当前没有选中的用例集。先「另存为新集」。",
+              "当前没有选中的测试集。先「另存为新集」。",
             ),
           },
           @cmd.none,
@@ -1334,6 +1554,42 @@ fn update(
       }
     CloseCompare => ({ ..model, compare: None, compare_picks: [], }, @cmd.none)
     SystemChanged(text) => ({ ..model, system: text, }, @cmd.none)
+    SetPanelTab(tab) => ({ ..model, panel_tab: tab, }, @cmd.none)
+    ImportPathChanged(text) => ({ ..model, import_path: text, }, @cmd.none)
+    ImportCaseFile => {
+      let name = import_set_name(model)
+      if name == "" {
+        (
+          {
+            ..model,
+            cases_error: Some(
+              "先写个新集名字，或用文件本身的名字",
+            ),
+          },
+          @cmd.none,
+        )
+      } else {
+        (
+          { ..model, cases_error: None, cases_saved: None, },
+          import_case_file(name, model, emit),
+        )
+      }
+    }
+    CaseFileImported(result) =>
+      match result {
+        Ok(json) =>
+          (
+            {
+              ..model,
+              cases_saved: Some("已从文本文件建好测试集"),
+              import_path: "",
+              panel_tab: "set",
+            },
+            @cmd.batch([fetch_meta(emit), fetch_case_set(json_name(json), emit)]),
+          )
+        Err(error) =>
+          ({ ..model, cases_error: Some(error.to_string()), }, @cmd.none)
+      }
     RepeatsChanged(text) =>
       ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
     MaxTokensChanged(text) =>
@@ -1385,7 +1641,17 @@ fn update(
             done: 0,
             busy_run: None,
           }
-          (next, @rabbita.delay(poll_run(response.id, emit), 400))
+          (
+            next,
+            @cmd.batch([
+              @rabbita.delay(poll_run(response.id, emit), 400),
+              // 立刻让侧栏出现这条「运行中」：不然跑 bench 的这几分钟里，侧栏里
+              // 找不到它，点开别的运行之后也回不来
+              fetch_runs(emit),
+              // 地址栏记住它：刷新之后还能回到这次运行
+              @cmd.effect(fn() { set_hash("run=" + response.id) }),
+            ]),
+          )
         }
         Err(error) =>
           (
@@ -1505,12 +1771,12 @@ struct RunPayload {
 fn RunPayload::of(model : AppModel) -> RunPayload {
   {
     models: effective_models(model),
-    cases: if model.use_prompt {
+    cases: if model.uses_prompt() {
       []
     } else {
       model.selected_cases
     },
-    prompt: if model.use_prompt {
+    prompt: if model.uses_prompt() {
       model.prompt
     } else {
       ""
@@ -1599,7 +1865,7 @@ fn share_url(model : AppModel) -> String {
   if models.length() > 0 {
     parts.push("models=" + percent_encode(models.join(",")))
   }
-  if model.use_prompt && model.prompt != "" {
+  if model.uses_prompt() {
     parts.push("prompt=" + percent_encode(model.prompt))
   } else if model.selected_cases.length() > 0 {
     parts.push("cases=" + percent_encode(model.selected_cases.join(",")))
@@ -1661,7 +1927,10 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("div", "app", [
     header(model),
     el("div", "wrap workbench", [
-      history_panel(model, emit),
+      match model.meta {
+        Some(meta) => history_panel(meta, model, emit)
+        None => @html.fragment([])
+      },
       el("main", "workbench-main", [
         controls(model, emit),
         progress(model),
@@ -1760,7 +2029,7 @@ fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ),
     el("div", "hint", [
       txt(
-        "留空就是不带 system。用例集里逐条写的 system 优先于这里填的。",
+        "留空就是不带 system。测试集里逐条写的 system 优先于这里填的。",
       ),
     ]),
   ])
@@ -1803,14 +2072,12 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         } else {
           @html.fragment([])
         },
-        model_picker(meta, model, emit),
-        // 网关与密钥紧挨着模型：它们和「跑哪个模型」是同一类设置——本次运行
-        // 对着谁说话。以前在参数行下面，和「重复几次」混在一起。
+        // 网关与密钥放在模型上面：这是「对着谁说话」，看模型勾选之前先确定它。
+        // 以前在参数行下面，和「重复几次」混在一起。
         gateway_row(model, emit),
+        model_picker(meta, model, emit),
         system_field(model, emit),
-        preset_panel(meta, model, emit),
         case_panel(meta, model, emit),
-        prompt_picker(model, emit),
         param_row(model, emit),
         action_row(model, emit),
         if model.autorun_held {
@@ -1880,31 +2147,6 @@ fn labelled_checkbox(
 }
 
 ///|
-/// 临时指令：勾上就只跑这一条，忽略上面的用例勾选。
-fn prompt_picker(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  el("fieldset", "picker", [
-    el("legend", "", [txt("临时指令")]),
-    @html.label(for_="use-prompt", class="check", [
-      @html.input(
-        input_type=@html.InputType::Checkbox,
-        id="use-prompt",
-        checked=model.use_prompt,
-        on_change=emit.map(fn(_value) { UsePrompt(!model.use_prompt) }),
-      ),
-      txt("只用下面这一条指令"),
-    ]),
-    @html.input(
-      input_type=@html.InputType::Text,
-      id="prompt",
-      class="prompt-input",
-      value=model.prompt,
-      placeholder="例如：用一句话说明什么是航空母舰",
-      on_input=emit.map(fn(text) { PromptChanged(text) }),
-    ),
-  ])
-}
-
-///|
 fn param_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("div", "params", [
     number_field(
@@ -1957,7 +2199,7 @@ fn number_field(
 fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let running = model.status == "running" || model.status == "starting"
   let total = effective_models(model).length() *
-    (if model.use_prompt { 1 } else { model.selected_cases.length() }) *
+    (if model.uses_prompt() { 1 } else { model.selected_cases.length() }) *
     model.repeats
   el("div", "actions", [
     // 刻意不用 `disabled` 属性：从「忙」切回「闲」时 Rabbita 的 vdom diff
@@ -2028,21 +2270,29 @@ fn export_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       let base = "/api/runs/" + id
       el("div", "actions export-row", [
         el("span", "hint", [txt("导出：")]),
-        @html.button(class="ghost", on_click=emit(Msg::CopyMarkdown), [
+        // 同一排里既有 button 又有 a：用同一个 class，否则两者的字体度量不一样，
+        // 一排按钮会错开一两个像素（看着「没对齐」）
+        @html.button(class="chip", on_click=emit(Msg::CopyMarkdown), [
           txt("复制 Markdown 报告"),
         ]),
-        @html.button(class="ghost", on_click=emit(Msg::CopyShareLink), [
+        @html.button(class="chip", on_click=emit(Msg::CopyShareLink), [
           txt("复制分享链接"),
         ]),
-        @html.a(href=base + "/runs.jsonl", download="runs.jsonl", [
-          txt("下载 runs.jsonl"),
-        ]),
-        @html.a(href=base + "/data.json", download="data.json", [
+        @html.a(
+          href=base + "/runs.jsonl",
+          download="runs.jsonl",
+          class="chip",
+          [txt("下载 runs.jsonl")],
+        ),
+        @html.a(href=base + "/data.json", download="data.json", class="chip", [
           txt("下载 data.json"),
         ]),
-        @html.a(href=base + "/report.html", download="report.html", [
-          txt("下载静态报告"),
-        ]),
+        @html.a(
+          href=base + "/report.html",
+          download="report.html",
+          class="chip",
+          [txt("下载静态报告")],
+        ),
         match model.copied {
           Some(text) => el("span", "hint copied", [txt(text)])
           None => @html.fragment([])

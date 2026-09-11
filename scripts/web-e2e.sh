@@ -226,21 +226,32 @@ grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模�
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
 grep -q 'id="api-key"' "$tmp/form.html" || fail "表单里没有 API key 输入框" "$tmp/form.html"
 grep -q 'type="password"' "$tmp/form.html" || fail "API key 输入框不是 password 类型" "$tmp/form.html"
+# 「这次跑什么」的两页：测试集 / 临时 First User Prompt
+grep -q 'panel-tabs' "$tmp/form.html" || fail "「这次跑什么」没有做成两页" "$tmp/form.html"
+grep -q '临时 First User Prompt' "$tmp/form.html" || fail "没有临时 prompt 那一页" "$tmp/form.html"
+# 从纯文本文件新建测试集
+grep -q 'id="import-path"' "$tmp/form.html" || fail "没有从文本文件建测试集的地方" "$tmp/form.html"
 # system prompt 是运行级的：页面打开时预填（服务端 LLM_WEB_SYSTEM），能改
 grep -q 'id="system"' "$tmp/form.html" || fail "工作台没有 system prompt 输入框" "$tmp/form.html"
 # 网关与密钥应当排在「模型」之后、「预设」之前（原来在参数行下面）
-python3 - "$tmp/form.html" <<'ORDER'
+# 顺序断言写成 if ! ...：脚本开头是 set -e，python 退出码 1 会让脚本当场退出，
+# 后面那句 `[ $? -eq 0 ] || fail` 根本跑不到——报错也就没了，只看到 e2e 静默结束。
+if ! python3 - "$tmp/form.html" <<'ORDER'
 import sys
 html = open(sys.argv[1], encoding="utf-8").read()
-i_model = html.find('id="model-mock-a"')
-i_gateway = html.find('id="base-url"')
-i_key = html.find('id="api-key"')
-i_system = html.find('id="system"')
-i_preset = html.find("预设")
-order = [i_model, i_gateway, i_key, i_system, i_preset]
+# 网关与密钥在最上面（先确定对着谁说话），然后模型、system、最后「这次跑什么」
+order = [
+    html.find('id="base-url"'),
+    html.find('id="api-key"'),
+    html.find('id="model-mock-a"'),
+    html.find('id="system"'),
+    html.find('panel-tabs'),
+]
 sys.exit(0 if all(x >= 0 for x in order) and order == sorted(order) else 1)
 ORDER
-[ $? -eq 0 ] || fail "表单顺序不对（应为 模型 → 网关 → 密钥 → system → 预设）" "$tmp/form.html"
+then
+  fail "表单顺序不对（应为 网关 → 密钥 → 模型 → system → 这次跑什么）" "$tmp/form.html"
+fi
 echo "ok: 浏览器里表单渲染出来了（含手输模型 / 网关 / 密钥，/api/meta 链路通）"
 
 echo "==> 浏览器触发一次评测（?autorun）"
@@ -290,7 +301,7 @@ echo "$probe" | grep -q '"answers":[1-9]' ||
   fail "历史视图里没渲染出那次的结果：$probe"
 echo "ok: 侧栏列得出历史，点开能看历史结果（只读）"
 
-echo "==> 用例集与预设"
+echo "==> 测试集与预设"
 # 页面改一条用例 + 存一条预设，然后回到磁盘上确认——页面说「已保存」不等于
 # 真的写进去了，这一条断言就是奔着那道口子去的。
 manage_probe='(async () => {
@@ -315,7 +326,7 @@ manage_probe='(async () => {
     prompt.dispatchEvent(new Event("input", { bubbles: true }));
   }
   await new Promise((r) => setTimeout(r, 400));
-  const save = byText("button", "保存用例集");
+  const save = byText("button", "保存测试集");
   if (save) { save.click(); }
   await new Promise((r) => setTimeout(r, 1800));
   out.saved = document.querySelector(".editor-actions .copied")
@@ -366,11 +377,11 @@ manage_probe='(async () => {
 dump_page_script "$run_url" 8000 "$tmp/manage.html" "$manage_probe" 2500 "$DUMP_READY_RUN_DONE"
 probe=$(grep -o 'SCRIPT .*' "$tmp/manage.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '"hasSetSelect":true' ||
-  fail "用例集的下拉没渲染出来：$probe"
+  fail "测试集的下拉没渲染出来：$probe"
 echo "$probe" | grep -qE '"drafts":[1-9]' ||
   fail "编辑态里没有草稿：$probe"
 echo "$probe" | grep -q '已保存' ||
-  fail "保存用例集没有成功反馈：$probe"
+  fail "保存测试集没有成功反馈：$probe"
 echo "$probe" | grep -q 'e2e-preset' ||
   fail "预设没有出现在列表里：$probe"
 echo "$probe" | grep -q '"systemAfterApply":"E2E 预设里的 system。"' ||
@@ -383,7 +394,7 @@ grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
   fail "页面说保存了，但磁盘上的用例没变"
 grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
-echo "ok: 页面上能用例集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
+echo "ok: 页面上能用测试集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
 
 echo "==> 两次运行对比"
 # 勾两次运行 → 头部换成「对比这两次」→ 点下去应该出来三块：参数差异、指标
@@ -540,6 +551,31 @@ context_probe='(async () => {
   const item = document.querySelector(".history-item");
   item.querySelectorAll(".history-actions button")[0].click();
   await new Promise((r) => setTimeout(r, 2500));
+  // 「这次跑什么」两页：切到临时 prompt 页时把后果说清楚
+  const tabs = Array.from(document.querySelectorAll(".panel-tabs button"));
+  const promptTab = tabs.find((b) => b.textContent === "临时 First User Prompt");
+  const setTab = tabs.find((b) => b.textContent === "测试集");
+  if (promptTab && setTab) {
+    promptTab.click();
+    await new Promise((r) => setTimeout(r, 400));
+    out.promptHintEmpty = (document.querySelector(".prompt-tab .hint") || {}).textContent || "";
+    const box = document.querySelector("#prompt");
+    box.value = "e2e 的临时 prompt";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    out.promptHintFilled = (document.querySelector(".prompt-tab .notice") || {}).textContent || "";
+    setTab.click();
+    await new Promise((r) => setTimeout(r, 400));
+    out.noticeOnSetTab = (document.querySelector(".case-panel .notice") || {}).textContent || "";
+    out.importRowVisible = !!document.querySelector("#import-path");
+    // 清空，别影响后面的运行
+    promptTab.click();
+    await new Promise((r) => setTimeout(r, 300));
+    const empty = document.querySelector("#prompt");
+    empty.value = "";
+    empty.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+  }
   const buttons = Array.from(document.querySelectorAll(".context-btn"));
   out.buttons = buttons.length;
   if (buttons.length === 0) { return out; }
@@ -562,11 +598,19 @@ context_probe='(async () => {
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/context.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '留空 = 跑上面那套测试集' ||
+  fail "临时 prompt 那页没说清楚「留空会怎样」：$probe"
+echo "$probe" | grep -q '填了内容 = 这次只跑这一条' ||
+  fail "临时 prompt 填了之后没说清楚后果：$probe"
+echo "$probe" | grep -q '测试集不参与' ||
+  fail "在测试集那一页没有提醒「这次不会跑它」：$probe"
+echo "$probe" | grep -q '"importRowVisible":true' ||
+  fail "测试集那一页没有「从纯文本文件新建」：$probe"
 echo "$probe" | grep -qE '"buttons":[1-9]' ||
   fail "用例行上没有「请求上下文」按钮：$probe"
 echo "$probe" | grep -q '"modal":true' ||
   fail "点了按钮没有弹出对话框：$probe"
-echo "$probe" | grep -q '用例集' ||
+echo "$probe" | grep -q '测试集' ||
   fail "对话框里没有运行级参数：$probe"
 echo "$probe" | grep -qE '"roles":\["system","user"\]' ||
   fail "对话框里没有 system / user 两条消息：$probe"
@@ -789,16 +833,35 @@ delete_probe='(async () => {
   const before = document.querySelectorAll(".history-item").length;
   const item = document.querySelector(".history-item");
   if (!item) { return { error: "no history item" }; }
-  const del = Array.from(item.querySelectorAll(".history-actions button"))
-    .find((b) => b.textContent === "删除");
+  const find = (text) => Array.from(item.querySelectorAll(".history-actions button"))
+    .find((b) => b.textContent === text);
+  const del = find("删除");
   if (!del) { return { error: "no delete button" }; }
+  // 第一次点击只是把按钮换成确认，列表不能变
   del.click();
+  await new Promise((r) => setTimeout(r, 600));
+  const confirm = find("确认删除");
+  const hasCancel = !!find("取消");
+  const confirmFirst = document.querySelectorAll(".history-item").length;
+  if (!confirm) { return { before: before, after: confirmFirst, noConfirm: true }; }
+  confirm.click();
   await new Promise((r) => setTimeout(r, 1500));
-  return { before: before, after: document.querySelectorAll(".history-item").length };
+  return {
+    before: before,
+    afterFirstClick: confirmFirst,
+    hasCancel: hasCancel,
+    after: document.querySelectorAll(".history-item").length,
+  };
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/delete.html" "$delete_probe" 2000 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/delete.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '"after":' || fail "删除探针没跑起来：$probe"
+echo "$probe" | grep -q '"hasCancel":true' ||
+  fail "点一次删除之后没有出现「取消」（二次确认没做）:$probe"
+before_first=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')
+first=$(echo "$probe" | sed -n 's/.*"afterFirstClick":\([0-9]*\).*/\1/p')
+[ -n "$before_first" ] && [ "$first" = "$before_first" ] ||
+  fail "第一次点删除就把记录删了（$before_first → $first）:$probe"
 before=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')
 after=$(echo "$probe" | sed -n 's/.*"after":\([0-9]*\).*/\1/p')
 [ -n "$before" ] && [ -n "$after" ] && [ "$after" -lt "$before" ] ||
