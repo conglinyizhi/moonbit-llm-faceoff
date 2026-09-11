@@ -214,6 +214,12 @@ bash scripts/real-gateway.sh               # → docs/real-gateway-run.md
 
 ## 1. 单次问答与流式输出
 
+`moon install ./cmd/...`（或 `make install`）会把两个命令行工具装进
+`~/.moon/bin`——工具链能跑起来就说明它已经在 `PATH` 上，装完就是干干净净的
+`faceoff` 和 `bench`。那个目录是工具链自己的 bin：**家目录下的普通目录**，
+不需要 `sudo`，不往系统里装东西，`make uninstall` 就能把两个二进制摘掉。
+下面的例子走另一条路：直接指构建产物，好处是不装任何东西、新开一个 shell 就能用。
+
 ```bash
 # 构建产物在 _build/ 下；每个 shell 先给它们起个名字
 faceoff=./_build/native/debug/build/cmd/faceoff/faceoff.exe

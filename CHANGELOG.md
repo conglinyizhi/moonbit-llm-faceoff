@@ -102,6 +102,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `make install` (a thin wrapper over `moon install ./cmd/...`) puts `faceoff` and
+  `bench` in `~/.moon/bin`. The README had been writing `faceoff` as a bare
+  command without ever saying how it gets onto the PATH; it now covers both
+  routes, and `scripts/real-gateway.sh` writes the command it actually ran into
+  its evidence instead of a shortened shape nobody can copy.
+
 - `scripts/real-gateway.sh` — the first thing in this repo that talks to a
   **real** endpoint, and the one that was missing: everything else runs against
   the bundled mock, which cannot tell you whether the client fits a real

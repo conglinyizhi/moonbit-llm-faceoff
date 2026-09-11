@@ -236,6 +236,13 @@ under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
 
 ## 1. One-shot and streaming
 
+`moon install ./cmd/...` (or `make install`) drops both CLIs into `~/.moon/bin`,
+which is already on your `PATH` once the toolchain works — after that it really is
+plain `faceoff` and `bench`. That directory is the toolchain's own bin directory:
+a per-user location under your home, no `sudo`, nothing installed system-wide,
+and `make uninstall` takes the two binaries back out. The examples below name the
+build output instead, so they work in a fresh shell without installing anything.
+
 ```bash
 # the build puts the binaries under _build/; name them once per shell
 faceoff=./_build/native/debug/build/cmd/faceoff/faceoff.exe
