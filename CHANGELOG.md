@@ -102,6 +102,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **The server no longer spawns `bench` through `/bin/sh`.** This is the one that
+  actually kept the workbench off Windows: every run went through
+  `spawn_orphan("/bin/sh", ["-c", "bench … > …; echo $? > exit_code"])`, and
+  Windows has no `/bin/sh`, so the very first click would have died there. The
+  child is now spawned directly with an argv array and a task attached to the
+  server's own lifetime waits for it to be reaped and writes `exit_code`. Two
+  side effects worth having: the shell-quoting helper is gone (nothing to escape,
+  and no command string left to inject into), and stdout/stderr are ordinary file
+  redirects rather than `>` and `2>>` inside a string.
+
+  Two things went wrong on the way, both kept in the comments because they are
+  the kind of mistake that looks right: the argv array still began with the bench
+  binary path (it was argv[0] for a shell command line, but `spawn` adds argv[0]
+  itself, so the child saw its own path as a flag), and the waiter was first put
+  in a `with_task_group`/`no_wait=true` scope — `no_wait` does not mean
+  fire-and-forget, it means "do not wait for this task *and cancel it when the
+  scope ends*", so the exit code was never written.
+
 - `make serve` builds the page and then starts the server **from `web/`**, which is
   the part everyone forgets: the server resolves `out/`, `runs/`, `cases/` and
   `presets.json` against its working directory, so starting it from the repository

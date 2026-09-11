@@ -87,9 +87,13 @@ async fn main {
     _ => ()
   }
   note("listening on http://127.0.0.1:\{server.addr.port()}/")
-  server.run_forever() <| async fn(request, body, conn) {
-    handle(config, request, body, conn)
-  }
+  // 这个 group 活到进程结束。子进程的「等退出码」任务挂在它上面，而不是挂在
+  // 请求任务上：请求发完 202 就结束了，而一次运行要跑几分钟。
+  @async.with_task_group(async fn(group) {
+    server.run_forever() <| async fn(request, body, conn) {
+      handle(config, group, request, body, conn)
+    }
+  })
 }
 
 // ---------------------------------------------------------------- 配置
@@ -171,6 +175,7 @@ fn allowed_models() -> Array[String] {
 ///|
 async fn handle(
   config : ServerConfig,
+  group : @async.TaskGroup[Unit],
   request : @http.Request,
   body : &@io.Reader,
   conn : @http.ServerConnection,
@@ -199,7 +204,7 @@ async fn handle(
         200,
         Json::object({ "runs": Json::array(scan_runs(config.work_dir)) }),
       )
-    (Post, "/api/runs") => start_run(config, body, conn)
+    (Post, "/api/runs") => start_run(config, group, body, conn)
     (Delete, _) if path.has_prefix("/api/runs/") =>
       delete_run(config, path[10:].to_owned(), conn)
     (Get, _) if path.has_prefix("/api/runs/") =>
@@ -606,6 +611,7 @@ async fn read_json_body(
 ///|
 async fn start_run(
   config : ServerConfig,
+  group : @async.TaskGroup[Unit],
   body : &@io.Reader,
   conn : @http.ServerConnection,
 ) -> Unit {
@@ -643,18 +649,22 @@ async fn start_run(
   // only carried in the child environment below.
   let safe_json = sanitized_request_json(obj, request.case_set)
   write_text(dir + "/request.json", safe_json.stringify(indent=2) + "\n")
-  let command = match build_command(config, request, dir) {
-    Ok(command) => command
+  let argv = match build_argv(config, request, dir) {
+    Ok(argv) => argv
     Err(message) => {
       send_text(conn, 400, message)
       return
     }
   }
   let spawned = @process.spawn_orphan(
-    "/bin/sh",
-    ["-c", command],
+    config.bench_bin,
+    argv,
     extra_env=run_env(config, request),
     inherit_env=true,
+    stdout=@process.redirect_to_file(
+      dir + "/stdout.log",
+      create_mode=@fs.CreateOrTruncate,
+    ),
     stderr=@process.redirect_to_file(
       dir + "/stderr.log",
       create_mode=@fs.CreateOrTruncate,
@@ -665,6 +675,12 @@ async fn start_run(
       return
     }
   }
+  // 退出码在这里等出来写，而不是让 shell 写（Windows 上没有 sh 可写）。
+  // 挂在服务器级别的 group 上：它比这次请求活得久，而请求已经把 202 发出去了。
+  group.spawn_bg(async fn() {
+    let code = @process.wait_pid(spawned) catch { _ => -1 }
+    write_text(dir + "/exit_code", code.to_string() + "\n")
+  })
   note("run \{id} started (pid \{spawned})")
   send_json(
     conn,
@@ -856,14 +872,21 @@ fn sanitized_request_json(obj : Map[String, Json], case_set : String) -> Json {
 }
 
 ///|
-/// 拼 bench 命令行，末尾把退出码写进 exit_code，供状态轮询判断完成。
-async fn build_command(
+/// 拼 bench 的参数表。
+///
+/// 只返回**参数**（argv[0] 由 spawn 自己填成可执行文件路径）。以前这是一条 shell
+/// 命令行，所以数组以二进制路径开头——现在它不再是 argv[0]，否则 bench 会把
+/// 自己的路径当成一个flag（真的报过 `unknown flag: .../bench.exe`）。
+///
+/// 改成参数表的理由：以前这里是 `"/bin/sh", ["-c", ...]`，而 Windows 上没有
+/// /bin/sh——整个工作台在那边第一下就死在起子进程上。附带两个好处：不用自己写
+/// shell 转义（`quote` 已删），也不再有一条能被注入的命令串。
+async fn build_argv(
   config : ServerConfig,
   request : RunRequest,
   dir : String,
-) -> Result[String, String] {
+) -> Result[Array[String], String] {
   let argv : Array[String] = [
-    config.bench_bin,
     "--models",
     request.models.join(","),
     "--repeats",
@@ -904,32 +927,7 @@ async fn build_command(
   if request.api_key.unwrap_or(config.api_key) == "" {
     argv.push("--no-key")
   }
-  let quoted = argv.map(quote).join(" ")
-  Ok(
-    quoted +
-    " > " +
-    quote(dir + "/stdout.log") +
-    " 2>> " +
-    quote(dir + "/stderr.log") +
-    "; echo $? > " +
-    quote(dir + "/exit_code"),
-  )
-}
-
-///|
-/// 单引号包裹，内部单引号按 shell 规则转义。
-fn quote(value : String) -> String {
-  let buf = StringBuilder()
-  buf.write_char('\'')
-  for ch in value {
-    if ch == '\'' {
-      buf.write_string("'\\''")
-    } else {
-      buf.write_char(ch)
-    }
-  }
-  buf.write_char('\'')
-  buf.to_string()
+  Ok(argv)
 }
 
 ///|
