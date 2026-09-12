@@ -485,7 +485,6 @@ enum Msg {
   CloseRun
   DeleteRun(String)
   CancelDeleteRun
-  ViewedProgress(String, Result[RunStatus, Error])
   RunDeleted(String, Result[Json, Error])
   Rerun(String)
   // 测试集
@@ -763,6 +762,32 @@ fn update(
       }
     ViewedLoaded(id, result) =>
       match result {
+        // 还在跑的那次运行**不是**「历史运行」：它就该是当前运行
+        //
+        // 不这么分辨的话，跑着的时候刷新一下，页面会把自己当成在看一份只读历史：
+        // 进度卡不见（换成一大段原始日志尾），开始按钮也能再点一次——又开一炉
+        Ok(status) if status.status == "running" =>
+          (
+            {
+              ..model,
+              run_id: Some(id),
+              status: "running",
+              done: status.done,
+              total: status.total,
+              failures: status.failures,
+              retried: status.retried,
+              truncated: status.truncated,
+              viewed: None,
+              viewed_error: None,
+              busy_run: None,
+            },
+            @cmd.batch([
+              // 写进地址栏：刷新之后还能回到这次运行
+              @cmd.effect(fn() { set_run_param(id) }),
+              // 接着用「当前运行」的轮询：跑完它会自己刷结果、解锁按钮
+              @rabbita.delay(poll_run(id, emit), 400),
+            ]),
+          )
         Ok(status) => {
           let data = match status.data {
             Some(json) =>
@@ -818,8 +843,6 @@ fn update(
               fetch_annotations(id, emit),
               // 写进 hash：刷新之后还能回到这一条，也能把链接发给别人
               @cmd.effect(fn() { set_run_param(id) }),
-              // 打开的可能还在跑：先接上轮询，跑完自己会停
-              @rabbita.delay(poll_viewed(id, emit), 400),
             ]),
           )
         }
@@ -830,56 +853,6 @@ fn update(
               busy_run: None,
               viewed: None,
               // 人话优先：浏览器给的 "Request error, HTTP 404 OK" 对用户没有意义
-              viewed_error: Some(
-                "找不到这次运行（\{id}）——它可能已经被删掉了",
-              ),
-            },
-            @cmd.none,
-          )
-      }
-    ViewedProgress(id, result) =>
-      match result {
-        Ok(status) => {
-          let data = match status.data {
-            Some(json) =>
-              match @shared.parse_page_data_json(json) {
-                Ok(data) => Some(data)
-                Err(_) => None
-              }
-            None => model.viewed.bind(fn(viewed) { viewed.data })
-          }
-          let viewed : ViewedRun = {
-            id,
-            status: status.status,
-            data,
-            error: status.error,
-            tail: status.tail.unwrap_or(""),
-            live: @shared.parse_live(status.live, status.liveAgeMs),
-          }
-          // 轮询的是同一条运行时，别把「请求上下文」对话框的状态清掉。清掉的
-          // 话它开了就关——每 400ms 关一次，表现成「点了没反应」。
-          let next = {
-            ..model,
-            viewed: Some(viewed),
-            runs_error: None,
-            viewed_error: None,
-            context_case: model.context_case,
-            context: model.context,
-            context_error: model.context_error,
-          }
-          if status.status == "running" {
-            // 打开一条还在跑的运行：接着看它的进度，而不是停在打开那一刻
-            (next, @rabbita.delay(poll_viewed(id, emit), 400))
-          } else {
-            (next, @cmd.batch([fetch_runs(emit), fetch_annotations(id, emit)]))
-          }
-        }
-        Err(_) =>
-          (
-            {
-              ..model,
-              viewed: None,
-              // 404 在这里落地：hash 里的 id 不存在（删掉了，或者从来就没有）
               viewed_error: Some(
                 "找不到这次运行（\{id}）——它可能已经被删掉了",
               ),

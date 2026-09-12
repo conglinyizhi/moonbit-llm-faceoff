@@ -866,7 +866,43 @@ process.exit(heights.length >= 2 && new Set(heights).size === 1 ? 0 : 1)
 ' "$probe" || fail "实时行高度在运行中变了（元素在跳）：$probe"
 echo "ok: 运行中的实时行（两行、高度稳定）"
 
-echo "==> 导出区与复制"
+echo "==> 跑着的时候刷新（还在跑的运行就是当前运行）"
+# 这一条给一个真 bug 加的：跑着的时候按 F5，页面把自己当成在看一份只读历史——
+# 进度卡变成一大段原始日志，开始按钮还能再点一次（又开一炉）
+#
+# 先开一次会跑几秒的运行，趁它还在跑时用它的 id 重新加载页面
+midrun_probe='(async () => {
+  const out = {};
+  const head = document.querySelector(".progress-head");
+  out.startedRunning = /运行中/.test(head ? head.textContent : "");
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/?autorun=1&models=mock-a&cases=math-short&repeats=4&maxTokens=32&paceMs=1200&retry=0" 15000 "$tmp/midrun.html" "$midrun_probe" 500 \
+  '/运行中/.test((document.querySelector(".progress-head") || {}).textContent || "")'
+mid_run_id=$(ls -t "$tmp/runs" 2>/dev/null | head -1)
+[ -n "$mid_run_id" ] || fail "没找到刚起的那次运行"
+reload_probe='(async () => {
+  await new Promise((r) => setTimeout(r, 800));
+  const head = document.querySelector(".progress-head");
+  const start = document.querySelector("button.primary");
+  return {
+    head: (head ? head.textContent : "").replace(/\s+/g, " "),
+    hasCard: !!document.querySelector(".progress-card"),
+    startBusy: !!(start && start.className.includes("busy")),
+    banner: (document.querySelector(".viewed-banner") ? document.querySelector(".viewed-banner").textContent : ""),
+  };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/?run=$mid_run_id" 15000 "$tmp/midreload.html" "$reload_probe" 800 \
+  '/运行中/.test((document.querySelector(".progress-head") || {}).textContent || "")'
+probe=$(grep -o 'SCRIPT .*' "$tmp/midreload.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"hasCard":true' ||
+  fail "刷新后没有进度卡（被当成只读历史了）：$probe"
+echo "$probe" | grep -q '"startBusy":true' ||
+  fail "跑着的时候开始按钮还能点（会又开一炉）：$probe"
+echo "$probe" | grep -qE '"banner":""' ||
+  fail "还在跑的运行不该被打上「只读历史」的横幅：$probe"
+echo "ok: 跑着的时候刷新（还跑着的那次就是当前运行，按钮也锁住）"
+
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
 # 这样拿到的正是应用要写进剪贴板的内容，且不依赖无头浏览器是否允许读剪贴板。
 # 这段 JS 刻意只用双引号，好安全地裹在 shell 的单引号里。

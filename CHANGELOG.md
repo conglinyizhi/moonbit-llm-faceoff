@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Refreshing while a run is going.** The page treated whatever ?run= pointed at
+  as a read-only history entry, so a run that was still in flight came back as
+  "正在看历史运行（只读）" with a wall of raw stderr instead of the progress card —
+  and the start button was live again, ready to launch a second benchmark on top
+  of the running one. A run that is still running is now adopted as *the current
+  run* no matter how the page got there: progress card, busy button, and the
+  poll that finishes the job all behave exactly as if it had been started here.
+
+### Fixed
+
 - **The download links did nothing.** `@html.a` renders a *captured* link by
   default — Rabbita attaches its own click listener and calls `preventDefault`
   (it is meant for the app to intercept navigation), so `download` never fired

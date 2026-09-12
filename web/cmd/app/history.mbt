@@ -160,18 +160,6 @@ fn fetch_viewed(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
 }
 
 ///|
-/// 轮询一条「打开着」的运行。
-///
-/// 和 `fetch_viewed` 只差发出的消息：首次打开要走 `ViewedLoaded`（那才是「换一条
-/// 运行」），后面每 400ms 走 `ViewedProgress`——用前者会把「换运行才该发生的
-/// 重置」每 400ms 做一遍，对话框之类跟着被清掉
-fn poll_viewed(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
-  @http.get("/api/runs/" + id).expect_json(
-    emit.map(fn(result) { ViewedProgress(id, result) }),
-  )
-}
-
-///|
 fn delete_run_cmd(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.delete("/api/runs/" + id).expect_json(
     emit.map(fn(result) { RunDeleted(id, result) }),
