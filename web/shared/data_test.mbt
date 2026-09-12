@@ -131,7 +131,10 @@ test "metric percentiles decode when present" {
 /// 正文首尾的空白不该进页面：模型很爱在答案前后各带一串换行，`<pre>` 会把它
 /// 原样渲染成一大片空白——看着就是「答案上面空了一块」
 test "display text trims the blank lines models like to add" {
-  assert_eq(display_text("\n\n  {\"result\": \"甲\"}  \n\n"), "{\"result\": \"甲\"}")
+  assert_eq(
+    display_text("\n\n  {\"result\": \"甲\"}  \n\n"),
+    "{\"result\": \"甲\"}",
+  )
   // 中间的空行是内容，不能动
   assert_eq(display_text("甲\n\n乙"), "甲\n\n乙")
   assert_eq(display_text(""), "")

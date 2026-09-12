@@ -11,7 +11,8 @@
 /// 只有点开对话框那一刻需要一次。
 fn fetch_context(id : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.get("/api/runs/" + id + "/context").expect_json(
-    emit.map(fn(result) { ContextLoaded(result) }),
+    // 把 id 带回去：回来的那份缓存要记住它属于哪次运行
+    emit.map(fn(result) { ContextLoaded(id, result) }),
   )
 }
 

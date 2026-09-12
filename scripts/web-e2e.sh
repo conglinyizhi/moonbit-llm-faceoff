@@ -493,6 +493,75 @@ echo "$probe" | grep -q '"target":"second"' ||
   fail "没有切到非默认的那套测试集，这条测不出这个 bug：$probe"
 echo "ok: 全选/全不选按当前测试集来（切到第二套也管用）"
 
+echo "==> 开始按钮旁的极限用量"
+# 按开始之前想知道的是「最坏要花多少」：输入按 system + 用例正文算，
+# 输出按每次跑满 max_tokens 算
+cost_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const hint = () => [...document.querySelectorAll(".actions .hint")].map((h) => h.textContent).join(" | ");
+  byText("全不选").click();
+  await new Promise((r) => setTimeout(r, 400));
+  out.empty = hint();
+  byText("全选").click();
+  await new Promise((r) => setTimeout(r, 400));
+  out.full = hint();
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/cost.html" "$cost_probe" 1500 "$DUMP_READY_FORM"
+probe=$(grep -o 'SCRIPT .*' "$tmp/cost.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '极限：输入' ||
+  fail "开始按钮旁边没有极限用量说明：$probe"
+echo "$probe" | grep -q '输出 ≤' ||
+  fail "极限用量里没有输出上限：$probe"
+echo "$probe" | grep -q '"empty":"约 0 次请求' ||
+  fail "一条都没勾时用量提示没跟着走：$probe"
+echo "ok: 开始按钮旁给出极限用量（输入字数与输出 token 上限）"
+
+echo "==> 请求上下文跟着运行走"
+# 这条是给一个真 bug 加的：缓存只判断「有没有拉过」，于是两次运行之间会串——
+# 看着 DeepSeek 的结果，弹出来的是上一次 MiniCPM 的参数与用例
+ctx2_probe='(async () => {
+  const out = {};
+  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const run = { models: ["mock-b"], cases: ["math-short"], caseSet: "default", repeats: 1, maxTokens: 32, paceMs: 0, retry: 0, temperature: 0 };
+  const posted = await (await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(run) })).json();
+  for (let i = 0; i < 80; i++) {
+    const st = await (await fetch("/api/runs/" + posted.id)).json();
+    if (st.status === "done" || st.status === "failed") { break; }
+    await sleep(200);
+  }
+  byText("刷新").click();
+  await sleep(1200);
+  const items = [...document.querySelectorAll(".history-item")];
+  const modelsOfNth = async (n) => {
+    items[n].querySelectorAll(".history-actions button")[0].click();
+    await sleep(1500);
+    const btn = document.querySelector(".context-btn");
+    if (!btn) { return null; }
+    btn.click();
+    await sleep(1500);
+    const modal = document.querySelector(".modal");
+    const value = [...(modal?.querySelectorAll(".context-params dd") || [])][0]?.textContent || "";
+    byText("关闭")?.click();
+    await sleep(400);
+    return value;
+  };
+  out.newest = await modelsOfNth(0);
+  out.older = await modelsOfNth(1);
+  // 用完删掉：只留一个模型的运行会让后面「对比表/分位切换」那几段没东西可断言
+  await fetch("/api/runs/" + posted.id, { method: "DELETE" });
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/ctx2.html" "$ctx2_probe" 1500 "$DUMP_READY_HISTORY"
+probe=$(grep -o 'SCRIPT .*' "$tmp/ctx2.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"newest":"mock-b"' ||
+  fail "打开最新一次运行的上下文时模型不对：$probe"
+echo "$probe" | grep -q '"older":"mock-a, mock-b"' ||
+  fail "换一次运行后上下文没跟着换（串了上一次的）：$probe"
+echo "ok: 请求上下文跟着运行走（两次不同模型的运行各显示各自的）"
+
 echo "==> 结果区：每个模型一条 / 并排对比 / 差异"
 views_probe='(async () => {
   const out = {};

@@ -190,6 +190,9 @@ struct AppModel {
   /// 请求上下文对话框：Some(用例 id) 时开着，带那次运行的上下文文档。
   context_case : String?
   context : @shared.RunContext?
+  /// 缓存里的那份上下文属于哪次运行。只判断「有没有缓存」是不够的：它会在两次
+  /// 运行之间串——看着 DeepSeek 的结果，弹出来的却是上一次 MiniCPM 的参数
+  context_for : String
   context_error : String?
   /// 结果看哪个分位：p10 / p20 / p50 / p99。P50 是默认——「通常有多快」是多数
   /// 时候要问的问题，尾部（P99）是另一类问题（会不会偶发地卡住）。
@@ -330,6 +333,7 @@ fn initial_model() -> AppModel {
     live: None,
     context_case: None,
     context: None,
+    context_for: "",
     context_error: None,
     percentile: "p50",
     results_mode: "stacked",
@@ -499,7 +503,7 @@ enum Msg {
   // 请求上下文
   OpenContext(String)
   CloseContext
-  ContextLoaded(Result[Json, Error])
+  ContextLoaded(String, Result[Json, Error])
   ImportTextChanged(String)
   ImportLines(Bool)
   DraftFieldChanged(Int, DraftField, String)
@@ -801,6 +805,12 @@ fn update(
                 model.context_error
               } else {
                 None
+              },
+              // 缓存跟着运行走：换了一条就得忘掉，否则 OpenContext 会拿旧的用
+              context_for: if same {
+                model.context_for
+              } else {
+                ""
               },
             },
             @cmd.batch([
@@ -1115,28 +1125,41 @@ fn update(
     }
     SetResultsMode(mode) => ({ ..model, results_mode: mode, }, @cmd.none)
     SetPercentile(which) => ({ ..model, percentile: which, }, @cmd.none)
-    OpenContext(case_id) =>
+    OpenContext(case_id) => {
+      let run_id = model.context_run_id()
       (
         {
           ..model,
           context_case: Some(case_id),
           context_error: None,
-          // 已经拉过就不重复拉：同一个运行的上下文不会变
-          context: model.context,
+          // 缓存只对同一次运行有效：换了一次运行还留着旧的，弹出来的就是
+          // 上一次的参数与用例
+          context: if model.context_for == run_id {
+            model.context
+          } else {
+            None
+          },
         },
-        match model.context {
-          Some(_) => @cmd.none
-          None => fetch_context(model.context_run_id(), emit)
+        if model.context_for == run_id && model.context is Some(_) {
+          @cmd.none
+        } else {
+          fetch_context(run_id, emit)
         },
       )
+    }
     CloseContext => ({ ..model, context_case: None, }, @cmd.none)
-    ContextLoaded(result) =>
+    ContextLoaded(id, result) =>
       match result {
         Ok(json) =>
           match @shared.parse_run_context(json) {
             Ok(context) =>
               (
-                { ..model, context: Some(context), context_error: None, },
+                {
+                  ..model,
+                  context: Some(context),
+                  context_for: id,
+                  context_error: None,
+                },
                 @cmd.none,
               )
             Err(message) =>
@@ -2222,6 +2245,49 @@ fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       [txt(if running { "运行中…" } else { "开始评测" })],
     ),
     el("span", "hint", [txt("约 \{total} 次请求")]),
+    cost_hint(model),
+  ])
+}
+
+///|
+/// 极限用量：输入按「system + 用例正文」字符数算，输出按每次把 max_tokens 跑满算。
+///
+/// 两个都是上界——真实请求的输入只多不少（思维链、工具说明之类都可能再加），
+/// 输出通常远小于上限。但「最坏要花多少」正是按开始之前想知道的那个数：
+/// 它决定要不要调小 max tokens、少勾几条、或者把并发降下来
+fn cost_hint(model : AppModel) -> @html.Html {
+  let models = effective_models(model).length()
+  let case_count = if model.uses_prompt() {
+    1
+  } else {
+    model.selected_cases.length()
+  }
+  let requests = models * case_count * model.repeats
+  if requests == 0 {
+    return @html.fragment([])
+  }
+  let system_chars = model.system.length()
+  // 每条用例的输入 = system + 这条的正文；用例自带的 system 没算在内，
+  // 所以这里是「至少这么多」
+  let body_chars = if model.uses_prompt() {
+    model.prompt.length()
+  } else {
+    let mut sum = 0
+    for case in model.available_cases {
+      if model.selected_cases.contains(case.id) {
+        sum = sum + case.prompt.length()
+      }
+    }
+    sum
+  }
+  let input_chars = (system_chars * case_count + body_chars) *
+    models *
+    model.repeats
+  let output_tokens = requests * model.max_tokens
+  el("span", "hint", [
+    txt(
+      "· 极限：输入 ≈ \{input_chars} 字，输出 ≤ \{output_tokens} token（每次请求跑满 \{model.max_tokens}）",
+    ),
   ])
 }
 

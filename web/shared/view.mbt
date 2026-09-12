@@ -478,14 +478,27 @@ pub fn run_context_body(context : RunContext, case_id : String) -> @html.Html {
   let wanted = context.cases.filter(fn(entry) { entry.id == case_id })
   let cases = if wanted.length() > 0 {
     wanted
-  } else if context.cases.length() > 0 {
-    context.cases
-  } else {
+  } else if context.cases.length() == 0 {
     // inline prompt 的运行没有 cases.jsonl，那条 prompt 就在请求文档里
     inline_case(context)
+  } else {
+    // 上下文里没有这条用例：什么都不显示，由下面那句提示说明。
+    // 以前这里是「找不到就把整份上下文都倒出来」，于是点 stt-18 会看到
+    // stt-10、stt-11——比空着更容易误以为数据错了
+    []
   }
+  let missing = wanted.length() == 0 && context.cases.length() > 0
   el("div", "context", [
     context_params(context),
+    if missing {
+      el("p", "muted", [
+        txt(
+          "这份上下文里没有 `\{case_id}` 这条用例（它是另一次运行的）。",
+        ),
+      ])
+    } else {
+      @html.fragment([])
+    },
     el(
       "div",
       "context-cases",
