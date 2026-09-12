@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`conglinyizhi/precss` 0.1.1 → 0.1.3**, and it turns out 0.1.1 was doing arithmetic
+  in `calc()` / `min()` and in multi-value properties by evaluating the expression
+  instead of passing it through: `min(100% - 2rem, 1100px)` came out as
+  `min(98%, 1100px)`, `calc(100vh - 2rem)` as `calc(98vh)`, and the dialog's
+  `-10px -10px 26px rgba(...)` shadow as `-0px 26px rgba(...)` — which is why the
+  neumorphic panel never quite looked right. 0.1.3 emits all three as written and
+  drops the stray spaces before commas in its output
+
 ### Fixed
 
 - **The live line was pushed into the right half of the card.** The two-row grid
