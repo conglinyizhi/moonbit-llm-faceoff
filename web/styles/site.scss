@@ -754,17 +754,30 @@ button.ghost {
 //
 // 两次轮询之间页面上什么都不动，而有的一条请求要好几秒——所以这行里必须有个
 // 自己会动的东西（脉冲点），以及一个每 250ms 就换一次数的东西（tok/s、字符数）。
+// 实时行：两行网格
+//
+//   点  谁 · 哪条 #第几次                        状态 时间
+//   字符  速率  [进度条]                       沉静多久
+//
+// 用网格而不是 flex-wrap：每一格都有固定位置，数字、状态、那句「N 秒没有新输出」
+// 都不会把别人挤到下一行去（那正是页面在跑动中来回抖的原因）
 .live-row {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
+  align-items: baseline;
+  display: grid;
+  gap: 0.15rem 0.75rem;
+  grid-template-areas:
+    "pulse who state"
+    "blank nums rate"
+    "blank bar extra";
+  grid-template-columns: auto max-content max-content;
   margin-top: 0.7rem;
   font-size: 0.85rem;
 
   .pulse {
+    align-self: center;
     background: $accent;
     border-radius: 50%;
+    grid-area: pulse;
     height: 0.5rem;
     width: 0.5rem;
     animation: live-pulse 1.1s ease-in-out infinite;
@@ -773,8 +786,7 @@ button.ghost {
   .live-who {
     color: $title;
     font-weight: 600;
-    // 每格给个下限：数字在变，宽度不能跟着变，否则整行会左右抖
-    min-width: 12rem;
+    grid-area: who;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -782,7 +794,7 @@ button.ghost {
 
   .live-state {
     color: $accent;
-    min-width: 8rem;
+    grid-area: state;
     white-space: nowrap;
   }
 
@@ -794,23 +806,34 @@ button.ghost {
   }
 
   .live-nums {
+    grid-area: nums;
     min-width: 6rem;
   }
 
   .live-rate {
     color: $title;
+    grid-area: rate;
     min-width: 7rem;
+  }
+
+  .live-extra {
+    color: $warn;
+    grid-area: extra;
+    white-space: nowrap;
   }
 
   // 当前这条请求的 token 进度。分母是 max_tokens：那是上限，不是目标，
   // 所以它可能中途停下——宽度只用来表示「在往前走」。
   .live-bar {
+    align-self: center;
     background: $bg;
     border-radius: 999px;
+    grid-area: bar;
     height: 0.3rem;
+    margin-left: 1.2rem;
     overflow: hidden;
     position: relative;
-    width: 5rem;
+    width: 8rem;
   }
 
   .live-bar-fill {
@@ -838,11 +861,6 @@ button.ghost {
     width: 100%;
   }
 
-  &.stalled .live-bar-flow {
-    animation: none;
-    opacity: 0;
-  }
-
   // 两秒没有新分片：点停下来、变灰，并直接说清楚安静了多久
   &.stalled {
     .pulse {
@@ -853,10 +871,6 @@ button.ghost {
     .live-state {
       color: $muted;
     }
-  }
-
-  .live-stalled {
-    color: $warn;
   }
 }
 

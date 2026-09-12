@@ -134,39 +134,38 @@ port=$(head -1 "$tmp/web.port")
 [ -n "$port" ] || { echo "服务端没起来（见 $tmp/server.log）" >&2; exit 1; }
 
 if [ "$seed" -eq 1 ]; then
-  python3 - "$port" "$mock_port" "$seed_repeats" "$system_text" <<'PY'
-import json, sys, time, urllib.request
-port, mock = sys.argv[1], sys.argv[2]
-# --system 给了就让这次预置运行也用它：看「system 有没有进报告」时需要
-system_text = sys.argv[4]
-body = json.dumps({
-    "models": ["mock-a", "mock-b"],
-    "caseSet": "default",
-    "cases": ["math-short"],
-    "repeats": int(sys.argv[3]),
-    "maxTokens": 64,
-    "temperature": 0.0,
-    "paceMs": 0,
-    "retry": 0,
-    "baseUrl": f"http://127.0.0.1:{mock}/v1",
-    "apiKey": "test-key",
-    **({"system": system_text} if system_text else {}),
-}).encode()
-request = urllib.request.Request(
-    f"http://127.0.0.1:{port}/api/runs",
-    data=body,
-    headers={"Content-Type": "application/json"},
-)
-run_id = json.loads(urllib.request.urlopen(request).read())["id"]
-for _ in range(200):
-    status = json.loads(
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/api/runs/{run_id}").read()
-    )
-    if status["status"] in ("done", "failed"):
-        break
-    time.sleep(0.2)
-print(f"probe-ui: 预置运行 {run_id} → {status['status']}", file=sys.stderr)
-PY
+  # node 而不是 python：本地本来就有 node（cdp-dump.mjs 也用它），少一个依赖
+  node -e '
+const [port, mock, repeats, system] = process.argv.slice(1)
+const body = {
+  models: ["mock-a", "mock-b"],
+  caseSet: "default",
+  cases: ["math-short"],
+  repeats: Number(repeats),
+  maxTokens: 64,
+  temperature: 0,
+  paceMs: 0,
+  retry: 0,
+  baseUrl: `http://127.0.0.1:${mock}/v1`,
+  apiKey: "test-key",
+}
+// --system 给了就让这次预置运行也用它（看「system 有没有进报告」时需要）
+if (system) body.system = system
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const post = await fetch(`http://127.0.0.1:${port}/api/runs`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body),
+})
+const { id } = await post.json()
+let status = ""
+for (let i = 0; i < 200; i++) {
+  status = (await (await fetch(`http://127.0.0.1:${port}/api/runs/${id}`)).json()).status
+  if (status === "done" || status === "failed") break
+  await sleep(200)
+}
+console.error(`probe-ui: 预置运行 ${id} → ${status}`)
+' "$port" "$mock_port" "$seed_repeats" "$system_text"
 fi
 
 chrome=${CHROME:-/usr/bin/chromium}

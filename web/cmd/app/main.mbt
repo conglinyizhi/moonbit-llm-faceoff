@@ -1704,12 +1704,21 @@ fn update(
 }
 
 ///|
+
+///|
+/// 加进去 / 拿出来，返回一个新数组。
+///
+/// **不能原地 push**：`values` 就是 `model.selected_cases` 那个数组，push 之后
+/// 改的是「旧模型」持有的同一块内存——于是新旧的 VDOM props 看起来一模一样，
+/// 该刷新的派生文本（「已选 N」「约 N 次请求」）就不刷新：勾选框是自己原生点亮的，
+/// 数字却停在 0
 fn toggle(values : Array[String], value : String) -> Array[String] {
-  if values.contains(value) {
-    values.filter(fn(item) { item != value })
+  let out = values.copy()
+  if out.contains(value) {
+    out.filter(fn(item) { item != value })
   } else {
-    values.push(value)
-    values.copy()
+    out.push(value)
+    out
   }
 }
 

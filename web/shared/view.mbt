@@ -268,6 +268,16 @@ pub fn case_block(
 }
 
 ///|
+
+///|
+/// 正文的显示形式：去掉首尾空白（含换行），中间原样保留。
+///
+/// 只在显示层做：数据里那份不动，导出、比对用的还是原文
+pub fn display_text(text : String) -> String {
+  text.trim(chars=" \t\r\n").to_owned()
+}
+
+///|
 pub fn answer_block(
   case_id : String,
   answer : Answer,
@@ -279,7 +289,9 @@ pub fn answer_block(
     answer.model
   }
   let body = if answer.ok {
-    @html.pre([txt(answer.content)])
+    // 模型常在正文前后带一串换行：`pre` 会把它原样渲染成一整块空白，
+    // 看起来就是「答案上面有一片空的地方」
+    @html.pre([txt(display_text(answer.content))])
   } else {
     let message = match answer.error {
       Some(error) => error
@@ -641,14 +653,12 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
     Some(live) => live
   }
   // 上一条已经返回、而它又不新鲜了：现在没有请求在飞（用例之间的间隔）。
-  // 这时候不能像以前那样整行收起来——那一行没了，下面的失败/重试计数和日志尾
-  // 就顶上来，等下一个请求开始又弹回去，页面在「等待」和「生成」之间反复跳。
-  // 改成进入「等待」状态：占位还在，只是不再有数字和动画
+  // 这时候不能整行收起来——下面的失败计数和日志尾会顶上来，下一条开始时又弹
+  // 回去。改成进入「等待」状态：位置还在，只是不再有数字和动画
+  let stalled = live.age_ms > 2000.0
   let waiting = live.event == "waiting" ||
     (live.event == "case_done" && live.age_ms > 1500.0)
-  // 2 秒没有任何新分片就算安静下来了：可能是模型在长思考，也可能是上游卡住，
-  // 页面分不清，但能说清「多久没有输出了」——这就够人决定要不要再等。
-  let stalled = live.age_ms > 2000.0
+  let quiet = stalled || waiting
   let who = if waiting {
     "下一条请求"
   } else if live.case_id == "" {
@@ -656,8 +666,6 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
   } else {
     "\{live.model} · \{live.case_id} #\{live.repeat + 1}"
   }
-  // 等首 token 的那一秒是页面上最像死掉的一秒：请求发出去了，什么都没有。
-  // 把它单独标出来，比笼统写「生成中」有用得多。
   let state = if waiting {
     "等待下一条"
   } else if live.event == "case_start" {
@@ -679,7 +687,7 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
     " \{fmt_number(live.elapsed_ms / 1000.0)}s"
   }
   // 空的时候不留空节点、也不隐藏：一律渲染，内容用占位。隐藏元素会让后面的
-  // 元素顶上来，数字一变就来回跳——这跟「数字宽度在变」是同一类闪动。
+  // 元素顶上来，数字一变就来回跳——这跟「数字宽度在变」是同一类闪动
   let numbers = if waiting || live.chars == 0 {
     "0 字符"
   } else {
@@ -690,24 +698,27 @@ pub fn live_row(live : LiveProgress?) -> @html.Html {
   } else {
     "≈\{fmt_number(live.tok_per_s)} tok/s"
   }
-  let quiet = stalled || waiting
+  // 两行：上面是「在跑什么、什么状态」，下面是数字、进度与那句「多久没输出了」。
+  // 挤在一行时最先被挤走的就是最后那句——它一出现就换行，整块长高又缩回去，
+  // 就是之前那种闪烁。两行之后每一格都有固定位置，谁也不挤谁
   el("div", if quiet { "live-row stalled" } else { "live-row" }, [
     el("span", "pulse", []),
     el("span", "live-who", [txt(who)]),
-    // state 为空（刚返回且已经过时）时也给个占位：这一格不能塌
     el("span", "live-state", [
       txt(if state == "" { "—" } else { state + clock }),
     ]),
     el("span", "live-nums", [txt(numbers)]),
     el("span", "live-rate", [txt(rate)]),
     live_bar(live, quiet),
-    if stalled {
-      el("span", "live-stalled", [
-        txt("\{fmt_number(live.age_ms / 1000.0)}s 没有新输出"),
-      ])
-    } else {
-      @html.fragment([])
-    },
+    el("span", "live-extra", [
+      txt(
+        if stalled {
+          "\{fmt_number(live.age_ms / 1000.0)}s 没有新输出"
+        } else {
+          ""
+        },
+      ),
+    ]),
   ])
 }
 
@@ -782,7 +793,7 @@ fn cot_block(answer : Answer) -> @html.Html {
         "思考过程 · \{answer.reasoning_tokens} token · \{answer.reasoning.length()} 字",
       ),
     ]),
-    @html.pre([txt(answer.reasoning)]),
+    @html.pre([txt(display_text(answer.reasoning))]),
   ])
 }
 

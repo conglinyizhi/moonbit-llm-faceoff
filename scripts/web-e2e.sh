@@ -232,15 +232,13 @@ grep -q '开始评测' "$tmp/form.html" || fail "表单里没有开始按钮" "$
 grep -q 'id="repeats"' "$tmp/form.html" || fail "表单里没有参数输入" "$tmp/form.html"
 # .workbench 是两列网格：侧栏那一格必须一直在，否则 meta 还在载入（或加载失败）
 # 的时候主内容会掉进第一列，整个页面被挤成 270px 宽
-if ! python3 - "$tmp/form.html" <<'GRID'
-import re, sys
-html = open(sys.argv[1], encoding="utf-8").read()
-wrap = re.search(r'<div class="wrap workbench">(.*?)<footer', html, re.S)
-sys.exit(0 if wrap and 'class="history"' in wrap.group(1) and 'workbench-main' in wrap.group(1) else 1)
-GRID
-then
+node -e '
+const html = require("fs").readFileSync(process.argv[1], "utf8")
+const wrap = html.match(/<div class="wrap workbench">([\s\S]*?)<footer/)
+const ok = !!wrap && wrap[1].includes("class=\"history\"") && wrap[1].includes("workbench-main")
+process.exit(ok ? 0 : 1)
+' "$tmp/form.html" ||
   fail "工作区不是「侧栏 + 主内容」两格（加载中会挤成一列）" "$tmp/form.html"
-fi
 # 新增的输入控件：能手填模型 id、网关地址与密钥
 grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模型 id 的输入框" "$tmp/form.html"
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
@@ -256,22 +254,14 @@ grep -q 'id="system"' "$tmp/form.html" || fail "工作台没有 system prompt �
 # 网关与密钥应当排在「模型」之后、「预设」之前（原来在参数行下面）
 # 顺序断言写成 if ! ...：脚本开头是 set -e，python 退出码 1 会让脚本当场退出，
 # 后面那句 `[ $? -eq 0 ] || fail` 根本跑不到——报错也就没了，只看到 e2e 静默结束。
-if ! python3 - "$tmp/form.html" <<'ORDER'
-import sys
-html = open(sys.argv[1], encoding="utf-8").read()
-# 网关与密钥在最上面（先确定对着谁说话），然后模型、system、最后「这次跑什么」
-order = [
-    html.find('id="base-url"'),
-    html.find('id="api-key"'),
-    html.find('id="model-mock-a"'),
-    html.find('id="system"'),
-    html.find('panel-tabs'),
-]
-sys.exit(0 if all(x >= 0 for x in order) and order == sorted(order) else 1)
-ORDER
-then
+node -e '
+const html = require("fs").readFileSync(process.argv[1], "utf8")
+// 网关与密钥在最上面（先确定对着谁说话），然后模型、system、最后「这次跑什么」
+const order = ["id=\"base-url\"", "id=\"api-key\"", "id=\"model-mock-a\"", "id=\"system\"", "panel-tabs"].map((needle) => html.indexOf(needle))
+const ok = order.every((index) => index >= 0) && order.every((index, i) => i === 0 || order[i - 1] < index)
+process.exit(ok ? 0 : 1)
+' "$tmp/form.html" ||
   fail "表单顺序不对（应为 网关 → 密钥 → 模型 → system → 这次跑什么）" "$tmp/form.html"
-fi
 echo "ok: 浏览器里表单渲染出来了（含手输模型 / 网关 / 密钥，/api/meta 链路通）"
 
 echo "==> 浏览器触发一次评测（?autorun）"
@@ -766,6 +756,46 @@ probe=$(grep -o 'SCRIPT .*' "$tmp/annotate2.html.err" | sed 's/^SCRIPT //')
 echo "$probe" | grep -q '不行' || fail "重新打开后判定丢了：$probe"
 echo "$probe" | grep -q 'e2e 备注' || fail "重新打开后备注丢了：$probe"
 echo "ok: 标注（判定 + 备注落盘、重开还在、导出带着走）"
+
+echo "==> 运行中的进度卡（实时行两行、高度不跳）"
+# 这条给「等待时整行消失把下面的东西顶上来」那个 bug 加的。断言方式是把实时行的
+# 高度采样几遍：两行布局之后每一格都有固定位置，高度不该在任何一次采样里变化
+live_probe='(async () => {
+  const out = { heights: [] };
+  const heights = [];
+  for (let i = 0; i < 14; i++) {
+    await new Promise((r) => setTimeout(r, 350));
+    const row = document.querySelector(".progress-card .live-row");
+    if (row) {
+      heights.push(Math.round(row.getBoundingClientRect().height));
+      out.hasExtraSlot = !!row.querySelector(".live-extra");
+      out.hasBar = !!row.querySelector(".live-bar");
+      out.state = (row.querySelector(".live-state") || {}).textContent || "";
+    }
+    const head = document.querySelector(".progress-head")?.textContent || "";
+    if (/已完成|失败/.test(head)) { break; }
+  }
+  out.heights = heights;
+  out.distinctHeights = [...new Set(heights)];
+  return out;
+})()'
+# 这条运行要跨过「用例之间」的空档，才会走到等待态：间隔给足
+live_url="http://127.0.0.1:$PORT/?autorun=1&models=mock-a&cases=math-short&repeats=3&maxTokens=32&paceMs=900&retry=0"
+# 就绪条件必须是「已经跑起来了」：给固定等待的话，等完这次运行早结束了
+dump_page_script "$live_url" 20000 "$tmp/live.html" "$live_probe" 1500 \
+  '/运行中/.test((document.querySelector(".progress-head") || {}).textContent || "")'
+probe=$(grep -o 'SCRIPT .*' "$tmp/live.html.err" | sed 's/^SCRIPT //')
+echo "$probe" | grep -q '"hasExtraSlot":true' ||
+  fail "实时行没有为「多久没输出」留位置：$probe"
+echo "$probe" | grep -q '"hasBar":true' ||
+  fail "实时行里没有进度条：$probe"
+node -e '
+const raw = process.argv[1]
+const data = JSON.parse(raw.startsWith("SCRIPT ") ? raw.slice(7) : raw)
+const heights = data.heights || []
+process.exit(heights.length >= 2 && new Set(heights).size === 1 ? 0 : 1)
+' "$probe" || fail "实时行高度在运行中变了（元素在跳）：$probe"
+echo "ok: 运行中的实时行（两行、高度稳定）"
 
 echo "==> 导出区与复制"
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。
