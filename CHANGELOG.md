@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The live line was pushed into the right half of the card.** The two-row grid
+  had an `auto` column where the dot sits, and in CSS grid an `auto` column
+  absorbs all of the free space — so the dot stayed at the left edge and
+  everything else slid right. The left column is now `minmax(0, 1fr)`. The e2e
+  assertion for this used to measure only the row height, which stayed perfectly
+  stable while the content drifted; it now checks the offsets too.
+
+### Fixed
+
 - **Refreshing while a run is going.** The page treated whatever ?run= pointed at
   as a read-only history entry, so a run that was still in flight came back as
   "正在看历史运行（只读）" with a wall of raw stderr instead of the progress card —

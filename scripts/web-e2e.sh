@@ -836,10 +836,19 @@ live_probe='(async () => {
     await new Promise((r) => setTimeout(r, 350));
     const row = document.querySelector(".progress-card .live-row");
     if (row) {
-      heights.push(Math.round(row.getBoundingClientRect().height));
+      const box = row.getBoundingClientRect();
+      heights.push(Math.round(box.height));
       out.hasExtraSlot = !!row.querySelector(".live-extra");
       out.hasBar = !!row.querySelector(".live-bar");
       out.state = (row.querySelector(".live-state") || {}).textContent || "";
+      // 贴左与贴右：grid 里把 auto 那一列写成了占位时，内容会被挤到右半边
+      // ——高度仍然稳定，所以只量高度是看不出来的
+      const pulse = row.querySelector(".pulse").getBoundingClientRect();
+      const who = row.querySelector(".live-who").getBoundingClientRect();
+      const state = row.querySelector(".live-state").getBoundingClientRect();
+      out.pulseOffset = Math.round(pulse.left - box.left);
+      out.whoOffset = Math.round(who.left - box.left);
+      out.stateGap = Math.round(box.right - state.right);
     }
     const head = document.querySelector(".progress-head")?.textContent || "";
     if (/已完成|失败/.test(head)) { break; }
@@ -858,6 +867,12 @@ echo "$probe" | grep -q '"hasExtraSlot":true' ||
   fail "实时行没有为「多久没输出」留位置：$probe"
 echo "$probe" | grep -q '"hasBar":true' ||
   fail "实时行里没有进度条：$probe"
+echo "$probe" | grep -qE '"pulseOffset":[0-3](,|})' ||
+  fail "实时行的点没贴在左边（内容被挤到右边了）：$probe"
+echo "$probe" | grep -qE '"whoOffset":([1-9][0-9]),|,}' ||
+  fail "实时行的模型名没紧跟左边的点：$probe"
+echo "$probe" | grep -qE '"stateGap":[0-4](,|})' ||
+  fail "实时行的状态文字没靠右：$probe"
 node -e '
 const raw = process.argv[1]
 const data = JSON.parse(raw.startsWith("SCRIPT ") ? raw.slice(7) : raw)

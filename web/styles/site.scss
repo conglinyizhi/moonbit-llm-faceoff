@@ -765,11 +765,15 @@ button.ghost {
   align-items: baseline;
   display: grid;
   gap: 0.15rem 0.75rem;
+  // 两列三行：左列是「谁在跑 / 数字 / 进度条」，右列是「状态 / 速率 / 停多久没输出」
+  //
+  // 左列必须是 1fr（占剩余的宽），不能是 auto：grid 里 auto 那一列会把空余
+  // 宽度全吞掉，于是内容被挤到右半边——真的这么错过一次
   grid-template-areas:
     "pulse who state"
-    "blank nums rate"
-    "blank bar extra";
-  grid-template-columns: auto max-content max-content;
+    ". nums rate"
+    ". bar extra";
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   margin-top: 0.7rem;
   font-size: 0.85rem;
 
@@ -795,6 +799,7 @@ button.ghost {
   .live-state {
     color: $accent;
     grid-area: state;
+    text-align: right;
     white-space: nowrap;
   }
 
@@ -814,11 +819,13 @@ button.ghost {
     color: $title;
     grid-area: rate;
     min-width: 7rem;
+    text-align: right;
   }
 
   .live-extra {
     color: $warn;
     grid-area: extra;
+    text-align: right;
     white-space: nowrap;
   }
 
@@ -830,10 +837,11 @@ button.ghost {
     border-radius: 999px;
     grid-area: bar;
     height: 0.3rem;
-    margin-left: 1.2rem;
+    // 只占左列的一半左右，不要拉满：它只是个进度参考，不该抢视觉
+    max-width: 12rem;
     overflow: hidden;
     position: relative;
-    width: 8rem;
+    width: 100%;
   }
 
   .live-bar-fill {
