@@ -942,8 +942,16 @@ struct RunRequest {
   /// 请求里内联带过来的用例（一组临时 prompt，不走测试集文件）。非空时优先于 `case_ids`：
   /// 它们不进测试集文件，直接写进这次运行目录的 cases.jsonl。
   inline_cases : Array[Json]
-  /// 这次运行的全局 system prompt。每条用例自己的 system 仍然可以覆盖它。
+  /// 这次运行的全局 system prompt。默认每条用例自己的 system 仍然可以覆盖它；
+  /// system_override 为真时反过来：全局的覆盖掉用例自带的。
   system : String?
+  system_override : Bool
+  /// 这些模型带 enable_thinking: true。
+  cot_thinking : Array[String]
+  /// 这些模型带 reasoning_effort: "high"。
+  cot_effort : Array[String]
+  /// 串行 / 按模型并行 / 全部并发。
+  parallel : String
   prompt : String?
   repeats : Int
   max_tokens : Int
@@ -1127,6 +1135,19 @@ fn finish_run_request(
   let temperature = number_of(obj, "temperature", 0.0)
   let base_url = optional_string(obj, "baseUrl")
   let api_key = optional_string(obj, "apiKey")
+  let system_override = bool_of(obj, "systemOverride", false)
+  let cot_thinking = model_list(obj, "cotThinking")
+  let cot_effort = model_list(obj, "cotEffort")
+  let parallel = match optional_string(obj, "parallel") {
+    // 服务端只是把 bench 二进制 spawn 起来，不认它的包，所以这里是同一套取值的
+    // 第二份校验（bench 侧 parse_parallel 那份是权威）
+    Some(raw) =>
+      match raw {
+        "serial" | "models" | "all" => raw
+        _ => return Err("parallel must be one of: serial, models, all")
+      }
+    None => "serial"
+  }
   if base_url is Some(url) && url.length() > 2048 {
     return Err("baseUrl is too long")
   }
@@ -1149,6 +1170,10 @@ fn finish_run_request(
     inline_cases,
     prompt,
     system,
+    system_override,
+    cot_thinking,
+    cot_effort,
+    parallel,
     repeats,
     max_tokens,
     temperature,
@@ -1247,8 +1272,24 @@ async fn build_argv(
       if system.trim(chars=" \t\r\n") != "" {
         argv.push("--system")
         argv.push(system)
+        // 只有真的带了 system 才有「覆盖」这回事
+        if request.system_override {
+          argv.push("--system-override")
+        }
       }
     None => ()
+  }
+  if request.parallel != "serial" {
+    argv.push("--parallel")
+    argv.push(request.parallel)
+  }
+  if request.cot_thinking.length() > 0 {
+    argv.push("--cot-thinking")
+    argv.push(request.cot_thinking.join(","))
+  }
+  if request.cot_effort.length() > 0 {
+    argv.push("--cot-effort")
+    argv.push(request.cot_effort.join(","))
   }
   if request.pace_ms > 0 {
     argv.push("--pace-ms")
@@ -1387,6 +1428,8 @@ async fn get_run_context(
   let global_system = str_field(fields, "system")
   let global_max_tokens = int_of(fields, "maxTokens", 0)
   let global_temperature = fields.get("temperature")
+  // 勾了「覆盖测试集内的 system prompt」的话，上面那条赢，用例自带的只当作被盖掉
+  let system_override = bool_of(fields, "systemOverride", false)
   // 用例文件可能不在：inline prompt 的运行只有一条、没有 cases.jsonl
   let cases : Array[Json] = []
   let cases_text = read_text(dir + "/cases.jsonl")
@@ -1402,7 +1445,12 @@ async fn get_run_context(
     let own_system = str_field(entry, "system")
     cases.push(
       context_case(
-        entry, own_system, global_system, global_max_tokens, global_temperature,
+        entry,
+        own_system,
+        global_system,
+        system_override,
+        global_max_tokens,
+        global_temperature,
       ),
     )
   }
@@ -1425,20 +1473,28 @@ fn context_case(
   entry : Map[String, Json],
   own_system : String,
   global_system : String,
+  system_override : Bool,
   global_max_tokens : Int,
   global_temperature : Json?,
 ) -> Json {
+  // 生效的 system 与「有没有被盖掉」两件事都要跟 override 走
+  let effective = if system_override {
+    global_system
+  } else if own_system != "" {
+    own_system
+  } else {
+    global_system
+  }
+  let overridden = if system_override {
+    global_system != ""
+  } else {
+    own_system != ""
+  }
   Json::object({
     "id": Json::string(str_field(entry, "id")),
     "prompt": Json::string(str_field(entry, "prompt")),
-    "system": Json::string(
-      if own_system != "" {
-        own_system
-      } else {
-        global_system
-      },
-    ),
-    "systemOverridden": Json::boolean(own_system != ""),
+    "system": Json::string(effective),
+    "systemOverridden": Json::boolean(overridden),
     "maxTokens": Json::number(
       int_of(entry, "maxTokens", global_max_tokens).to_double(),
     ),
@@ -1467,6 +1523,33 @@ fn str_field(fields : Map[String, Json], key : String) -> String {
 
 ///|
 /// 取一个数组字段，缺失就算空。
+/// 一串模型名：和 models 走同一套清洗（去空白、限长、不许换行），顺带去重
+fn model_list(obj : Map[String, Json], key : String) -> Array[String] {
+  let raw = match obj.get(key) {
+    Some(Array(items)) =>
+      items.map(fn(item) {
+        match item {
+          String(text) => text
+          _ => ""
+        }
+      })
+    _ => []
+  }
+  let clean : Array[String] = []
+  for model in raw {
+    let name = model.trim(chars=" \t\r\n").to_owned()
+    if name.length() > 0 &&
+      name.length() <= 128 &&
+      !name.contains("\n") &&
+      !name.contains("\r") &&
+      !clean.contains(name) {
+      clean.push(name)
+    }
+  }
+  clean
+}
+
+///|
 fn array_field(fields : Map[String, Json], key : String) -> Array[Json] {
   match fields.get(key) {
     Some(Array(items)) => items
@@ -1892,6 +1975,15 @@ async fn read_text(path : String) -> String {
 async fn write_text(path : String, content : String) -> Unit {
   @fs.write_file(path, content, create_mode=@fs.CreateOrTruncate) catch {
     _ => ()
+  }
+}
+
+///|
+fn bool_of(obj : Map[String, Json], key : String, fallback : Bool) -> Bool {
+  match obj.get(key) {
+    Some(True) => true
+    Some(False) => false
+    _ => fallback
   }
 }
 
