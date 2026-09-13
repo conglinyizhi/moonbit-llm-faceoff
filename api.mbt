@@ -29,6 +29,13 @@ pub fn request_body(
   if settings.max_tokens is Some(max_tokens) {
     body["max_tokens"] = Json::number(max_tokens.to_double())
   }
+  // 推理开关：两种风格并存，勾哪个发哪个（端点认哪个由使用方决定）
+  if settings.enable_thinking {
+    body["enable_thinking"] = Json::boolean(true)
+  }
+  if settings.reasoning_effort is Some(effort) {
+    body["reasoning_effort"] = Json::string(effort)
+  }
   Json::object(body)
 }
 

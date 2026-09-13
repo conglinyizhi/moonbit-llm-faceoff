@@ -15,6 +15,11 @@ pub(all) struct Settings {
   mut max_tokens : Int?
   /// Per-request timeout in milliseconds.
   mut timeout_ms : Int
+  /// 推理开关：勾上就往请求体里带 enable_thinking: true（Qwen3 / DashScope 那一套）。
+  /// 各家的开关名没有统一标准，所以两种都留着，由使用方按端点选。
+  mut enable_thinking : Bool
+  /// 另一个风格：reasoning_effort（OpenAI / DeepSeek 那一套）。None 表示不发。
+  mut reasoning_effort : String?
 } derive(Eq)
 
 ///|
@@ -92,6 +97,8 @@ pub fn Settings::from_env(env : Map[String, String]) -> Settings {
     temperature: None,
     max_tokens: None,
     timeout_ms: default_timeout_ms,
+    enable_thinking: false,
+    reasoning_effort: None,
   }
 }
 

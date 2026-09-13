@@ -214,3 +214,23 @@ test "response_outcome rejects a body with no choices" {
     _ => fail("expected Decode")
   }
 }
+
+///|
+test "request_body：推理开关按开关走，不勾就不发" {
+  let plain = request_body(test_settings(), "hi").stringify()
+  assert_false(plain.contains("enable_thinking"))
+  assert_false(plain.contains("reasoning_effort"))
+
+  let thinking = test_settings()
+  thinking.enable_thinking = true
+  let body = request_body(thinking, "hi").stringify()
+  assert_true(body.contains("\"enable_thinking\":true"))
+  assert_false(body.contains("reasoning_effort"))
+
+  // 两种风格可以同时带（不同端点认不同的名字）
+  let effort = test_settings()
+  effort.reasoning_effort = Some("high")
+  let body2 = request_body(effort, "hi").stringify()
+  assert_true(body2.contains("\"reasoning_effort\":\"high\""))
+  assert_false(body2.contains("enable_thinking"))
+}
