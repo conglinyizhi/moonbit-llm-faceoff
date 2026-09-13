@@ -46,7 +46,7 @@ pub fn results_markdown(data : PageData) -> String {
     }
     if block.system != "" {
       out.write_string(
-        "\n<details><summary>system prompt</summary>\n\n```text\n\{block.system}\n```\n\n</details>\n",
+        "\n<details><summary>System Prompt</summary>\n\n```text\n\{block.system}\n```\n\n</details>\n",
       )
     }
     for answer in block.answers {

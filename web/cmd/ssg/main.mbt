@@ -75,7 +75,7 @@ fn shell(data : @shared.PageData) -> @html.Html {
       @html.meta(charset="utf-8"),
       @html.meta(name="viewport", content="width=device-width, initial-scale=1"),
       @html.node("title", @html.Attrs::build(), [
-        txt("LLM 模型对比 · faceoff"),
+        txt("模型对比 - faceoff"),
       ]),
       @html.link(href="site.css", rel="stylesheet"),
     ]),
@@ -85,17 +85,17 @@ fn shell(data : @shared.PageData) -> @html.Html {
           @shared.el("div", "site-logo", [txt("faceoff")]),
           @shared.el("div", "site-meta", [
             txt(
-              "\{data.models.length()} 个模型 · \{data.cases.length()} 道用例",
+              "\{data.models.length()} 个模型 · \{data.cases.length()} 条用例",
             ),
           ]),
         ]),
       ]),
       @shared.el("main", "wrap", [
         @shared.el("section", "hero", [
-          @html.h1([txt("模型对比")]),
+          @html.h1([txt("LLM 模型对比")]),
           @html.p([
             txt(
-              "同一套用例、串行执行、流式计时得到的结果。指标取中位数；decode tok/s 只统计首 token 之后的生成窗口。",
+              "同一套用例、串行执行、流式计时得到的结果。指标取中位数；decode tok/s 只统计首 token 之后的生成窗口",
             ),
           ]),
         ]),
@@ -103,10 +103,10 @@ fn shell(data : @shared.PageData) -> @html.Html {
       ]),
       @shared.el("footer", "site-footer", [
         @shared.el("div", "wrap", [
-          txt("数据来源 \{data.source}"),
+          txt("数据来源：\{data.source}"),
           @html.br(),
           txt(
-            "静态报告由 Rabbita SSR 生成；样式由 precss 从 styles/site.scss 编译。交互版见同一服务的首页。",
+            "静态报告由 Rabbita SSR 生成；样式由 precss 从 styles/site.scss 编译。交互版见同一服务的首页",
           ),
         ]),
       ]),

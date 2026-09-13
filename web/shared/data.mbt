@@ -423,6 +423,15 @@ pub fn int_field(obj : Map[String, Json], key : String, fallback : Int) -> Int {
 }
 
 ///|
+pub fn bool_field(obj : Map[String, Json], key : String, fallback : Bool) -> Bool {
+  match obj.get(key) {
+    Some(True) => true
+    Some(False) => false
+    _ => fallback
+  }
+}
+
+///|
 pub fn number_field(
   obj : Map[String, Json],
   key : String,

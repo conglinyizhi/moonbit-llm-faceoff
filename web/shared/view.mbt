@@ -248,7 +248,7 @@ pub fn case_block(
       @html.fragment([])
     } else {
       el("details", "case-system", [
-        el("summary", "", [txt("system prompt")]),
+        el("summary", "", [txt("System Prompt")]),
         @html.pre([txt(block.system)]),
       ])
     },
@@ -390,7 +390,7 @@ pub fn answer_diffs(block : CaseBlock) -> @html.Html {
       if block.answers.length() == 1 {
         el("p", "muted", [
           txt(
-            "只有一个模型，没有可比的对象（勾两个模型再跑）。",
+            "只有一个模型，没有可比的对象（勾两个模型再跑）",
           ),
         ])
       } else {
@@ -493,7 +493,7 @@ pub fn run_context_body(context : RunContext, case_id : String) -> @html.Html {
     if missing {
       el("p", "muted", [
         txt(
-          "这份上下文里没有 `\{case_id}` 这条用例（它是另一次运行的）。",
+          "这份上下文里没有 `\{case_id}` 这条用例（它是另一次运行的）",
         ),
       ])
     } else {
@@ -878,7 +878,7 @@ pub fn annotation_editor(
         input_type=@html.InputType::Text,
         class="note-input",
         value=note,
-        placeholder="备注：这里出现了什么问题？",
+        placeholder="备注：这里出现了什么问题",
         on_input=on_note,
       ),
       @html.button(class="ghost", on_click=on_save, [txt("存备注")]),
