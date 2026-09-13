@@ -216,6 +216,7 @@ moon run --target native scripts/real-gateway.mbtx   # → docs/real-gateway-run
 - [8. 目录结构](#8-目录结构)
 - [9. 延伸阅读](#9-延伸阅读)
 - [10. 参与贡献](#10-参与贡献)
+- [11. 来源与依赖](#11-来源与依赖)
 
 ---
 
@@ -746,6 +747,20 @@ docs/               选型调查、基准复盘
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 构建要求、几条硬规矩（不用 Python、为什么分成两个模块），以及提 PR 前该跑什么。
 - [`SECURITY.md`](SECURITY.md) —— 怎么报漏洞，以及你的 API key 会经过哪里、不会去哪里。
 - [`CHANGELOG.md`](CHANGELOG.md) —— 各版本改了什么，包括从 `llm_client` 改名这一条。
+
+## 11. 来源与依赖
+
+faceoff 是原创项目，不是移植：HTTP 客户端、流式读取、统计、对比跑批和页面都写在这个仓库里，仓库内没有任何 vendored 的第三方代码。也没有 LLM 客户端依赖——[`docs/library-survey.md`](docs/library-survey.md) 记下了当时调查并试用过的那个 Mooncakes 包、它缺什么，以及后来为什么拿掉。
+
+真正用到的包都来自 Mooncakes：
+
+| 包 | 许可证 | 用在哪 |
+| --- | --- | --- |
+| `moonbitlang/async` | Apache-2.0 | HTTP 客户端、流式读取、网页背后的本地服务端，以及跑批用的并发 |
+| `moonbit-community/rabbita` | Apache-2.0 | 页面应用与静态报告生成器 |
+| `conglinyizhi/precss` | Apache-2.0 | 编译 `web/styles/site.scss` |
+
+协议格式是 OpenAI 兼容的 `POST /v1/chat/completions`——参加对比的模型都得会说这一套接口，其中不涉及 OpenAI 的 SDK 或代码。除 [`bench/cases.example.jsonl`](bench/cases.example.jsonl) 这个示例外，仓库里不带任何用例集：prompt 属于写它的人。
 
 ## 许可证
 

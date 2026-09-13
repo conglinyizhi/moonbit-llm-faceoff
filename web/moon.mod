@@ -22,6 +22,5 @@ description = "Static page for the faceoff benchmark results (Rabbita SSG + prec
 import {
   "moonbit-community/rabbita@0.15.7",
   "moonbitlang/async@0.21.2",
-  "moonbitlang/x@0.5.1",
   "conglinyizhi/precss@0.1.3",
 }

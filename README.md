@@ -243,6 +243,7 @@ under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
 - [8. Layout](#8-layout)
 - [9. Further reading](#9-further-reading)
 - [10. Contributing](#10-contributing)
+- [11. Provenance and dependencies](#11-provenance-and-dependencies)
 
 ---
 
@@ -898,6 +899,29 @@ docs/               library survey, benchmark notes
   to your API key.
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed between versions, including the
   rename from `llm_client`.
+
+## 11. Provenance and dependencies
+
+faceoff is an original project, not a port: the HTTP client, the streaming
+reader, the statistics, the comparison harness and the page are written here,
+and no third-party code is vendored into the repository. There is no LLM client
+dependency either — [`docs/library-survey.md`](docs/library-survey.md) records
+the Mooncakes library that was surveyed and tried, the gaps it had, and why it
+was removed again.
+
+The packages it does build on, all from Mooncakes:
+
+| package | license | used for |
+| --- | --- | --- |
+| `moonbitlang/async` | Apache-2.0 | HTTP client, streaming reads, the local server behind the page, and the concurrency the harness runs on |
+| `moonbit-community/rabbita` | Apache-2.0 | the page app and the static report generator |
+| `conglinyizhi/precss` | Apache-2.0 | compiling `web/styles/site.scss` |
+
+The wire format is the OpenAI-compatible `POST /v1/chat/completions` — the one
+interface every model in a comparison has to speak. No OpenAI SDK or code is
+involved. No case set ships with the repository beyond
+[`bench/cases.example.jsonl`](bench/cases.example.jsonl): prompts belong to
+whoever wrote them.
 
 ## License
 
