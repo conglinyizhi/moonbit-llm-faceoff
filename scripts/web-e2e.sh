@@ -254,11 +254,12 @@ grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模�
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
 grep -q 'id="api-key"' "$tmp/form.html" || fail "表单里没有 API key 输入框" "$tmp/form.html"
 grep -q 'type="password"' "$tmp/form.html" || fail "API key 输入框不是 password 类型" "$tmp/form.html"
-# 「这次跑什么」的两页：测试集 / 临时 First User Prompt
+# 「这次跑什么」的两页：测试集 / 临时提示词
 grep -q 'panel-tabs' "$tmp/form.html" || fail "「这次跑什么」没有做成两页" "$tmp/form.html"
-grep -q '临时 First User Prompt' "$tmp/form.html" || fail "没有临时 prompt 那一页" "$tmp/form.html"
+grep -q '临时提示词' "$tmp/form.html" || fail "没有临时提示词那一页" "$tmp/form.html"
 # 从纯文本文件新建测试集
-grep -q 'id="import-path"' "$tmp/form.html" || fail "没有从文本文件建测试集的地方" "$tmp/form.html"
+# 这一块现在收成一个按钮了（点开才露出路径输入框），所以断言按钮本身
+grep -q '从文本文件生成新测试集' "$tmp/form.html" || fail "没有从文本文件建测试集的地方" "$tmp/form.html"
 # system prompt 是运行级的：页面打开时预填（服务端 LLM_WEB_SYSTEM），能改
 grep -q 'id="system"' "$tmp/form.html" || fail "工作台没有 system prompt 输入框" "$tmp/form.html"
 # 网关与密钥应当排在「模型」之后、「预设」之前（原来在参数行下面）
@@ -485,8 +486,8 @@ curl -sf -X DELETE "http://127.0.0.1:$PORT/api/cases/many" >/dev/null ||
 # 右上角：不再放网关地址，而是「手上有什么 + 跑过几次」
 echo "$probe" | grep -q 'http' &&
   fail "header 里还写着网关地址：$probe"
-echo "$probe" | grep -q '道用例' ||
-  fail "header 里没有用例规模：$probe"
+echo "$probe" | grep -q '条用例' ||
+  fail "header 里没有用例规模（而且量词得统一成「条」）：$probe"
 echo "$probe" | grep -qE '"headerText":"[^"]*已跑 [0-9]+ 次' ||
   fail "header 里没有跑过几次（历史汇总）：$probe"
 echo "$probe" | grep -qE '"wrapGap":[0-9]{1,2}(,|})' ||
@@ -546,7 +547,10 @@ echo "==> 全选按当前测试集来"
 # 勾的是一批不属于这套的 id——面板上什么都没变，跑起来还「一道都没选中」
 setall_probe='(async () => {
   const out = {};
-  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  // 页面上有两处「全不选」：用例区一个、推理开关那一列也有一个（两者都在
+  // .case-panel 之外/之内）。这里要的是用例区那个，所以按容器找，别按全页找
+  const byText = (t, root) => Array.from((root || document).querySelectorAll("button")).find((b) => b.textContent === t);
+  const casePanel = document.querySelector(".case-panel");
   const select = document.querySelector(".set-select");
   out.sets = Array.from(select.options).map((o) => o.value);
   if (out.sets.length < 2) { return out; }
@@ -556,7 +560,7 @@ setall_probe='(async () => {
   select.value = target;
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 1500));
-  byText("全不选").click();
+  byText("全不选", casePanel).click();
   await new Promise((r) => setTimeout(r, 400));
   out.noneAfterClear = Array.from(document.querySelectorAll("input[type=checkbox]"))
     .filter((c) => c.id.startsWith("case-")).filter((c) => c.checked).length;
@@ -588,9 +592,11 @@ echo "==> 开始按钮旁的极限用量"
 # 输出按每次跑满 max_tokens 算
 cost_probe='(async () => {
   const out = {};
-  const byText = (t) => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === t);
+  // 同样有两处「全不选」（用例区 / 推理开关），按容器找用例区那个
+  const byText = (t, root) => Array.from((root || document).querySelectorAll("button")).find((b) => b.textContent === t);
+  const casePanel = document.querySelector(".case-panel");
   const hint = () => [...document.querySelectorAll(".actions .hint")].map((h) => h.textContent).join(" | ");
-  byText("全不选").click();
+  byText("全不选", casePanel).click();
   await new Promise((r) => setTimeout(r, 400));
   out.empty = hint();
   byText("全选").click();
@@ -762,9 +768,9 @@ context_probe='(async () => {
   const item = document.querySelector(".history-item");
   item.querySelectorAll(".history-actions button")[0].click();
   await new Promise((r) => setTimeout(r, 2500));
-  // 「这次跑什么」两页：切到临时 prompt 页时把后果说清楚
+  // 「这次跑什么」两页：切到临时提示词页时把后果说清楚
   const tabs = Array.from(document.querySelectorAll(".panel-tabs button"));
-  const promptTab = tabs.find((b) => b.textContent === "临时 First User Prompt");
+  const promptTab = tabs.find((b) => b.textContent === "临时提示词");
   const setTab = tabs.find((b) => b.textContent === "测试集");
   if (promptTab && setTab) {
     promptTab.click();
@@ -778,7 +784,8 @@ context_probe='(async () => {
     setTab.click();
     await new Promise((r) => setTimeout(r, 400));
     out.noticeOnSetTab = (document.querySelector(".case-panel .notice") || {}).textContent || "";
-    out.importRowVisible = !!document.querySelector("#import-path");
+    // 「从文本文件生成新测试集」平时是一个按钮，点开才有输入框
+    out.importRowVisible = Array.from(document.querySelectorAll(".import-row button")).some((b) => b.textContent.includes("从文本文件"));
     // 清空，别影响后面的运行
     promptTab.click();
     await new Promise((r) => setTimeout(r, 300));
@@ -823,7 +830,7 @@ context_probe='(async () => {
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/context.html.err" | sed 's/^SCRIPT //')
-echo "$probe" | grep -q '留空 = 跑上面那套测试集' ||
+echo "$probe" | grep -q '留空将会运行测试集' ||
   fail "临时 prompt 那页没说清楚「留空会怎样」：$probe"
 echo "$probe" | grep -q '填了内容 = 这次只跑这一条' ||
   fail "临时 prompt 填了之后没说清楚后果：$probe"

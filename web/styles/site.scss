@@ -112,7 +112,9 @@ body.page {
     letter-spacing: -0.02em;
   }
 
-  p {
+  // 只约束 hero 自己的那句话；早先写的是后代选择器，于是嵌在 hero 里的
+  // 卡片（比如预设）里所有 p 都被限到 46rem，提示文字提前折行
+  > p {
     margin: 0;
     max-width: 46rem;
     color: $text;
@@ -449,16 +451,13 @@ table {
 }
 
 .history {
-  @include card(0.9rem);
-  position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
-  overflow-y: auto;
-
-  @media (max-width: 960px) {
-    position: static;
-    max-height: none;
-  }
+  // 裸容器：清掉卡片感（底色、边框、圆角、内外边距全不要）。
+  // 侧栏与主区之间的分隔交给 .workbench 的 gap，不靠一块底色去撑
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
 
   .section-head {
     display: flex;
@@ -566,18 +565,23 @@ table {
     padding: 0 0.4rem;
     color: $muted;
     font-size: 0.8rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: 0.02em;
     font-weight: 400;
     // legend 站在边框上，而 fieldset 的背景不画在它那一段：不补的话，
     // 那截露出的是页面底色，在有底色的区块上就是一块脏补丁
     background-color: inherit;
   }
 
-  // 核心区（SYSTEM PROMPT）：底色亮一档，边框反而更淡
+  // 核心区（SYSTEM PROMPT）：不要底色，边框比默认再淡一档。
+  // legend（那一行小标题）也得显式清掉：它站在边框上，而 fieldset 的背景不画在
+  // 它那一段，只要两边任一侧留了底色，那段就会露出一块对不上色的补丁
   &.picker-core {
-    background: $core;
+    background: none;
     border-color: $border-soft;
+
+    legend {
+      background: none;
+    }
   }
 }
 
@@ -666,6 +670,11 @@ table {
     border-color: $accent;
     outline: none;
   }
+}
+
+// System Prompt 那个框是 fieldset 的第一个子元素，上面不需要再加一层空白
+.picker-core .prompt-input {
+  margin-top: 0;
 }
 
 .params {
@@ -1560,13 +1569,6 @@ button.ghost {
   }
 }
 
-// 表单里的分组分界线
-.form-divider {
-  border: 0;
-  border-top: 1px solid $border;
-  margin: 1.1rem 0;
-}
-
 // 「这次跑什么」面板的两页
 .panel-tabs {
   display: flex;
@@ -1933,4 +1935,235 @@ button.ghost {
     font-family: ui-monospace, SFMono-Regular, "JetBrains Mono", monospace;
     font-size: 0.8rem;
   }
+}
+
+// 推理开关：每个选中的模型一行，左边模型名、右边两个机制勾
+.cot-box {
+  border-top: 1px solid $border-soft;
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+
+  .cot-head {
+    color: $muted;
+    font-size: 0.78rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .cot-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.2rem;
+    padding: 0.2rem 0;
+  }
+
+  .cot-model {
+    color: $title;
+    font-size: 0.82rem;
+    min-width: 8rem;
+  }
+
+  .check {
+    font-size: 0.8rem;
+  }
+}
+
+// 推理开关那一行的表头：「全选1 / 全选2 / 全不选」贴右，和用例那边的整列按钮一个性格
+.cot-box .cot-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+
+  .cot-all {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 0.8rem;
+
+    .link-btn {
+      color: $muted;
+      font-size: 0.76rem;
+      padding: 0;
+
+      &:hover {
+        color: $accent;
+      }
+    }
+  }
+}
+
+// 运行方式：三选一，radio + 一行说明。放在参数行与开始按钮之间——
+// 它是「怎么跑」，不是「跑什么」
+.parallel-row {
+  border-top: 1px solid $border-soft;
+  padding-top: 0.9rem;
+  margin-bottom: 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.6rem;
+
+  .parallel-head {
+    color: $muted;
+    font-size: 0.78rem;
+    min-width: 4rem;
+  }
+
+  .parallel-option {
+    gap: 0.35rem;
+
+    input {
+      accent-color: $accent;
+      height: 0.85rem;
+      width: 0.85rem;
+      margin: 0;
+    }
+
+    .label {
+      color: $text;
+      font-size: 0.84rem;
+    }
+
+    .hint {
+      color: $muted;
+      font-size: 0.74rem;
+    }
+  }
+}
+
+// 刚套用过预设：把受影响的东西框起来，直到用户自己改任意一个字段。
+//
+// 选择器只列「预设真的会写进去」的那些控件——预设带 models / caseSet / system /
+// baseUrl / 重复次数 / maxTokens / temperature / 间隔 / 重试，不带 API key，
+// 所以 key 那个输入框不在此列
+// 高亮用黄色：边框与阴影同色，和「主操作蓝」区分开——蓝是让你点的，黄是提醒你
+// 「这里刚被改过 / 这里就是你要找的那个」
+.workbench-main.preset-fresh {
+  .picker:not(.preset-panel),
+  .case-panel,
+  // 网关那行也带 .params 类（div.params.gateway-row），所以要排掉它，
+  // 再单独点 base-url：预设不带 API key，key 那个框不该跟着亮
+  .params:not(.gateway-row) .field input,
+  #base-url {
+    border-color: $warn;
+    box-shadow: 0 0 0 2px rgba(210, 153, 34, 0.22);
+  }
+}
+
+// 「开始前确认」里点某一行右边的「调整」：滚到那个输入框并亮 5 秒
+// （用户一动任何输入就提前熄，见 web/cmd/app/spot.mbt）
+.spot {
+  border-color: $warn !important;
+  box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.28) !important;
+  transition: box-shadow 0.15s ease;
+}
+
+// 开始前确认：只读的一览表 + 每行一个「调整」。放在开始按钮上面，
+// 眼睛扫完最后一行就直接落到按钮上
+.confirm-box {
+  border-top: 1px solid $border-soft;
+  padding-top: 0.9rem;
+  margin-bottom: 1.2rem;
+
+  .confirm-head {
+    color: $muted;
+    font-size: 0.78rem;
+    margin-bottom: 0.5rem;
+  }
+
+  // 宽屏一行两条：12 行铺成一条太长，值那一列还会被拉出一大段空白。
+  // 窄屏退回一条——两列时标签那列会被压到折行
+  .confirm-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.05rem 2.2rem;
+
+    @media (max-width: 900px) {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .confirm-row {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 0.2rem 0.7rem;
+    padding: 0.22rem 0.4rem;
+    margin: 0 -0.4rem;
+    border-radius: 0.3rem;
+    font-size: 0.82rem;
+
+    // 鼠标停在哪一行，哪一行整条亮一下——它右边有个可点的「调整」，
+    // 行本身也得看着像是能操作的东西
+    &:hover {
+      background: rgba(88, 166, 255, 0.07);
+
+      .confirm-label {
+        color: $text;
+      }
+    }
+  }
+
+  .confirm-label {
+    color: $muted;
+  }
+
+  .confirm-value {
+    color: $text;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .link-btn {
+    color: $accent;
+    font-size: 0.78rem;
+    padding: 0;
+  }
+}
+
+// 「调整」有时指向组里的某个控件（运行方式的 radio、推理开关的 checkbox）。
+// 一个 14px 的 radio 亮一圈 3px 的光环，等于没亮——所以用 :has() 把整组一起点亮，
+// 同时把那个控件自己身上的光环收掉，只留组这一层
+.parallel-row:has(.spot),
+.cot-box:has(.spot) {
+  border-color: $warn;
+  border-radius: 0.35rem;
+  box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.28);
+}
+
+.parallel-row input.spot,
+.cot-box input.spot {
+  box-shadow: none !important;
+}
+
+// System Prompt 里那条提示（勾选框下面跟着变的那句）不是页面级告警条。
+//
+// 它借了 .notice（底色 + 左侧黄边 + margin-top: -0.6rem）——那套是给整页告警
+// 用的：负上边距把它上提，于是它顶到勾选框那一行；而且勾选框一开一关时它在
+// .hint 与 .notice 之间切换，两边的边距不同，块会跟着跳。
+//
+// 这里把两种状态压成同一套排版，只留颜色差别，切来切去不再动位置
+.picker-core {
+  > .hint,
+  > .notice {
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    margin: 0.45rem 0 0;
+    color: $muted;
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+
+  > .notice {
+    color: $warn;
+  }
+}
+
+// 勾了覆盖、但文本框空着——这行红的跟在提示后面，说明此刻开关等于没开。
+// 只加一层红字，不再开一个方框：它紧贴着上面那句，独立成块又会变回"告警条"
+.picker-core .notice-bad {
+  color: $danger;
+  margin-left: 0.4rem;
 }

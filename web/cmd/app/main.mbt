@@ -120,11 +120,23 @@ struct AppModel {
   pending_run : String?
   /// 「从文本文件建测试集」的路径输入（服务端上的路径，服务端去读）。
   import_path : String
-  /// 「这次跑什么」面板开在哪一页：set（测试集）/ prompt（临时 prompt）。
+  /// 「这次跑什么」面板开在哪一页：set（测试集）/ prompt（临时提示词）。
   /// 只是视图状态——真正决定跑什么的是上面那个输入框里有没有内容。
   panel_tab : String
   /// 本次运行的 system prompt：所有用例共用。用例自带的会覆盖它。
   system : String
+  /// 勾上就让上面那条 system 覆盖测试集里逐条写的 system
+  system_override : Bool
+  /// 这些模型带 enable_thinking: true
+  cot_thinking : Array[String]
+  /// 这些模型带 reasoning_effort: "high"
+  cot_effort : Array[String]
+  /// 运行方式：serial（默认）/ models（按模型并行）/ all（全部并发）
+  parallel : String
+  /// 刚套用过预设：把受影响的输入框框起来，直到用户自己改任意一个字段
+  preset_applied : Bool
+  /// 「从文本文件生成新测试集」那个按钮展开了没有
+  import_open : Bool
   run_id : String?
   status : String
   done : Int
@@ -272,7 +284,7 @@ fn query_run_id(query : Map[String, String]) -> String? {
 }
 
 ///|
-/// 这次跑「临时 First User Prompt」还是跑测试集。
+/// 这次跑「临时提示词」还是跑测试集。
 ///
 /// 没有开关：输入框里填了非空内容就是前者。多一个勾选框的代价是——用户填了
 /// 一条 prompt、忘了勾那个框，然后对着 33 道测试题的结果发愣。
@@ -298,6 +310,12 @@ fn initial_model() -> AppModel {
     pace_ms: 3000,
     retry: 3,
     system: query.get("system").unwrap_or(""),
+    system_override: query.get("systemOverride") == Some("1"),
+    cot_thinking: query_list(query, "cotThinking"),
+    cot_effort: query_list(query, "cotEffort"),
+    parallel: query.get("parallel").unwrap_or("serial"),
+    preset_applied: false,
+    import_open: false,
     viewed_error: None,
     confirm_delete: None,
     pending_run: query_run_id(query),
@@ -465,8 +483,18 @@ enum Msg {
   PromptChanged(String)
   RepeatsChanged(String)
   SystemChanged(String)
+  ToggleSystemOverride
+  ToggleCotThinking(String)
+  ToggleCotEffort(String)
+  // 整列操作：①（enable_thinking）全选 / ②（reasoning_effort）全选 / 全不选
+  CotThinkingAll
+  CotEffortAll
+  CotClear
+  SetParallel(String)
   SetPanelTab(String)
   ImportPathChanged(String)
+  ToggleImport
+  Spot(String)
   ImportCaseFile
   CaseFileImported(Result[Json, Error])
   MaxTokensChanged(String)
@@ -701,12 +729,13 @@ fn update(
       }
     ToggleModel(id) =>
       (
-        { ..model, selected_models: toggle(model.selected_models, id), },
+        { ..model,
+        preset_applied: false, selected_models: toggle(model.selected_models, id), },
         @cmd.none,
       )
     ToggleCase(id) =>
       (
-        { ..model, selected_cases: toggle(model.selected_cases, id), },
+        { ..model, preset_applied: false, selected_cases: toggle(model.selected_cases, id), },
         @cmd.none,
       )
     // 全选勾的是**当前这套**用例。以前取的是 meta.cases（默认那套），于是
@@ -714,7 +743,8 @@ fn update(
     // 跑起来还会「一道都没选中」
     SelectAllCases =>
       (
-        { ..model, selected_cases: model.available_cases.map(fn(c) { c.id }), },
+        { ..model,
+        preset_applied: false, selected_cases: model.available_cases.map(fn(c) { c.id }), },
         @cmd.none,
       )
     // 开始打字就把面板跟到临时那一页：用户的动作说明了他要看哪一页
@@ -731,7 +761,8 @@ fn update(
         },
         @cmd.none,
       )
-    ExtraModelsChanged(text) => ({ ..model, extra_models: text, }, @cmd.none)
+    ExtraModelsChanged(text) =>
+      ({ ..model, preset_applied: false, extra_models: text, }, @cmd.none)
     BaseUrlChanged(text) => ({ ..model, base_url: text, }, @cmd.none)
     ApiKeyChanged(text) => ({ ..model, api_key: text, }, @cmd.none)
     CopyMarkdown =>
@@ -858,7 +889,7 @@ fn update(
               viewed: None,
               // 人话优先：浏览器给的 "Request error, HTTP 404 OK" 对用户没有意义
               viewed_error: Some(
-                "找不到这次运行（\{id}）——它可能已经被删掉了",
+                "找不到这次运行（\{id}），它可能已经被删掉了",
               ),
             },
             @cmd.none,
@@ -936,7 +967,7 @@ fn update(
                   ..model,
                   busy_run: None,
                   runs_error: Some(
-                    "重跑需要密钥：服务端环境里没有，页面上也没填。",
+                    "重跑需要密钥：服务端环境里没有，页面上也没填",
                   ),
                 },
                 @cmd.none,
@@ -965,7 +996,8 @@ fn update(
       }
     SelectCaseSet(name) =>
       (
-        { ..model, case_set: name, cases_error: None, cases_saved: None, },
+        { ..model,
+        preset_applied: false, case_set: name, cases_error: None, cases_saved: None, },
         fetch_case_set(name, emit),
       )
     CaseSetLoaded(name, result) =>
@@ -1095,7 +1127,8 @@ fn update(
         Err(error) =>
           ({ ..model, cases_error: Some(error.to_string()), }, @cmd.none)
       }
-    SelectNoCases => ({ ..model, selected_cases: [], }, @cmd.none)
+    SelectNoCases => ({ ..model,
+        preset_applied: false, selected_cases: [], }, @cmd.none)
     AddDraft => {
       // 不在编辑态点它，就顺手打开：点了没反应比多点一下更难受
       let drafts = model.drafts.copy()
@@ -1240,7 +1273,7 @@ fn update(
           {
             ..model,
             cases_error: Some(
-              "当前没有选中的测试集。先「另存为新集」。",
+              "当前没有选中的测试集。先「另存为新集」",
             ),
           },
           @cmd.none,
@@ -1341,6 +1374,7 @@ fn update(
               let extra = preset.models.filter(fn(id) { !known.contains(id) })
               let next = {
                 ..model,
+                preset_applied: true,
                 selected_models: selected,
                 extra_models: extra.join(","),
                 system: preset.system.unwrap_or(model.system),
@@ -1554,8 +1588,28 @@ fn update(
           }
       }
     CloseCompare => ({ ..model, compare: None, compare_picks: [], }, @cmd.none)
-    SystemChanged(text) => ({ ..model, system: text, }, @cmd.none)
+    SystemChanged(text) =>
+      ({ ..model, preset_applied: false, system: text, }, @cmd.none)
+    ToggleSystemOverride =>
+      ({ ..model,
+        preset_applied: false, system_override: !model.system_override }, @cmd.none)
+    ToggleCotThinking(id) =>
+      ({ ..model, cot_thinking: toggle(model.cot_thinking, id) }, @cmd.none)
+    ToggleCotEffort(id) =>
+      ({ ..model, cot_effort: toggle(model.cot_effort, id) }, @cmd.none)
+    // 整列操作用「当前选中的模型」为准：勾选模型之后按一下，新加进来的那个也一起开
+    CotThinkingAll =>
+      ({ ..model, cot_thinking: effective_models(model) }, @cmd.none)
+    CotEffortAll =>
+      ({ ..model, cot_effort: effective_models(model) }, @cmd.none)
+    CotClear => ({ ..model, cot_thinking: [], cot_effort: [] }, @cmd.none)
+    SetParallel(mode) => ({ ..model, parallel: mode }, @cmd.none)
     SetPanelTab(tab) => ({ ..model, panel_tab: tab, }, @cmd.none)
+    ToggleImport => ({ ..model, import_open: !model.import_open }, @cmd.none)
+    Spot(id) => {
+      spot_field(id)
+      (model, @cmd.none)
+    }
     ImportPathChanged(text) => ({ ..model, import_path: text, }, @cmd.none)
     ImportCaseFile => {
       let name = import_set_name(model)
@@ -1592,27 +1646,44 @@ fn update(
           ({ ..model, cases_error: Some(error.to_string()), }, @cmd.none)
       }
     RepeatsChanged(text) =>
-      ({ ..model, repeats: clamp_int(text, 1, 20, model.repeats), }, @cmd.none)
+      (
+        {
+          ..model,
+          preset_applied: false,
+          repeats: clamp_int(text, 1, 20, model.repeats),
+        },
+        @cmd.none,
+      )
     MaxTokensChanged(text) =>
       (
-        { ..model, max_tokens: clamp_int(text, 1, 32768, model.max_tokens), },
+        {
+          ..model,
+          preset_applied: false,
+          max_tokens: clamp_int(text, 1, 32768, model.max_tokens),
+        },
         @cmd.none,
       )
     TemperatureChanged(text) =>
       (
         {
           ..model,
+          preset_applied: false,
           temperature: clamp_double(text, 0.0, 2.0, model.temperature),
         },
         @cmd.none,
       )
     PaceChanged(text) =>
       (
-        { ..model, pace_ms: clamp_int(text, 0, 60000, model.pace_ms), },
+        {
+          ..model,
+          preset_applied: false,
+          pace_ms: clamp_int(text, 0, 60000, model.pace_ms),
+        },
         @cmd.none,
       )
     RetryChanged(text) =>
-      ({ ..model, retry: clamp_int(text, 0, 10, model.retry), }, @cmd.none)
+      ({ ..model,
+        preset_applied: false, retry: clamp_int(text, 0, 10, model.retry), }, @cmd.none)
     StartRun =>
       // 运行中重复点击直接忽略：按钮不再用 disabled 属性挡（见 action_row）
       if model.status == "running" || model.status == "starting" {
@@ -1765,6 +1836,14 @@ struct RunPayload {
   prompt : String
   /// 运行级 system prompt。空（None）就不发这个字段，服务端那边当作「不带」。
   system : String?
+  /// 让上面那条覆盖测试集里逐条写的 system
+  systemOverride : Bool
+  /// 这些模型带 enable_thinking: true
+  cotThinking : Array[String]
+  /// 这些模型带 reasoning_effort: "high"
+  cotEffort : Array[String]
+  /// 串行 / 按模型并行 / 全部并发
+  parallel : String
   /// 这些 case id 从哪套用例里读。空表示用服务端的默认集。
   caseSet : String?
   repeats : Int
@@ -1802,6 +1881,12 @@ fn RunPayload::of(model : AppModel) -> RunPayload {
     } else {
       Some(model.system)
     },
+    // 空文本框时这个开关不生效：别发出去，否则 request.json 与重跑重放都会
+    // 记下一个当时并没有生效的设置
+    systemOverride: model.system_override && model.system.trim(chars=" \t\r\n") != "",
+    cotThinking: model.cot_thinking,
+    cotEffort: model.cot_effort,
+    parallel: model.parallel,
     maxTokens: model.max_tokens,
     temperature: model.temperature,
     paceMs: model.pace_ms,
@@ -1821,6 +1906,23 @@ fn RunPayload::of(model : AppModel) -> RunPayload {
 
 ///|
 /// 勾选的模型 + 手输的额外模型，去重后就是本次真正要跑的列表。
+/// 一个逗号分隔的查询参数 → 数组（分享链接里带「哪些模型开了推理开关」）
+fn query_list(query : Map[String, String], key : String) -> Array[String] {
+  let raw = match query.get(key) {
+    Some(value) => value
+    None => return []
+  }
+  let out : Array[String] = []
+  for piece in raw.split(",") {
+    let clean = piece.trim(chars=" \t").to_owned()
+    if clean != "" && !out.contains(clean) {
+      out.push(clean)
+    }
+  }
+  out
+}
+
+///|
 fn effective_models(model : AppModel) -> Array[String] {
   let out : Array[String] = []
   for id in model.selected_models {
@@ -1940,8 +2042,11 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       // 侧栏一直渲染，哪怕 meta 还没到：`.workbench` 是两列网格，少一个子元素
       // 主内容就会掉进第一列（那 270px 里）——加载中或加载失败时整个页面挤成
       // 一条。空着也得占住那一格
-      history_panel(model.meta, model, emit),
-      el("main", "workbench-main", [
+      history_panel(model, emit),
+      el(
+        "main",
+        if model.preset_applied { "workbench-main preset-fresh" } else { "workbench-main" },
+        [
         controls(model, emit),
         progress(model),
         result_section(model, emit),
@@ -2012,7 +2117,7 @@ fn header(model : AppModel) -> @html.Html {
   let running = model.status == "running" || model.status == "starting"
   let counts = match model.meta {
     Some(meta) =>
-      "\{meta.models.length()} 个模型 · \{meta.cases.length()} 道用例"
+      "\{meta.models.length()} 个模型 · \{meta.cases.length()} 条用例"
     None => "正在载入…"
   }
   let history = match model.runs {
@@ -2057,21 +2162,46 @@ fn header(model : AppModel) -> @html.Html {
 fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("fieldset", "picker picker-core", [
     el("legend", "", [
-      txt("System prompt（本次运行的所有用例共用）"),
+      txt("System Prompt"),
     ]),
     @html.textarea(
       class="prompt-input",
       id="system",
       value=model.system,
       rows=3,
-      placeholder="例如：把下面的语音转写文本整理成通顺的书面表达，保留原意，不要解释。",
+      placeholder="例如：把下面的语音转写文本整理成通顺的书面表达，保留原意，不要解释",
       on_input=emit.map(fn(text) { SystemChanged(text) }),
       ([] : Array[@html.Html]),
     ),
     el("div", "hint", [
-      txt(
-        "留空就是不带 system。测试集里逐条写的 system 优先于这里填的。",
+      txt("留空就是不带 system"),
+    ]),
+    // 用例级 system 与运行级 system 到底谁赢：以前是写死「用例级优先」，
+    // 现在交给用户勾
+    el("label", "check system-override", [
+      @html.input(
+        input_type=@html.InputType::Checkbox,
+        id="system-override",
+        checked=model.system_override,
+        on_change=emit.map(fn(_value) { ToggleSystemOverride }),
       ),
+      el("span", "", [txt("覆盖测试集内的 System Prompt")]),
+    ]),
+    el("p", if model.system_override { "notice" } else { "hint" }, [
+      txt(
+        if model.system_override {
+          "勾上了：每个请求都发上面这条；测试集里逐条的 system 不再生效"
+        } else {
+          "不勾：测试集里逐条写的 system 优先，用例没写的才落到上面这条"
+        },
+      ),
+      // 勾了但文本框是空的：这个开关此刻等于没开（后端也是这么判的），
+      // 所以补一句红色提示——否则用户会以为填了测试集之外的 system 已经生效
+      if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
+        el("span", "notice-bad", [txt("文本框还是空的，填上才生效")])
+      } else {
+        @html.fragment([])
+      },
     ]),
   ])
 }
@@ -2081,7 +2211,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   match model.meta {
     None =>
       el("section", "hero", [
-        @html.h1([txt("模型对比")]),
+        @html.h1([txt("LLM 模型对比")]),
         @html.p([
           txt(
             match model.meta_error {
@@ -2093,21 +2223,21 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       ])
     Some(meta) =>
       el("section", "hero", [
-        @html.h1([txt("模型对比")]),
+        @html.h1([txt("LLM 模型对比")]),
         @html.p([
           txt(
-            "勾选或直接填模型、调好参数，点开始。运行在服务端串行执行，进度实时回传。",
+            "勾选或直接填模型、调好参数，点「开始评测」，进度实时回传；运行方式可选串行或并行",
           ),
         ]),
         @html.p([
           txt(
-            "网关默认用服务端配置；下面填了地址或密钥就只对本次运行生效，密钥只经过本页内存，不落盘。",
+            "网关默认用服务端配置；下面填了地址或密钥就只对本次运行生效，密钥只经过本页内存，不落盘",
           ),
         ]),
         if !meta.hasKey {
           el("p", "failed", [
             txt(
-              "服务端没有读到 API key。可以在启动服务端前设好 MOONLLM_API_KEY / OPENAI_API_KEY，也可以直接在下面的 API key 里填一把。",
+              "服务端没有读到 API key。可以在启动服务端前设好 MOONLLM_API_KEY / OPENAI_API_KEY，也可以直接在下面的 API key 里填一把",
             ),
           ])
         } else {
@@ -2117,16 +2247,17 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         // 以前在参数行下面，和「重复几次」混在一起。
         gateway_row(model, emit),
         model_picker(meta, model, emit),
-        // 分界：上面是「对着谁说话」（网关 + 模型），下面是「跑什么 / 怎么跑」
-        el("hr", "form-divider", []),
         system_field(model, emit),
         case_panel(meta, model, emit),
+        preset_panel(meta, model, emit),
         param_row(model, emit),
+        parallel_row(model, emit),
+        confirm_summary(model, emit),
         action_row(model, emit),
         if model.autorun_held {
           el("p", "notice", [
             txt(
-              "链接里带了 autorun=1，但眼下没有可用的 API key，所以没有自动开跑——直接跑只会撞上鉴权失败。填好上面的 API key（或确认网关不需要 key）后点「开始评测」。",
+              "链接里带了 autorun=1，但眼下没有可用的 API key，所以没有自动开跑：直接跑只会撞上鉴权失败。填好上面的 API key（或确认网关不需要 key）后点「开始评测」",
             ),
           ])
         } else {
@@ -2167,6 +2298,54 @@ fn model_picker(
         on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
       ),
     ]),
+    // 推理开关：按模型勾（勾中的模型才生成一行）。
+    //
+    // 两家风格的字段名不一样，所以两个都在：勾哪个就往那个模型的请求体里带哪个。
+    // 各端点认不认、认哪个，得看网关自己（页面不替你猜）
+    cot_rows(model, emit),
+  ])
+}
+
+///|
+/// 每个选中的模型一行：「对 <模型> 启动 CoT 推理」+ 两种机制各一个勾。
+fn cot_rows(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let models = effective_models(model)
+  if models.length() == 0 {
+    return @html.fragment([])
+  }
+  let rows = models.map(fn(id) {
+    el("div", "cot-row", [
+      el("span", "cot-model", [txt(id)]),
+      labelled_checkbox(
+        "cot-thinking-" + id,
+        "enable_thinking",
+        model.cot_thinking.contains(id),
+        emit.map(fn(_value) { ToggleCotThinking(id) }),
+      ),
+      labelled_checkbox(
+        "cot-effort-" + id,
+        "reasoning_effort",
+        model.cot_effort.contains(id),
+        emit.map(fn(_value) { ToggleCotEffort(id) }),
+      ),
+    ])
+  })
+  el("div", "cot-box", [
+    el("div", "cot-head", [
+      el("span", "", [txt("推理开关（按模型选，可多选）")]),
+      el("span", "cot-all", [
+        @html.button(class="link-btn", on_click=emit(Msg::CotThinkingAll), [
+          txt("全选 enable_thinking"),
+        ]),
+        @html.button(class="link-btn", on_click=emit(Msg::CotEffortAll), [
+          txt("全选 reasoning_effort"),
+        ]),
+        @html.button(class="link-btn", on_click=emit(Msg::CotClear), [
+          txt("全不选"),
+        ]),
+      ]),
+    ]),
+    ..rows,
   ])
 }
 
@@ -2218,7 +2397,7 @@ fn param_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ),
     number_field(
       "retry",
-      "重试次数",
+      "最大重试次数",
       model.retry.to_string(),
       emit.map(fn(text) { RetryChanged(text) }),
     ),
@@ -2235,6 +2414,105 @@ fn number_field(
   el("div", "field", [
     @html.label(for_=id_, [txt(label)]),
     @html.input(input_type=@html.InputType::Text, id=id_, value~, on_input~),
+  ])
+}
+
+///|
+///|
+/// 运行方式：串行是默认（延迟数字只有串行才干净），另外两个只为了快
+fn parallel_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let option = fn(mode : String, label : String, hint : String) {
+    el("label", "check parallel-option", [
+      @html.input(
+        input_type=@html.InputType::Radio,
+        id="parallel-" + mode,
+        name="parallel-mode",
+        value=mode,
+        checked=model.parallel == mode,
+        on_change=emit.map(fn(_value) { SetParallel(mode) }),
+      ),
+      el("span", "label", [txt(label)]),
+      el("span", "hint", [txt(hint)]),
+    ])
+  }
+  el("div", "parallel-row", [
+    el("div", "parallel-head", [txt("运行方式")]),
+    option("serial", "串行", "延迟数字只有串行才干净，也是默认"),
+    option("models", "按模型并行", "每个模型一条流，模型内仍串行"),
+    option("all", "全部并发", "所有请求一起发，最快也最容易撞限流"),
+  ])
+}
+
+///|
+/// 《开始前确认》：把这次会用到的东西只读列一遍，行尾「调整」跳到对应输入框并亮 5 秒。
+///
+/// 它不改变任何状态，也不参与提交——纯粹是「按开始之前再扫一眼」，以及
+/// 「我想改哪一项」的快捷入口。
+fn confirm_summary(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  let jump = fn(target : String) {
+    @html.button(class="link-btn", on_click=emit(Msg::Spot(target)), [
+      txt("调整"),
+    ])
+  }
+  let row = fn(label : String, value : String, target : String) {
+    el("div", "confirm-row", [
+      el("span", "confirm-label", [txt(label)]),
+      el("span", "confirm-value", [txt(value)]),
+      jump(target),
+    ])
+  }
+  let models = effective_models(model)
+  let yes_no = fn(flag : Bool) { if flag { "是" } else { "否" } }
+  let cot = {
+    let parts : Array[String] = []
+    if model.cot_thinking.length() > 0 {
+      parts.push("enable_thinking: " + model.cot_thinking.join(", "))
+    }
+    if model.cot_effort.length() > 0 {
+      parts.push("reasoning_effort: " + model.cot_effort.join(", "))
+    }
+    if parts.length() == 0 { "无" } else { parts.join(" · ") }
+  }
+  let cot_target = if models.length() > 0 {
+    "cot-thinking-" + models[0]
+  } else {
+    "extra-models"
+  }
+  let cases = if model.uses_prompt() {
+    "临时提示词 1 条"
+  } else {
+    "\{model.case_set} · 已选 \{model.selected_cases.length()} 条"
+  }
+  let parallel_label = match model.parallel {
+    "models" => "按模型并行"
+    "all" => "全部并发"
+    _ => "串行"
+  }
+  el("div", "confirm-box", [
+    el("div", "confirm-head", [txt("开始前确认")]),
+    el("div", "confirm-rows", [
+    row("网关", if model.base_url == "" { "服务端默认" } else { model.base_url }, "base-url"),
+    row("模型", if models.length() == 0 { "还没选" } else { models.join(", ") }, "extra-models"),
+    row(
+      "System Prompt",
+      if model.system == "" { "不带" } else { "已填 \{model.system.length()} 字" },
+      "system",
+    ),
+    row(
+      "覆盖测试集 system",
+      // 文本框空着的时候这个开关是不生效的（与后端一致），所以这里显示「否」
+      yes_no(model.system_override && model.system.trim(chars=" \t\r\n") != ""),
+      if model.system.trim(chars=" \t\r\n") == "" { "system" } else { "system-override" },
+    ),
+    row("推理开关", cot, cot_target),
+    row("测试集", cases, "case-set"),
+    row("重复次数", model.repeats.to_string(), "repeats"),
+    row("max tokens", model.max_tokens.to_string(), "max-tokens"),
+    row("temperature", model.temperature.to_string(), "temperature"),
+    row("间隔", "\{model.pace_ms} ms", "pace-ms"),
+    row("最大重试次数", "\{model.retry} 次", "retry"),
+    row("运行方式", parallel_label, "parallel-" + model.parallel),
+    ]),
   ])
 }
 
@@ -2565,7 +2843,7 @@ fn result_section(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
                 el("p", "failed", [txt(message)]),
                 el("p", "hint", [
                   txt(
-                    "地址栏里那个 #run=… 指向的运行不存在；点侧栏里的任意一条可以打开别的运行。",
+                    "地址栏里那个 #run=… 指向的运行不存在；点侧栏里的任意一条可以打开别的运行",
                   ),
                 ]),
               ])
@@ -2605,14 +2883,15 @@ fn results_for(
 fn footer(model : AppModel) -> @html.Html {
   let source = match model.data {
     Some(data) => if data.source == "" { "本次运行" } else { data.source }
-    None => "—"
+    // 没有数据时别写「数据来源 —」：那看着像标签后面拖了条破折号
+    None => "暂无"
   }
   el("footer", "site-footer", [
     el("div", "wrap", [
-      txt("数据来源 \{source}"),
+      txt("数据来源：\{source}"),
       @html.br(),
       txt(
-        "页面由 Rabbita 驱动，样式由 precss 从 styles/site.scss 编译。",
+        "页面由 Rabbita 驱动，样式由 precss 从 styles/site.scss 编译",
       ),
     ]),
   ])

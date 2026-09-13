@@ -78,6 +78,11 @@ fn request_int(info : RunInfo, key : String, fallback : Int) -> Int {
 }
 
 ///|
+fn request_bool(info : RunInfo, key : String, fallback : Bool) -> Bool {
+  @shared.bool_field(request_obj(info), key, fallback)
+}
+
+///|
 fn request_number(info : RunInfo, key : String, fallback : Double) -> Double {
   @shared.number_field(request_obj(info), key, fallback)
 }
@@ -183,6 +188,14 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
     // 重跑要重放的是「当时问的那一套」，system 也算：用页面上当前的会把
     // 一次运行悄悄变成另一次
     system: request_string(info, "system"),
+    // 重跑也要重放「当时那条 system 是怎么生效的」：
+    // 不带上，一次勾了覆盖的运行重跑后会变成用例级优先
+    systemOverride: request_bool(info, "systemOverride", false),
+    // 推理开关也要重放，否则重跑出来的参数和当时不是一回事
+    cotThinking: request_strings(info, "cotThinking"),
+    cotEffort: request_strings(info, "cotEffort"),
+    // 运行方式也重放：勾过并行的运行重跑时不该悄悄变回串行
+    parallel: request_string(info, "parallel").unwrap_or("serial"),
     repeats: request_int(info, "repeats", 1),
     maxTokens: request_int(info, "maxTokens", 1024),
     temperature: request_number(info, "temperature", 0.0),
@@ -203,7 +216,6 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
 /// 左侧的历史面板。放在表单旁边而不是折叠起来：管理测试的时候，
 /// 「之前跑过什么」和「这次要跑什么」是同一个视线里的两件事。
 fn history_panel(
-  meta : Meta?,
   model : AppModel,
   emit : @cmd.Emit[Msg],
 ) -> @html.Html {
@@ -213,7 +225,7 @@ fn history_panel(
       if runs.length() == 0 {
         [
           el("p", "muted", [
-            txt("还没有运行记录。跑一次就会出现在这里。"),
+            txt("还没有运行记录。跑一次就会出现在这里"),
           ]),
         ]
       } else {
@@ -225,16 +237,6 @@ fn history_panel(
     None => txt("")
   }
   el("aside", "history", [
-    // 预设在上：它是「准备跑之前先定下来」的东西，比翻历史更靠前一步
-    match meta {
-      Some(meta) => preset_panel(meta, model, emit)
-      // 载入中也要占位：这块塌了会让下面的运行记录往上跳
-      None =>
-        el("div", "preset-panel", [
-          el("div", "section-head", [el("h2", "", [txt("预设")])]),
-          el("p", "hint", [txt("正在载入…")]),
-        ])
-    },
     el("div", "section-head", [
       el("h2", "", [txt("运行记录")]),
       // 勾满两个就把「刷新」换成「对比」——头部只有一格，而这两个动作

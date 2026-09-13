@@ -46,12 +46,12 @@ let compared_params : Array[(String, String)] = [
   ("models", "模型"),
   ("caseSet", "测试集"),
   ("cases", "用例"),
-  ("prompt", "一次性指令"),
+  ("prompt", "临时提示词"),
   ("repeats", "重复次数"),
   ("maxTokens", "max_tokens"),
   ("temperature", "temperature"),
   ("paceMs", "间隔"),
-  ("retry", "重试次数"),
+  ("retry", "最大重试次数"),
 ]
 
 ///|
@@ -110,7 +110,7 @@ fn param_diff(state : CompareState) -> @html.Html {
   if rows.length() == 0 {
     return el("p", "muted", [
       txt(
-        "两次的参数完全一样（就是把同一件事又跑了一遍）。",
+        "两次的参数完全一样（就是把同一件事又跑了一遍）",
       ),
     ])
   }
@@ -226,7 +226,7 @@ fn metric_diff(model : String, state : CompareState) -> @html.Html {
   let note = if left is None || right is None {
     [
       el("p", "muted", [
-        txt("这个模型只在其中一次里跑过，差值没有意义。"),
+        txt("这个模型只在其中一次里跑过，差值没有意义"),
       ]),
     ]
   } else {
@@ -312,7 +312,7 @@ fn answer_column(
 fn cases_compare(state : CompareState) -> @html.Html {
   let ids = case_ids_union(state.data_a, state.data_b)
   if ids.length() == 0 {
-    return el("p", "muted", [txt("两次都没有可比的用例输出。")])
+    return el("p", "muted", [txt("两次都没有可比的用例输出")])
   }
   el(
     "div",

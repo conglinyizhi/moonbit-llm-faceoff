@@ -223,7 +223,7 @@ fn save_presets(presets : Array[Preset], emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
 // ---------------------------------------------------------------- 渲染：测试集
 
 ///|
-/// 「这次跑什么」：要么跑一套测试集，要么只跑一条临时 prompt。
+/// 「这次跑什么」：要么跑一套测试集，要么只跑一条临时提示词。
 ///
 /// 两者做成同一个面板的两页，因为它们**互斥**——请求里只能二选一。以前是上下
 /// 两个面板加一个「只用下面这一条指令」的勾选框：勾选框和输入框分开在屏幕两端，
@@ -249,7 +249,7 @@ fn case_panel(
     el("span", "muted count-badge", [
       txt(
         if prompt_mode {
-          "临时 prompt 一条"
+          "临时提示词 1 条"
         } else {
           "\{model.available_cases.length()} 条 · 已选 \{model.selected_cases.length()}"
         },
@@ -265,7 +265,7 @@ fn case_panel(
   ])
   let tabs = el("div", "panel-tabs", [
     tab_button("set", "测试集"),
-    tab_button("prompt", "临时 First User Prompt"),
+    tab_button("prompt", "临时提示词"),
   ])
   let body = if tab == "prompt" {
     prompt_tab(model, emit)
@@ -288,7 +288,7 @@ fn case_panel(
     if tab == "set" && prompt_mode {
       el("p", "notice", [
         txt(
-          "下面那条临时 prompt 里有内容，所以这次只跑它——测试集不参与。清空它才会回到跑测试集。",
+          "下面那条临时提示词里有内容，所以这次只跑它，测试集不参与。清空它才会回到跑测试集",
         ),
       ])
     } else {
@@ -302,7 +302,7 @@ fn case_panel(
 }
 
 ///|
-/// 临时 prompt 那一页：一条 user prompt，填了就算启用。
+/// 临时提示词那一页：一条 user prompt，填了就算启用。
 fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let filled = model.uses_prompt()
   el("div", "prompt-tab", [
@@ -311,16 +311,16 @@ fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       id="prompt",
       value=model.prompt,
       rows=4,
-      placeholder="例如：把下面这段口语文本整理成书面表达。",
+      placeholder="例如：把下面这段口语文本整理成书面表达",
       on_input=emit.map(fn(text) { PromptChanged(text) }),
       ([] : Array[@html.Html]),
     ),
     el("p", if filled { "notice" } else { "hint" }, [
       txt(
         if filled {
-          "填了内容 = 这次只跑这一条：模型、system 与参数照用，上面那套测试集不参与。"
+          "填了内容 = 这次只跑这一条：模型、system 与参数照用，上面那套测试集不参与"
         } else {
-          "留空 = 跑上面那套测试集。这里填上内容就只跑这一条。"
+          "留空将会运行测试集。这里填上内容就只跑这一条"
         },
       ),
     ]),
@@ -330,6 +330,16 @@ fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 ///|
 /// 从纯文本文件建测试集：一行一条 prompt。服务端读这个路径（它就在你机器上）。
 fn import_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
+  // 收成一个按钮：平时只有它一个，点开才露出路径输入框。
+  // 不能用原生文件选择器——导入要在**服务端**读文件，而浏览器选中的是本机文件，
+  // 服务端看不到。所以这里要的是「服务端能读到的路径」。
+  if !model.import_open {
+    return el("div", "import-row", [
+      @html.button(class="link-btn", on_click=emit(Msg::ToggleImport), [
+        txt("从文本文件生成新测试集"),
+      ]),
+    ])
+  }
   el("div", "import-row", [
     el("span", "muted", [txt("从纯文本文件新建")]),
     @html.input(
@@ -342,6 +352,9 @@ fn import_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ),
     @html.button(class="ghost", on_click=emit(Msg::ImportCaseFile), [
       txt("导入为新集"),
+    ]),
+    @html.button(class="link-btn", on_click=emit(Msg::ToggleImport), [
+      txt("收起"),
     ]),
     el("span", "hint", [
       txt(
@@ -392,7 +405,7 @@ fn set_row(meta : Meta, model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 fn browse_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   if model.available_cases.length() == 0 {
     return el("p", "muted", [
-      txt("这套里还没有用例。点「编辑用例」加几条。"),
+      txt("这套里还没有用例。点「编辑用例」加几条"),
     ])
   }
   let boxes = model.available_cases.map(fn(case) {
@@ -628,7 +641,7 @@ fn preset_panel(
         [
           el("p", "muted", [
             txt(
-              "还没有预设。填好参数后存一条，下次一键套用。",
+              "还没有预设。填好参数后存一条，下次一键套用",
             ),
           ]),
         ]
@@ -641,7 +654,7 @@ fn preset_panel(
     // 说明它到底动哪些东西：用户点「套用」之前得知道会覆盖什么
     el("p", "hint", [
       txt(
-        "一条预设 = 模型 + 测试集 + system prompt + 网关地址 + 参数（重复次数 / max tokens / temperature / 间隔 / 重试）。套用它＝把这些一次性写回表单；API key 不在里面，也不会被动。",
+        "一条预设 = 模型 + 测试集 + System Prompt + 网关地址 + 参数（重复次数 / max tokens / temperature / 间隔 / 重试）。套用它＝把这些一次性写回表单；API key 不在里面，也不会被动",
       ),
     ]),
     el("div", "preset-list", body),
