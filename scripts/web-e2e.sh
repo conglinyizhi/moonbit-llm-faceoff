@@ -118,6 +118,14 @@ trap cleanup EXIT
 
 build_mbtx scripts/mock_openai.mbtx "$MOCK_BIN" || fail "mock 编译失败"
 
+# out/ 是这次跑要挨个读的静态目录（index.html / app.js / site.css / report.html），
+# 而它随时可能被 `make web` / `make ci` 原地重写。读到半写入的文件、或者「页面在、
+# 资源还没到」的中间态，表现是一份看起来像 CSS 报错的页面转储（issue #5）。
+#
+# 所以先给 out/ 拍一张快照，让服务端从快照提供静态资源：被测页面在这次跑里被冻住，
+# 外面怎么重建都影响不到它。LLM_WEB_STATIC 认绝对路径（服务端按 cwd 解析默认的 out）。
+cp -r web/out "$tmp/static" || fail "out/ 快照失败"
+
 echo "==> 起 mock LLM 与评测服务"
 exec env MOCK_STREAM_DELAY=0.08 "$MOCK_BIN" >"$tmp/mock.port" 2>/dev/null &
 mock_pid=$!
@@ -135,6 +143,7 @@ mock_port=$(cat "$tmp/mock.port")
   LLM_WEB_MODELS="mock-a,mock-b" \
   LLM_WEB_PORT="$WEB_PORT" \
   LLM_WEB_WORK="$tmp/runs" \
+  LLM_WEB_STATIC="$tmp/static" \
   LLM_WEB_CASES_DIR="$tmp/cases" \
   LLM_WEB_PRESETS="$tmp/presets.json" \
   ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web.port" 2>"$tmp/server.log") &
@@ -983,6 +992,7 @@ echo "==> autorun 在拿不到 key 时不该开跑"
   MOONLLM_BASE_URL="http://127.0.0.1:$mock_port/v1" \
   LLM_WEB_MODELS="mock-a" \
   LLM_WEB_WORK="$tmp/runs-nokey" \
+  LLM_WEB_STATIC="$tmp/static" \
   LLM_WEB_PORT=0 \
   ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web2.port" 2>/dev/null) &
 web2_pid=$!
