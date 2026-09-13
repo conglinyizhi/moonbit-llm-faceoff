@@ -569,6 +569,9 @@ table {
     letter-spacing: 0.04em;
     text-transform: uppercase;
     font-weight: 400;
+    // legend 站在边框上，而 fieldset 的背景不画在它那一段：不补的话，
+    // 那截露出的是页面底色，在有底色的区块上就是一块脏补丁
+    background-color: inherit;
   }
 
   // 核心区（SYSTEM PROMPT）：底色亮一档，边框反而更淡
