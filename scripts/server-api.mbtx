@@ -963,6 +963,37 @@ async fn main {
     )
     let _ = delete(base + "/api/runs/" + context_id)
 
+    // 勾上「覆盖测试集内的 system prompt」：运行级那条赢，用例自带的被丢掉。
+    // 同一套用例、同一份 system，只差一个布尔值——两条上下文一对比就看得出来
+    let ovr_started = post(
+      base + "/api/runs",
+      context_body +
+      mock_port +
+      "/v1\",\"systemOverride\":true,\"apiKey\":\"sk-context-should-not-leak\"}",
+    )
+    let ovr_id = json_string(ovr_started.body, "id")
+    if ovr_id == "" {
+      bail("没起成带 systemOverride 的那次运行：" + ovr_started.body)
+      return
+    }
+    ignore(await_finished(base, ovr_id))
+    let ovr_context = get(base + "/api/runs/" + ovr_id + "/context")
+    expect(
+      ovr_context.code == 200 &&
+      ovr_context.body.contains("\"systemOverride\":true") &&
+      !ovr_context.body.contains("\"只输出一个词，不要标点。\""),
+      "systemOverride：上下文里生效的是运行级的那条，用例自带的被盖掉",
+      "code=\{ovr_context.code} body=\{ovr_context.body}",
+    )
+    // 重跑要重放当时的规则：不带上的话，勾过的运行重跑会变回用例级优先
+    expect(
+      ovr_context.body.contains("\"request\"") &&
+      ovr_context.body.contains("\"systemOverride\":true"),
+      "request.json 里记下了 systemOverride（重跑重放要用）",
+      ovr_context.body,
+    )
+    let _ = delete(base + "/api/runs/" + ovr_id)
+
     // ---- 从纯文本文件建测试集
     println("==> 从纯文本文件导入测试集")
     let source_txt = tmp + "/source.txt"
