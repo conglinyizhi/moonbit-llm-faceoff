@@ -305,6 +305,16 @@ fn json_string(text : String, key : String) -> String {
   }
 }
 
+///|
+/// 手拼 JSON 字符串时的转义。
+///
+/// 服务端回 400 "request body must be JSON" 就是这个漏了：Windows 上的临时路径
+/// 是 `C:\Users\...`，反斜杠原样插进去，`\U` 不是合法转义，整份文档就废了。
+/// 页面侧的导入走的是 `Json::string`（正经编码器），没这个问题；只有这里手拼。
+fn escape_json(text : String) -> String {
+  text.replace_all(old="\\", new="\\\\").replace_all(old="\"", new="\\\"")
+}
+
 
 // ---------------------------------------------------------------- 请求体
 
@@ -965,7 +975,7 @@ async fn main {
     }
     let imported = post(
       base + "/api/cases/from-txt/import",
-      "{\"path\":\"" + source_txt + "\"}",
+      "{\"path\":\"" + escape_json(source_txt) + "\"}",
     )
     expect(
       imported.code == 200 &&
@@ -982,6 +992,32 @@ async fn main {
       "导入出来的集能读回来，内容就是文件里的那几行",
       imported_set.body,
     )
+    // 路径里的反斜杠：Windows 上 source.txt 的路径本来就长这样
+    // （C:\Users\...\source.txt），不转义就不是合法 JSON，服务端会回
+    // 400 "request body must be JSON"。Linux 上造一个名字带反斜杠的文件
+    // 同样能测到这条（Windows 上文件名不能有反斜杠，写不进去就跳过，
+    // 上面那条已经顺带盖住了）。
+    let backslash_txt = tmp + "/back\\slash.txt"
+    @fs.write_file(
+      backslash_txt,
+      "反斜杠路径也导得进来\n",
+      create_mode=@fs.CreateOrTruncate,
+    ) catch {
+      _ => ()
+    }
+    let wrote_backslash = @fs.exists(backslash_txt) catch { _ => false }
+    if wrote_backslash {
+      let bs = post(
+        base + "/api/cases/from-bs/import",
+        "{\"path\":\"" + escape_json(backslash_txt) + "\"}",
+      )
+      expect(
+        bs.code == 200 && bs.body.contains("\"count\":1"),
+        "路径里有反斜杠也能导入（Windows 的路径就是这个形状）",
+        "code=\{bs.code} body=\{bs.body}",
+      )
+      let _ = delete(base + "/api/cases/from-bs")
+    }
     expect(
       post(base + "/api/cases/nope/import", "{\"path\":\"/no/such/file.txt\"}")
         .code == 404,
