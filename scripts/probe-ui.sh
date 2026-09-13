@@ -158,6 +158,19 @@ const post = await fetch(`http://127.0.0.1:${port}/api/runs`, {
   body: JSON.stringify(body),
 })
 const { id } = await post.json()
+// 预设也预置两条：侧栏那张卡空着看不出设计，而且换行/长名字/多字段
+// 得真有一两条才看得到
+const presetPut = await fetch(`http://127.0.0.1:${port}/api/presets`, {
+  method: "PUT",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    presets: [
+      { name: "quick", models: ["mock-a"], repeats: 1, maxTokens: 256, caseSet: "default" },
+      { name: "round-2-with-a-long-name", models: ["mock-a", "mock-b"], repeats: 3, maxTokens: 2048, caseSet: "default" },
+    ],
+  }),
+})
+if (presetPut.status !== 200) console.error(`probe-ui: 预置预设失败 HTTP ${presetPut.status} ${await presetPut.text()}`)
 let status = ""
 for (let i = 0; i < 200; i++) {
   status = (await (await fetch(`http://127.0.0.1:${port}/api/runs/${id}`)).json()).status

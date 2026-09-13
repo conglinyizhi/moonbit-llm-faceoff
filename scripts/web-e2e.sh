@@ -372,6 +372,18 @@ manage_probe='(async () => {
     if (applyBtn) { applyBtn.click(); }
     await new Promise((r) => setTimeout(r, 1200));
     out.systemAfterApply = document.querySelector("#system").value;
+    // 布局：整页铺满（.wrap 只留两侧 padding），预设名字框不该被拉高
+    // （列方向的 flex 容器里 flex-basis 是高度，之前把单行 input 撑成 18rem 高的空框），
+    // 预设卡里两个按钮应该在同一行
+    const wrapBox = document.querySelector(".wrap").getBoundingClientRect();
+    out.wrapGap = Math.round(innerWidth - wrapBox.width);
+    out.nameHeight = Math.round(nameBox.getBoundingClientRect().height);
+    // 按卡判，不能跨卡：多张预设时行位置本来就不一样，跨卡比会永远 false
+    // （这条先是在探针里跨卡比、结果自己骗了自己一次）
+    out.presetButtonsOneRow = Array.from(document.querySelectorAll(".preset")).every((card) => {
+      const tops = Array.from(card.querySelectorAll(".link-btn")).map((b) => Math.round(b.getBoundingClientRect().top));
+      return new Set(tops).size <= 1;
+    });
   }
   // 按行导入也接在用例编辑里
   const importBox = document.querySelector("#import-lines");
@@ -414,6 +426,12 @@ grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
 grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
 echo "ok: 页面上能用测试集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
+echo "$probe" | grep -qE '"wrapGap":[0-9]{1,2}(,|})' ||
+  fail "页面没有铺满宽度（两侧空白太宽）：$probe"
+echo "$probe" | grep -qE '"nameHeight":[0-9]{1,2}(,|})' ||
+  fail "预设名字框被拉高了（列方向下 flex-basis 是高度）：$probe"
+echo "$probe" | grep -q '"presetButtonsOneRow":true' ||
+  fail "预设卡的按钮没有排在同一行：$probe"
 
 echo "==> 两次运行对比"
 # 勾两次运行 → 头部换成「对比这两次」→ 点下去应该出来三块：参数差异、指标

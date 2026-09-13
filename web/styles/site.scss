@@ -39,9 +39,12 @@ body.page {
   line-height: 1.6;
 }
 
+// 整页铺满：这是个看表格与并排答案的工具页，内容越宽越有用。
+// 之前是 min(100% - 2rem, 1100px) 居中，宽屏上两侧白白空着
 .wrap {
-  width: min(100% - 2rem, 1100px);
-  margin: 0 auto;
+  width: 100%;
+  padding: 0 1.5rem;
+  margin: 0;
 }
 
 .site-header {
@@ -397,8 +400,9 @@ table {
 // 不是主要使用场景。
 .workbench {
   display: grid;
-  grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
-  gap: 1.4rem;
+  // 侧栏窄一点、主区拿走剩下的全部：全宽之后主区才是受益方
+  grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
+  gap: 1.6rem;
   align-items: start;
   padding-top: 1.5rem;
   padding-bottom: 2rem;
@@ -1098,22 +1102,49 @@ button.ghost {
   margin-bottom: 0.6rem;
 }
 
+// 预设卡：两行网格。
+//
+// 名字 + 两个按钮在第一行，元信息雅在第二行横跨整宽。
+// 之前是一行 flex + wrap：窄列里按钮先被挤成竖排（「套/用」「删/除」），
+// 元信息再往下折，看着就是一坨。
 .preset {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name apply del"
+    "meta meta meta";
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.1rem 0.45rem;
   border: 1px solid $border;
   border-radius: 0.4rem;
-  padding: 0.3rem 0.6rem;
+  padding: 0.4rem 0.55rem;
   font-size: 0.82rem;
 
   .preset-name {
+    grid-area: name;
     color: $title;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .preset-meta {
+    grid-area: meta;
     color: $muted;
-    font-size: 0.76rem;
+    font-size: 0.74rem;
+  }
+
+  // 两个按钮各占一列，不会缩成一字宽
+  .link-btn {
+    white-space: nowrap;
+  }
+
+  .link-btn:not(.danger) {
+    grid-area: apply;
+  }
+
+  .link-btn.danger {
+    grid-area: del;
   }
 }
 
@@ -1451,16 +1482,29 @@ button.ghost {
   padding-top: 0.8rem;
 
   .hint {
-    margin: 0 0 0.6rem;
+    margin: 0 0 0.7rem;
+    font-size: 0.78rem;
   }
 
   .preset-list {
     flex-direction: column;
+    gap: 0.45rem;
   }
 
+  // 列方向：input 的 flex-basis 在这里是**高度**，不是宽度。
+  // 全局那条 .set-name { flex: 1 1 18rem } 于是把它拉成 18rem 高的大空框。
   .preset-actions {
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.45rem;
+
+    .set-name {
+      flex: 0 0 auto;
+      width: 100%;
+    }
+
+    .ghost {
+      width: 100%;
+    }
   }
 }
 
