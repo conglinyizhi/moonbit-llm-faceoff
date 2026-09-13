@@ -1998,15 +1998,46 @@ fn el(
 
 ///|
 fn header(model : AppModel) -> @html.Html {
-  let meta_line = match model.meta {
+  // 右上角放「现在什么状态 + 手上有什么」。
+  //
+  // 原来这里是「N 个模型可选 · N 道用例 · <网关地址>」。网关那串最占地方，
+  // 信息量却是零：下面表单里就有一个一模一样的输入框，而且它长到把整行吃完了。
+  // 换掉它的是两件在别处看不到（或者得数半天）的事：有没有在跑、跑过几次。
+  let running = model.status == "running" || model.status == "starting"
+  let counts = match model.meta {
     Some(meta) =>
-      "\{meta.models.length()} 个模型可选 · \{meta.cases.length()} 道用例 · \{meta.baseUrl}"
+      "\{meta.models.length()} 个模型 · \{meta.cases.length()} 道用例"
     None => "正在载入…"
+  }
+  let history = match model.runs {
+    Some(runs) =>
+      if runs.length() == 0 {
+        ""
+      } else {
+        "已跑 \{runs.length()} 次 · 最近 \{format_time(runs[0].startedAt)}"
+      }
+    None => ""
+  }
+  let summary = if history == "" {
+    counts
+  } else {
+    counts + " · " + history
+  }
+  let right = if running {
+    [
+      el("span", "site-live", [
+        el("span", "dot", []),
+        txt("运行中 \{model.done}/\{model.total}"),
+      ]),
+      el("span", "", [txt(summary)]),
+    ]
+  } else {
+    [el("span", "", [txt(summary)])]
   }
   el("header", "site-header", [
     el("div", "wrap site-header-inner", [
       el("div", "site-logo", [txt("faceoff")]),
-      el("div", "site-meta", [txt(meta_line)]),
+      el("div", "site-meta", right),
     ]),
   ])
 }

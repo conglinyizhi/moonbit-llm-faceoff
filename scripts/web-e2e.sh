@@ -31,6 +31,7 @@ CHROME=${CHROME:-/usr/bin/chromium}
 DEBUG_PORT=${DEBUG_PORT:-0}
 CHROME_FLAGS=(--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage
               --disable-extensions --no-first-run --disable-crash-reporter
+              --window-size=1600,1000
               --remote-debugging-port="$DEBUG_PORT")
 
 fail() {
@@ -335,6 +336,9 @@ manage_probe='(async () => {
   const byText = (tag, text) =>
     Array.from(document.querySelectorAll(tag)).find((el) => el.textContent === text);
   out.hasSetSelect = !!document.querySelector(".set-select");
+  // 右上角不再放网关地址（表单里就有，而且长到把整行吃完）
+  const hdr = document.querySelector(".site-meta");
+  out.headerText = hdr ? hdr.textContent.replace(/\s+/g, " ").trim() : null;
   const edit = Array.from(document.querySelectorAll(".link-btn")).find((b) => b.textContent === "编辑用例");
   if (edit) { edit.click(); }
   await new Promise((r) => setTimeout(r, 1500));
@@ -426,6 +430,13 @@ grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
 grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
 echo "ok: 页面上能用测试集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
+# 右上角：不再放网关地址，而是「手上有什么 + 跑过几次」
+echo "$probe" | grep -q 'http' &&
+  fail "header 里还写着网关地址：$probe"
+echo "$probe" | grep -q '道用例' ||
+  fail "header 里没有用例规模：$probe"
+echo "$probe" | grep -qE '"headerText":"[^"]*已跑 [0-9]+ 次' ||
+  fail "header 里没有跑过几次（历史汇总）：$probe"
 echo "$probe" | grep -qE '"wrapGap":[0-9]{1,2}(,|})' ||
   fail "页面没有铺满宽度（两侧空白太宽）：$probe"
 echo "$probe" | grep -qE '"nameHeight":[0-9]{1,2}(,|})' ||
@@ -932,6 +943,9 @@ reload_probe='(async () => {
     hasCard: !!document.querySelector(".progress-card"),
     startBusy: !!(start && start.className.includes("busy")),
     banner: (document.querySelector(".viewed-banner") ? document.querySelector(".viewed-banner").textContent : ""),
+    // 右上角也应该跟着显示在跑（不用翻到主区去看进度）
+    headerLive: !!document.querySelector(".site-live"),
+    headerText: (document.querySelector(".site-meta") ? document.querySelector(".site-meta").textContent : "").replace(/\s+/g, " ").trim(),
   };
 })()'
 dump_page_script "http://127.0.0.1:$PORT/?run=$mid_run_id" 15000 "$tmp/midreload.html" "$reload_probe" 800 \
@@ -943,6 +957,8 @@ echo "$probe" | grep -q '"startBusy":true' ||
   fail "跑着的时候开始按钮还能点（会又开一炉）：$probe"
 echo "$probe" | grep -qE '"banner":""' ||
   fail "还在跑的运行不该被打上「只读历史」的横幅：$probe"
+echo "$probe" | grep -q '"headerLive":true' ||
+  fail "跑着的时候 header 没显示运行中：$probe"
 echo "ok: 跑着的时候刷新（还跑着的那次就是当前运行，按钮也锁住）"
 
 # 把 navigator.clipboard 换成一个记录器，再点两个复制按钮。

@@ -40,10 +40,11 @@ body.page {
 }
 
 // 整页铺满：这是个看表格与并排答案的工具页，内容越宽越有用。
-// 之前是 min(100% - 2rem, 1100px) 居中，宽屏上两侧白白空着
+// 之前是 min(100% - 2rem, 1100px) 居中，宽屏上两侧白白空着。
+// 边距随视口长（宽屏上 1.5rem 看着就是贴边）。
 .wrap {
   width: 100%;
-  padding: 0 1.5rem;
+  padding: 0 clamp(1.25rem, 2.5vw, 3rem);
   margin: 0;
 }
 
@@ -56,7 +57,11 @@ body.page {
     align-items: baseline;
     justify-content: space-between;
     gap: 1rem;
-    padding: 1.1rem 0;
+    // 只给上下：横向留给 .wrap 的 padding。
+    // 这里写 padding: 1.1rem 0 会把横向那把抹成 0（选择器比 .wrap 更具体），
+    // 之前没事是因为 .wrap 靠宽度居中，改全宽之后就地贴边了。
+    padding-top: 1.1rem;
+    padding-bottom: 1.1rem;
   }
 
   .site-logo {
@@ -67,8 +72,28 @@ body.page {
   }
 
   .site-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     color: $muted;
     font-size: 0.85rem;
+    text-align: right;
+  }
+
+  // 运行中那一个点：和实时行里的同源，这里为了跟文字基线对齐重写一份
+  .site-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: $accent;
+
+    .dot {
+      background: $accent;
+      border-radius: 50%;
+      height: 0.45rem;
+      width: 0.45rem;
+      animation: live-pulse 1.1s ease-in-out infinite;
+    }
   }
 }
 
