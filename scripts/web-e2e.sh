@@ -430,6 +430,58 @@ grep -q 'e2e 改过的 prompt' "$tmp/cases/default.jsonl" ||
 grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
 echo "ok: 页面上能用测试集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
+
+echo "==> 用例多的时候默认只露两行"
+# 真实规模（几十条）下，勾选区是整页最吵的一块，所以默认收成两行。
+# 默认集只有 6 条、碰不到阈值，这里造一套 24 条的集来盖：默认收起、
+# 展开后高度确实变大、而收起的框仍然在 DOM 里（勾选与全选/全不选
+# 按全集算，不受折叠影响）
+collapsed_txt="$tmp/cases-many.txt"
+for i in $(seq 1 48); do echo "第 $i 条 prompt" >>"$collapsed_txt"; done
+curl -sf -X POST "http://127.0.0.1:$PORT/api/cases/many/import" \
+  -H 'Content-Type: application/json' \
+  -d "{\"path\":\"$collapsed_txt\"}" >/dev/null ||
+  fail "导入 48 条的集失败"
+collapsed_probe='(async () => {
+  const out = {};
+  const sel = document.querySelector(".set-select");
+  sel.value = "many";
+  sel.dispatchEvent(new Event("change", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 1500));
+  // 页面上有两个 .picker-items（模型那组 + 用例那组），必须限定到用例卡里
+  const list = document.querySelector(".case-panel .picker-items");
+  out.collapsed = list.className.includes("collapsed");
+  out.collapsedHeight = Math.round(list.getBoundingClientRect().height);
+  out.boxes = document.querySelectorAll(".case-panel .check input").length;
+  const more = Array.from(document.querySelectorAll(".case-panel .picker-more button"))[0];
+  out.hasMore = !!more;
+  if (more) { more.click(); }
+  await new Promise((r) => setTimeout(r, 500));
+  const after = document.querySelector(".case-panel .picker-items");
+  out.expandedStillCollapsed = after.className.includes("collapsed");
+  out.expandedHeight = Math.round(after.getBoundingClientRect().height);
+  out.boxesAfter = document.querySelectorAll(".case-panel .check input").length;
+  out.expandedTaller = out.expandedHeight > out.collapsedHeight;
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 15000 "$tmp/collapsed.html" "$collapsed_probe" 2500 \
+  'document.querySelector(".set-select") !== null'
+cprobe=$(grep -o 'SCRIPT .*' "$tmp/collapsed.html.err" | sed 's/^SCRIPT //')
+echo "$cprobe" | grep -q '"collapsed":true' ||
+  fail "48 条的集默认没有收起：$cprobe"
+echo "$cprobe" | grep -q '"boxes":48' ||
+  fail "收起后勾选框不该从 DOM 里消失（全选要按全集算）：$cprobe"
+echo "$cprobe" | grep -q '"expandedStillCollapsed":false' ||
+  fail "点「展开全部」没有展开：$cprobe"
+echo "$cprobe" | grep -q '"boxesAfter":48' ||
+  fail "展开后勾选框数量变了：$cprobe"
+echo "$cprobe" | grep -q '"expandedTaller":true' ||
+  fail "展开后的列表没有比收起时更高（折叠没生效）：$cprobe"
+echo "ok: 用例多时默认收起两行，展开后恢复，勾选不受影响"
+# 用完就把这套集删掉：后面还有一段靠「切到非默认测试集」来测别的东西，
+# 多留一套会让它选中我这一套（它取的是排序第一个非默认集）
+curl -sf -X DELETE "http://127.0.0.1:$PORT/api/cases/many" >/dev/null ||
+  fail "删掉临时造的 many 集失败"
 # 右上角：不再放网关地址，而是「手上有什么 + 跑过几次」
 echo "$probe" | grep -q 'http' &&
   fail "header 里还写着网关地址：$probe"

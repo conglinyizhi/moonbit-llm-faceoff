@@ -4,10 +4,15 @@
 $bg: #0f1216;
 $panel: #161b22;
 $panel-2: #1c232c;
+// 核心区的底色：比 $panel 亮一档，形成很轻的卡片感（不加粗边框）
+$core: #1e252f;
 $border: #2a323d;
+// 输入框的边框：比 $border 再淡一点，只在 focus 时变亮
+$border-soft: #232a34;
 $title: #e6edf3;
 $text: #b6c2cf;
-$muted: #7d8896;
+// 次要文字再降一档饱和度与亮度：说明、placeholder、小标签统一走它
+$muted: #6e7a88;
 $accent: #58a6ff;
 $accent-2: #3fb950;
 $warn: #d29922;
@@ -485,7 +490,7 @@ table {
 .history-item {
   border: 1px solid $border;
   border-radius: 0.4rem;
-  padding: 0.55rem 0.7rem;
+  padding: 0.75rem 0.85rem;
   font-size: 0.82rem;
 
   &.active {
@@ -495,7 +500,7 @@ table {
 
   .history-row {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
   }
@@ -519,11 +524,18 @@ table {
 
   .history-actions {
     display: flex;
-    gap: 0.5rem;
-    margin-top: 0.3rem;
+    gap: 0.6rem;
+    margin-top: 0.45rem;
 
     .link-btn {
       padding: 0;
+      // 操作链接是每条卡里最低一级的东西：比内容小一号、再淡一点
+      color: $muted;
+      font-size: 0.76rem;
+
+      &:hover {
+        color: $accent;
+      }
     }
 
     .danger {
@@ -547,33 +559,76 @@ table {
   border: 1px solid $border;
   border-radius: 0.5rem;
   padding: 0.9rem 1rem 1rem;
-  margin: 0 0 1rem;
+  // 拉开大区块之间的距离：一块一块讲，读完一块能歇一口气
+  margin: 0 0 1.4rem;
 
   legend {
     padding: 0 0.4rem;
     color: $muted;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     letter-spacing: 0.04em;
     text-transform: uppercase;
+    font-weight: 400;
+  }
+
+  // 核心区（SYSTEM PROMPT）：底色亮一档，边框反而更淡
+  &.picker-core {
+    background: $core;
+    border-color: $border-soft;
   }
 }
 
 .picker-items {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem 1.2rem;
+  align-items: center;
+  gap: 0.35rem 1rem;
+  position: relative;
+
+  // 默认只露两行：再往下就是整页最吵的色块。
+  // 收起来的勾选框还在 DOM 里（勾选与全选/全不选都不受影响），只是被裁掉，
+  // 下方用一层很淡的渐变化开，不至于像被硬切一刀。
+  // 两行的高度（实测一行约 2.1rem，含行距），再给渐变化开切口的余量
+  &.collapsed {
+    max-height: 4.25rem;
+    overflow: hidden;
+    padding-bottom: 0.6rem;
+
+    &::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 1.5rem;
+      background: linear-gradient(180deg, rgba(30, 37, 47, 0), $core);
+      pointer-events: none;
+    }
+  }
+}
+
+.picker-more {
+  margin-top: 0.35rem;
+
+  .link-btn {
+    font-size: 0.78rem;
+    padding: 0;
+  }
 }
 
 .check {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   color: $text;
   cursor: pointer;
+  font-size: 0.86rem;
+  line-height: 1.35;
 
   input {
     accent-color: $accent;
     cursor: pointer;
+    height: 0.85rem;
+    width: 0.85rem;
+    margin: 0;
   }
 }
 
@@ -590,15 +645,18 @@ table {
   width: 100%;
   margin-top: 0.7rem;
   background: $bg;
-  border: 1px solid $border;
+  border: 1px solid $border-soft;
   border-radius: 0.35rem;
   color: $title;
   font-family: inherit;
   font-size: 0.9rem;
+  line-height: 1.55;
   padding: 0.5rem 0.7rem;
 
+  // 「例如：…」这种提示是给眼睛跳过的，不该和填进去的正文同字号
   &::placeholder {
     color: $muted;
+    font-size: 0.88em;
   }
 
   &:focus {
@@ -610,28 +668,37 @@ table {
 .params {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.8rem;
-  margin-bottom: 1.1rem;
+  gap: 1rem;
+  // 参数区跟上面那些内容不是一类东西：一条很淡的分割线就够了，
+  // 不要再来一个盒子（盒子已经够多了）
+  border-top: 1px solid $border-soft;
+  padding-top: 1.3rem;
+  margin-bottom: 1.3rem;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.35rem;
 
   label {
     color: $muted;
-    font-size: 0.8rem;
+    font-size: 0.78rem;
   }
 
   input {
     background: $bg;
-    border: 1px solid $border;
+    border: 1px solid $border-soft;
     border-radius: 0.35rem;
     color: $title;
     font-family: inherit;
     font-size: 0.9rem;
     padding: 0.45rem 0.6rem;
+
+    &::placeholder {
+      color: $muted;
+      font-size: 0.88em;
+    }
 
     &:focus {
       border-color: $accent;
@@ -644,11 +711,12 @@ table {
   display: flex;
   align-items: center;
   gap: 0.9rem;
-  margin-bottom: 1.6rem;
+  // 行动的终点：上下都多留一点，让人一眼看出「到这里就是开始」
+  margin: 0 0 2.2rem;
 
   .hint {
     color: $muted;
-    font-size: 0.85rem;
+    font-size: 0.82rem;
   }
 }
 
@@ -660,7 +728,7 @@ button.primary {
   cursor: pointer;
   font-size: 0.95rem;
   font-weight: 600;
-  padding: 0.55rem 1.4rem;
+  padding: 0.7rem 1.6rem;
 
   &:hover:not(:disabled) {
     filter: brightness(1.1);
@@ -980,14 +1048,14 @@ button.ghost {
 
 .case-panel,
 .preset-panel {
-  @include card(0.9rem 1rem);
-  margin-bottom: 1rem;
+  @include card(1rem 1.1rem);
+  margin-bottom: 1.4rem;
 
   .section-head {
     display: flex;
     align-items: baseline;
     gap: 0.6rem;
-    margin-bottom: 0.6rem;
+    margin-bottom: 0.7rem;
 
     h2 {
       margin: 0;
@@ -1019,11 +1087,16 @@ button.ghost {
 .set-select,
 .set-name {
   background: $bg;
-  border: 1px solid $border;
+  border: 1px solid $border-soft;
   border-radius: 0.35rem;
   color: $text;
   padding: 0.3rem 0.5rem;
   font-size: 0.85rem;
+
+  &::placeholder {
+    color: $muted;
+    font-size: 0.88em;
+  }
 }
 
 .set-name {
@@ -1033,8 +1106,29 @@ button.ghost {
 
 .picker-all {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.15rem;
+
+  // 全选/全不选是辅助动作，别和用例名同音量
+  .link-btn {
+    color: $muted;
+    font-size: 0.78rem;
+    padding: 0;
+
+    &:hover {
+      color: $accent;
+    }
+  }
+}
+
+// 「N 条 · 已选 N」：右上角的小标签，比正文淡
+.count-badge {
+  border: 1px solid $border-soft;
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: $muted;
+  font-size: 0.74rem;
 }
 
 .case-editor {
@@ -1171,6 +1265,12 @@ button.ghost {
   .link-btn.danger {
     grid-area: del;
   }
+}
+
+// 「这次跑什么」是第二个核心区：底色亮一档，边框淡一档
+.case-panel.core {
+  background: $core;
+  border-color: $border-soft;
 }
 
 // ---------------------------------------------------------------- 两次运行对比

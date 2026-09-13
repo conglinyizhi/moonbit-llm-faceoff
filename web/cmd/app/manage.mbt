@@ -246,7 +246,7 @@ fn case_panel(
   }
   let head = el("div", "section-head", [
     el("h2", "", [txt("这次跑什么")]),
-    el("span", "muted", [
+    el("span", "muted count-badge", [
       txt(
         if prompt_mode {
           "临时 prompt 一条"
@@ -280,7 +280,7 @@ fn case_panel(
       import_row(model, emit),
     ])
   }
-  el("section", "case-panel", [
+  el("section", "case-panel core", [
     head,
     tabs,
     body,
@@ -403,21 +403,44 @@ fn browse_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       emit.map(fn(_value) { ToggleCase(case.id) }),
     )
   })
-  el(
-    "div",
-    "picker-items",
-    [
-      el("div", "picker-all", [
-        @html.button(class="link-btn", on_click=emit(Msg::SelectAllCases), [
-          txt("全选"),
-        ]),
-        @html.button(class="link-btn", on_click=emit(Msg::SelectNoCases), [
-          txt("全不选"),
-        ]),
+  // 条数一多，这块就是整页最吵的地方。默认只露两行，其余收起来——
+  // 勾选本身不受影响（收起来的框还在 DOM 里，全选/全不选也照旧按全集算）。
+  let collapsible = model.available_cases.length() > 8
+  let collapsed = collapsible && !model.cases_expanded
+  let list_class = if collapsed { "picker-items collapsed" } else { "picker-items" }
+  let more = if collapsible {
+    el("div", "picker-more", [
+      @html.button(class="link-btn", on_click=emit(Msg::ToggleCaseList), [
+        txt(
+          if model.cases_expanded {
+            "收起"
+          } else {
+            "展开全部（\{model.available_cases.length()} 条）"
+          },
+        ),
       ]),
-      ..boxes,
-    ],
-  )
+    ])
+  } else {
+    @html.fragment([])
+  }
+  el("div", "", [
+    el(
+      "div",
+      list_class,
+      [
+        el("div", "picker-all", [
+          @html.button(class="link-btn", on_click=emit(Msg::SelectAllCases), [
+            txt("全选"),
+          ]),
+          @html.button(class="link-btn", on_click=emit(Msg::SelectNoCases), [
+            txt("全不选"),
+          ]),
+        ]),
+        ..boxes,
+      ],
+    ),
+    more,
+  ])
 }
 
 ///|

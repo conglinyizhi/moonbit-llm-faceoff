@@ -156,6 +156,8 @@ struct AppModel {
   available_cases : Array[CaseInfo]
   /// 用例编辑态：草稿 + 反馈。
   editing_cases : Bool
+  // 用例勾选区默认只露两行（行数一多就是整页最吵的地方）
+  cases_expanded : Bool
   drafts : Array[CaseDraft]
   cases_error : String?
   cases_saved : String?
@@ -318,6 +320,7 @@ fn initial_model() -> AppModel {
     case_set: query.get("caseSet").unwrap_or(""),
     available_cases: [],
     editing_cases: false,
+    cases_expanded: false,
     drafts: [],
     cases_error: None,
     cases_saved: None,
@@ -489,6 +492,7 @@ enum Msg {
   Rerun(String)
   // 测试集
   ToggleCaseEditor
+  ToggleCaseList
   SelectCaseSet(String)
   CaseSetLoaded(String, Result[CaseSetResponse, Error])
   NewSetNameChanged(String)
@@ -941,6 +945,8 @@ fn update(
           }
         }
       }
+    ToggleCaseList =>
+      ({ ..model, cases_expanded: !model.cases_expanded }, @cmd.none)
     ToggleCaseEditor =>
       if model.editing_cases {
         ({ ..model, editing_cases: false, cases_error: None, }, @cmd.none)
@@ -2049,7 +2055,7 @@ fn header(model : AppModel) -> @html.Html {
 /// 用例自己也能带 system（用例编辑器里逐条填），那条会盖掉这里填的；页面上的
 /// 「请求上下文」会标出哪条被盖了。
 fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  el("fieldset", "picker", [
+  el("fieldset", "picker picker-core", [
     el("legend", "", [
       txt("System prompt（本次运行的所有用例共用）"),
     ]),
