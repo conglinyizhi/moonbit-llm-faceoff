@@ -15,6 +15,8 @@ pub(all) suberror BenchConfigError {
   MissingValue(flag~ : String)
   /// An unrecognized flag.
   UnknownFlag(flag~ : String)
+  /// --parallel 的取值不在 serial / models / all 里。
+  BadParallel(value~ : String)
 }
 
 ///|
@@ -27,6 +29,7 @@ pub fn BenchConfigError::to_string(self : BenchConfigError) -> String {
     BadNumber(flag~, value~) => "invalid number for \{flag}: \{value}"
     MissingValue(flag~) => "missing value for \{flag}"
     UnknownFlag(flag~) => "unknown flag: \{flag}"
+    BadParallel(value~) => "invalid value for --parallel: \{value} (serial / models / all)"
   }
 }
 
@@ -50,6 +53,10 @@ pub let usage : String =
   #|      --max-tokens <n>  token budget per reply (default 1024)
   #|      --temperature <t> sampling temperature
   #|      --system <text>   system prompt
+  #|      --system-override  the run-level system wins over per-case system
+  #|      --cot-thinking <models>  comma-separated models to send enable_thinking: true
+  #|      --cot-effort <models>    comma-separated models to send reasoning_effort: high
+  #|      --parallel <mode>        serial (default) | models | all
   #|
   #|rate limits:
   #|      --retry <n>       extra attempts after 429/5xx (default 1)
@@ -82,6 +89,14 @@ pub(all) struct BenchCli {
   max_tokens : Int
   temperature : Double?
   system : String
+  /// 运行级 system 是否覆盖用例自带的 system。默认否（用例级优先）。
+  system_override : Bool
+  /// 这些模型带 enable_thinking: true。
+  cot_thinking : Array[String]
+  /// 这些模型带 reasoning_effort: "high"。
+  cot_effort : Array[String]
+  /// 串行 / 按模型并行 / 全部并发。
+  parallel : String
   show_cot : Bool
   show_output : Bool
   json_path : String?
@@ -109,6 +124,10 @@ pub fn BenchCli::parse(
   let mut max_tokens = 1024
   let mut temperature : Double? = None
   let mut system = ""
+  let mut system_override = false
+  let cot_thinking : Array[String] = []
+  let cot_effort : Array[String] = []
+  let mut parallel = "serial"
   let mut show_cot = false
   let mut show_output = false
   let mut json_path : String? = None
@@ -127,6 +146,23 @@ pub fn BenchCli::parse(
     match arg {
       "-h" | "--help" => show_help = true
       "--show-cot" => show_cot = true
+      "--system-override" => system_override = true
+      "--cot-thinking" => {
+        push_models(cot_thinking, next_value(argv, i, "--cot-thinking"))
+        i = i + 1
+      }
+      "--cot-effort" => {
+        push_models(cot_effort, next_value(argv, i, "--cot-effort"))
+        i = i + 1
+      }
+      "--parallel" => {
+        let raw = next_value(argv, i, "--parallel")
+        parallel = match parse_parallel(raw) {
+          Ok(mode) => mode
+          Err(_) => raise BenchConfigError::BadParallel(value=raw)
+        }
+        i = i + 1
+      }
       "--show-output" => show_output = true
       "--no-key" => no_key = true
       "--models" => {
@@ -255,6 +291,10 @@ pub fn BenchCli::parse(
     max_tokens,
     temperature,
     system,
+    system_override,
+    cot_thinking,
+    cot_effort,
+    parallel,
     show_cot,
     show_output,
     json_path,

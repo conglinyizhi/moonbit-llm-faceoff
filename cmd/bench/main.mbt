@@ -1,4 +1,12 @@
 ///|
+/// 输出锁：并行模式（--parallel models / all）下三个回调会被并发调用，
+/// 而进度文件、stdout、还有下面的 index / cot.open 全是共享状态。
+///
+/// 进度文件那边尤其要命：@stdio 的句柄从并发任务里写会直接 abort
+/// （web 服务端那份 note 踩过同样的坑），所以这里是同一套做法。
+let out_lock : @semaphore.Semaphore = @semaphore.Semaphore(1)
+
+///|
 /// The shell exit code for a failed run.
 let failure_exit_code : Int = 1
 
@@ -286,6 +294,10 @@ async fn main {
         max_tokens: cli.max_tokens,
         temperature: cli.temperature,
         system: cli.system,
+        system_override: cli.system_override,
+        cot_thinking: cli.cot_thinking,
+        cot_effort: cli.cot_effort,
+        parallel: cli.parallel,
         retry: cli.retry,
         retry_backoff_ms: cli.retry_backoff_ms,
         pace_ms: cli.pace_ms,
@@ -311,6 +323,8 @@ async fn main {
         cases,
         options,
         async fn(model, case_id, repeat) {
+          out_lock.acquire()
+          defer out_lock.release()
           index = index + 1
           progress.case_started(
             model,
@@ -324,6 +338,8 @@ async fn main {
           note("> \{model}  \{case_id} #\{repeat + 1}")
         },
         async fn(part) {
+          out_lock.acquire()
+          defer out_lock.release()
           match part {
             @faceoff.Reasoning(text) => progress.part(text.length(), false)
             @faceoff.Content(text) => progress.part(text.length(), true)
@@ -340,6 +356,8 @@ async fn main {
           }
         },
         async fn(result) {
+          out_lock.acquire()
+          defer out_lock.release()
           progress.case_done(result)
           // 思考碎片是连续写出去的，没带换行。不先结掉这一行，进度行就会粘在
           // 思考的尾巴上（"weighing the question[mock-a] ..."）。

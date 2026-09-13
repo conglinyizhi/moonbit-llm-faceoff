@@ -9,6 +9,14 @@ pub(all) struct BenchOptions {
   temperature : Double?
   /// System prompt; applies when a case does not override it.
   system : String
+  /// 勾上就用运行级 system 覆盖用例自带的 system（默认：用例级优先）。
+  system_override : Bool
+  /// 这些模型往请求里带 enable_thinking: true。
+  cot_thinking : Array[String]
+  /// 这些模型往请求里带 reasoning_effort: "high"。
+  cot_effort : Array[String]
+  /// 串行 / 按模型并行 / 全部并发（见 parse_parallel）。
+  parallel : String
   /// Extra attempts after a rate limit or server error. `0` fails fast.
   retry : Int
   /// First backoff delay; doubles on each further attempt.
@@ -249,9 +257,13 @@ fn settings_for(
     api_key: base.api_key,
     base_url: base.base_url,
     model,
-    system: match case.system {
-      Some(system) => system
-      None => options.system
+    system: if options.system_override {
+      options.system
+    } else {
+      match case.system {
+        Some(system) => system
+        None => options.system
+      }
     },
     temperature: match case.temperature {
       Some(temperature) => Some(temperature)
@@ -264,6 +276,12 @@ fn settings_for(
       },
     ),
     timeout_ms: base.timeout_ms,
+    enable_thinking: options.cot_thinking.contains(model),
+    reasoning_effort: if options.cot_effort.contains(model) {
+      Some("high")
+    } else {
+      None
+    },
   }
 }
 
@@ -413,12 +431,133 @@ fn failure_result(
 }
 
 ///|
-/// Run the whole suite, serially, and collect every attempt.
+/// 并行方式。
+///
+/// 串行是默认：比两个模型只有在它们不抢同一条连接时才说明问题。后两种是给
+/// 「我就想快点看到全部结果」用的，代价是延迟数字不再干净（同一模型内仍然串行
+/// 的 `models` 比 `all` 干净一点）。
+pub fn parse_parallel(raw : String) -> Result[String, String] {
+  match raw {
+    "" | "serial" => Ok("serial")
+    "models" => Ok("models")
+    "all" => Ok("all")
+    _ => Err("parallel must be one of: serial, models, all")
+  }
+}
+
+///|
+/// 一次尝试：`on_start` → 跑 → `on_result`。三种并行方式共用的那一截。
+async fn run_one(
+  base : @faceoff.Settings,
+  model : String,
+  case : Case,
+  options : BenchOptions,
+  repeat : Int,
+  on_start : async (String, String, Int) -> Unit,
+  on_part : async (@faceoff.StreamPart) -> Unit,
+  on_result : async (RunResult) -> Unit,
+) -> RunResult {
+  on_start(model, case.id, repeat) catch {
+    _ => ()
+  }
+  let result = run_case(base, model, case, options, repeat, on_part)
+  on_result(result) catch {
+    _ => ()
+  }
+  result
+}
+
+///|
+/// 一个模型的全部尝试（模型内串行），并把自己的结果收集到 `out` 里。
+///
+/// `out` 由每个任务各占一格写：并发写同一个数组的代价是两边的 push 会撞上，
+/// 所以调用方先按模型数铺好空数组，任务只写自己那一格。
+async fn run_model_serial(
+  base : @faceoff.Settings,
+  model : String,
+  cases : Array[Case],
+  options : BenchOptions,
+  on_start : async (String, String, Int) -> Unit,
+  on_part : async (@faceoff.StreamPart) -> Unit,
+  on_result : async (RunResult) -> Unit,
+) -> Array[RunResult] {
+  let results : Array[RunResult] = []
+  let mut first = true
+  for case in cases {
+    for repeat = 0; repeat < options.repeats; repeat = repeat + 1 {
+      if !first && options.pace_ms > 0 {
+        @async.sleep(options.pace_ms) catch {
+          _ => ()
+        }
+      }
+      first = false
+      results.push(
+        run_one(
+          base, model, case, options, repeat, on_start, on_part, on_result,
+        ),
+      )
+    }
+  }
+  results
+}
+
+///|
+/// 结果按（模型、用例、第几次）排好再交出去。
+///
+/// 并发跑完的顺序是随机的，而写进 JSONL 与 data.json 的顺序会被人（和 diff）
+/// 看见：同一批参数跑两次应该得到同一份文件。排序只在收尾做一次。
+fn sorted_results(
+  models : Array[String],
+  cases : Array[Case],
+  results : Array[RunResult],
+) -> Array[RunResult] {
+  let case_order : Map[String, Int] = Map([])
+  for i = 0; i < cases.length(); i = i + 1 {
+    case_order[cases[i].id] = i
+  }
+  let model_order : Map[String, Int] = Map([])
+  for i = 0; i < models.length(); i = i + 1 {
+    model_order[models[i]] = i
+  }
+  let key = fn(result : RunResult) {
+    (
+      match model_order.get(result.model) {
+        Some(index) => index
+        None => models.length()
+      },
+      match case_order.get(result.case_id) {
+        Some(index) => index
+        None => cases.length()
+      },
+      result.repeat,
+    )
+  }
+  let out = results.copy()
+  out.sort_by(fn(a, b) {
+    let x = key(a)
+    let y = key(b)
+    if x.0 != y.0 {
+      if x.0 < y.0 { -1 } else { 1 }
+    } else if x.1 != y.1 {
+      if x.1 < y.1 { -1 } else { 1 }
+    } else if x.2 != y.2 {
+      if x.2 < y.2 { -1 } else { 1 }
+    } else {
+      0
+    }
+  })
+  out
+}
+
+///|
+/// Run the whole suite and collect every attempt.
 ///
 /// `on_start` fires before each attempt, `on_part` receives stream fragments
-/// while it runs, and `on_result` fires once it settles. Serial execution is
-/// deliberate: comparing two models only means something when they are not
-/// competing for the same connection.
+/// while it runs, and `on_result` fires once it settles.
+///
+/// 串行是默认（也是唯一能让延迟数字干净的做法）；`options.parallel` 可以改成
+/// 「按模型并行」或「全部并发」，那两种下面三个回调会被并发调用——调用方得
+/// 自己把共享的进度文件与输出串起来（`cmd/bench` 就是这么做的）。
 pub async fn run_bench(
   base : @faceoff.Settings,
   models : Array[String],
@@ -428,27 +567,82 @@ pub async fn run_bench(
   on_part : async (@faceoff.StreamPart) -> Unit,
   on_result : async (RunResult) -> Unit,
 ) -> Array[RunResult] {
-  let results : Array[RunResult] = []
-  let mut first = true
-  for model in models {
-    for case in cases {
-      for repeat = 0; repeat < options.repeats; repeat = repeat + 1 {
-        if !first && options.pace_ms > 0 {
-          @async.sleep(options.pace_ms) catch {
-            _ => ()
-          }
+  let collected = match options.parallel {
+    "models" => {
+      // 每个模型一个任务，各写自己那格
+      let per_model : Array[Array[RunResult]] = []
+      for _i = 0; _i < models.length(); _i = _i + 1 {
+        per_model.push([])
+      }
+      @async.with_task_group(fn(group) {
+        for i = 0; i < models.length(); i = i + 1 {
+          let slot = per_model[i]
+          let model = models[i]
+          group.spawn(async fn() {
+            let got = run_model_serial(
+              base, model, cases, options, on_start, on_part, on_result,
+            )
+            for result in got {
+              slot.push(result)
+            }
+          })
+          |> ignore
         }
-        first = false
-        on_start(model, case.id, repeat) catch {
-          _ => ()
-        }
-        let result = run_case(base, model, case, options, repeat, on_part)
-        results.push(result)
-        on_result(result) catch {
-          _ => ()
+      })
+      let flat : Array[RunResult] = []
+      for slot in per_model {
+        for result in slot {
+          flat.push(result)
         }
       }
+      flat
+    }
+    "all" => {
+      // 每条请求一个任务，模型内也不串行
+      let slots : Array[Array[RunResult]] = []
+      let plan : Array[(String, Case, Int)] = []
+      for model in models {
+        for case in cases {
+          for repeat = 0; repeat < options.repeats; repeat = repeat + 1 {
+            slots.push([])
+            plan.push((model, case, repeat))
+          }
+        }
+      }
+      @async.with_task_group(fn(group) {
+        for i = 0; i < plan.length(); i = i + 1 {
+          let slot = slots[i]
+          let (model, case, repeat) = plan[i]
+          group.spawn(async fn() {
+            slot.push(
+              run_one(
+                base, model, case, options, repeat, on_start, on_part, on_result,
+              ),
+            )
+          })
+          |> ignore
+        }
+      })
+      let flat : Array[RunResult] = []
+      for slot in slots {
+        for result in slot {
+          flat.push(result)
+        }
+      }
+      flat
+    }
+    _ => {
+      let results : Array[RunResult] = []
+      for model in models {
+        let got = run_model_serial(
+          base, model, cases, options, on_start, on_part, on_result,
+        )
+        for result in got {
+          results.push(result)
+        }
+      }
+      results
     }
   }
-  results
+  sorted_results(models, cases, collected)
 }
