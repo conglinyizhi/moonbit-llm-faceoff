@@ -22,3 +22,8 @@ todo.md
 # 页面工作台的用户数据：用例集与预设（可能含私有 prompt，别跟着提交）
 web/cases/
 web/presets.json
+
+# 真实网关的运行留证：`make real-gateway` 会往这里写真实响应。别提交这个文件——
+# 之前只写在 AGENTS.md 里，靠每次提交手打排除项挡着；一条 git add -A 就能带进来
+real-gateway-run.md
+docs/real-gateway-run.md
