@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-14
+
+First release: the library, the two CLIs, the harness and the web half, in one
+module.
+
 ### Changed
 
 - **The `web/` half is no longer a module of its own.** The library, the two
@@ -669,10 +674,6 @@ All notable changes to this project are documented here. The format follows
   button must return to a usable state after a run completes.
 - `scripts/cdp-dump.mjs` can capture a full-page screenshot, for checking what
   the page actually looks like rather than only what its DOM says.
-
-## [0.1.0] - unreleased
-
-First working version. Not published to Mooncakes, and not tagged.
 
 ### Added
 
