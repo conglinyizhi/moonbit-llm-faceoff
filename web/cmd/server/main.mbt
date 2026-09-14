@@ -57,7 +57,6 @@ async fn main {
     base_url: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or(""),
     // 空字符串要当没配：set 成空是「取消」的常见写法，is_some() 会把它算成配了
     base_url_configured: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or("") != "",
-    models_configured: @env.get_env_var("LLM_WEB_MODELS").unwrap_or("") != "",
     api_key: first_env(["MOONLLM_API_KEY", "OPENAI_API_KEY"]).unwrap_or(""),
     default_system,
   }
@@ -121,8 +120,6 @@ struct ServerConfig {
   base_url : String
   /// 网关地址是配的还是没有。页面用它决定报警：字段空着 + 服务端也没配
   base_url_configured : Bool
-  /// 同上：LLM_WEB_MODELS 没设时，模型表是编出来占位的 MiniCPM5-1B 之类
-  models_configured : Bool
   api_key : String
   /// 默认 system prompt：页面打开时预填进那个框，跑的时候按页面上的值发。
   /// 「固定 system + 变动的 user prompt」时，把它写在启动服务端的地方，
@@ -334,7 +331,6 @@ async fn meta_json(config : ServerConfig) -> Json {
     "baseUrl": Json::string(config.base_url),
     // 值是兜底的还是配的，页面得能分辨：空字段 + 兜底值 = 该拦的红线
     "baseUrlConfigured": Json::boolean(config.base_url_configured),
-    "modelsConfigured": Json::boolean(config.models_configured),
   })
 }
 

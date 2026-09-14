@@ -44,10 +44,8 @@ struct Meta {
   defaults : Defaults
   hasKey : Bool
   baseUrl : String
-  /// 网关地址是配的还是没有
-  baseUrlConfigured : Bool
-  /// LLM_WEB_MODELS 没设时，模型表是编出来占位的
-  modelsConfigured : Bool
+  /// 网关地址是配的还是没有。可选：服务端版本比页面旧时不至于让整个页面解不开
+  baseUrlConfigured : Bool?
 } derive(Eq, FromJson)
 
 ///|
@@ -2338,7 +2336,9 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         @html.p([
           txt(
             match model.meta_error {
-              Some(error) => "载入失败：" + error
+              Some(error) =>
+                // 字段对不上多半是服务端还在跑旧版本，光看 JsonDecodeError 没法自救
+                "载入失败：" + error + "（若是 Missing field，服务端可能是旧版本，重启 make serve 即可）"
               None => "正在载入配置…"
             },
           ),
@@ -2666,7 +2666,7 @@ fn run_issues(model : AppModel) -> (Array[Issue], Array[Issue]) {
   // 服务端给的值分两种：配置的，和内置兜底。字段空着 + 只剩兜底 = 谁都没配过，
   // 按下去会去连一个根本没打算用的地址——这种要拦住，不能当「能用」放过去
   let (configured_base, server_has_key) = match model.meta {
-    Some(meta) => (meta.baseUrlConfigured, meta.hasKey)
+    Some(meta) => (meta.baseUrlConfigured.unwrap_or(false), meta.hasKey)
     None => (false, false)
   }
   // 网关：填了就必须像个 http(s) 地址；空着看服务端配没配
