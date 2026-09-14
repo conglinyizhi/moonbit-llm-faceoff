@@ -41,6 +41,17 @@ Breaking any of these produces a confusing failure, not a clean error.
   `bench`, and passed over as JSON (a live run crosses a process boundary; the
   static report reads the file). Keep `web/` off the library's API — the moment
   it calls into `bench`, the statistics gain a second implementation.
+- **Parallel steps in `scripts/ci.sh` must collect every exit code.** Bare `wait`
+  returns 0. `make -s smoke & make -s api & make -s web & wait` therefore wrote
+  `=== [e2e] ok` while `make api` had exited 1 — a whole CI run was green with
+  five failing assertions inside it, and the next hour went into asking why the
+  green run was wrong instead of what the failure was. Wait on each pid.
+- **A local `make ci` can be fooled by a leftover `_build`; a fresh checkout
+  cannot.** Merging the two modules left `web/_build/` behind, and the server's
+  `LLM_WEB_SSG` default still named the pre-merge path: it resolved to that
+  leftover binary here and to nothing on a runner, so the same commit was green
+  locally and 500 on CI. When a change moves where build outputs land, verify in
+  a clone (`git clone . /tmp/x && make ci` there), not in the working tree.
 - **No Python.** Test utilities are `.mbtx` scripts run with
   `moon run <file>.mbtx --target native` — the default target is wasm and cannot
   open a socket.

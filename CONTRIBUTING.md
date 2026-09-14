@@ -85,6 +85,16 @@ git config core.hooksPath .githooks
 workflow should pass too. Then run `make e2e` if your change can affect the page
 (CI does not run it). Say in the PR which ones you ran.
 
+One exception worth knowing: a local pass can come from leftovers. The merge that
+turned the two modules into one left `web/_build/` behind, and the server's ssg
+path resolved to that stale binary here and to nothing on a fresh checkout — the
+same commit was green locally and 500 on CI. If your change moves where build
+outputs land, or renames a package, check it in a clone:
+
+```bash
+git clone . /tmp/clean && cd /tmp/clean && make ci
+```
+
 | your change | run |
 | --- | --- |
 | anything | `make ci` |
