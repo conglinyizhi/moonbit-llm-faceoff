@@ -53,7 +53,21 @@ wait || true
 # 端到端：这三个才是真正互不相干的（各自的 .mbtx 有自己的构建目录）。
 # 注意 web 这一条会构建根模块的 cmd/bench 与 web/cmd/*，所以它留在这一段、
 # 不和上面的 module 通道同时跑——实测同时跑会抢 _build 的锁，反而更慢
-run_lane e2e bash -c 'make -s smoke & make -s api & make -s web & wait'
+#
+# 三个目标的退出码必须逐个收：无参 wait 返回 0，会把失败吞掉。CI 上因此
+# 报过假绿（一个套件实际 5 项失败，lane 却写 ok），然后再去查为何绿
+run_lane e2e bash -c '
+  pids=()
+  for t in smoke api web; do
+    make -s "$t" &
+    pids+=($!)
+  done
+  rc=0
+  for p in "${pids[@]}"; do
+    wait "$p" || rc=1
+  done
+  exit $rc
+'
 wait || true
 
 failed=0
