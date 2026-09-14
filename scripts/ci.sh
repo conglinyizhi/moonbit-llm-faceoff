@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 #
-# make ci 的真身：把确定性的那套测试按「抢哪个构建目录」分成三条通道并行跑。
+# make ci 的真身：把确定性的那套测试按「抢哪个构建目录」分成两段跑。
 #
 # 为什么要分通道，而不是无脑 `make -j`：
-#   moon 的锁是目录级的（_build/、web/_build/、scripts/_build/ 各一把）。同一个
-#   目录上的并发调用不会失败，而是**排队**——所以「把所有目标一起丢出去」不会更快，
-#   只会把输出搅在一起。按目录分开之后，通道之间真的互不相干，通道内部保持串行。
+#   moon 的锁是目录级的（_build/、scripts/_build/ 各一把）。同一个目录上的并发调用
+#   不会失败，而是**排队**——所以「把所有目标一起丢出去」不会更快，只会把输出搅在
+#   一起。按目录分开之后，通道之间真的互不相干，通道内部保持串行。
+#
+#   页面和 CLI 现在是同一个模块了，模块本身的检查/测试/页面构建都抢 _build，
+#   所以它们分在两段、不互相抢；真正能并行的是第二段那三个 .mbtx 目标。
 #
 #   .mbtx 那三个目标（smoke / api / web）之所以敢一起跑，是因为它们的单文件构建
 #   产物已经按子脚本分了目录（见 scripts/lib.sh 与各 .mbtx 里的 mbtx_dir）。
@@ -40,21 +43,21 @@ run_lane() {
 }
 
 start=$(date +%s)
-echo "== 三段：模块检查/测试（root∥web）→ 端到端（smoke∥api∥web）"
+echo "== 两段：模块检查/测试（native + js）→ 端到端（smoke∥api∥web）"
 
-# 模块检查/测试：两个模块的构建目录不同，真并行
-run_lane root bash -c 'moon check --target native && moon test --target native'
-run_lane web bash -c 'cd web && moon check --target native && moon check --target js && moon test --target native'
+# 一个模块，一条通道：check 两种目标 + 单测都写在同一把 _build 锁上，
+# 拆开并行只会排队，还会把输出搅在一起
+run_lane module bash -c 'moon check --target native && moon check --target js && moon test --target native'
 wait || true
 
-# 端到端：这三个才是真正互不相干的（各自的 .mbtx 有自己的构建目录，
-# 而且都不重建模块）。注意 web 这一条会构建根模块的 cmd/bench，所以它
-# 不能和上面的 root 通道同时跑——实测那样会抢 _build 的锁，反而更慢
+# 端到端：这三个才是真正互不相干的（各自的 .mbtx 有自己的构建目录）。
+# 注意 web 这一条会构建根模块的 cmd/bench 与 web/cmd/*，所以它留在这一段、
+# 不和上面的 module 通道同时跑——实测同时跑会抢 _build 的锁，反而更慢
 run_lane e2e bash -c 'make -s smoke & make -s api & make -s web & wait'
 wait || true
 
 failed=0
-for lane in root web e2e; do
+for lane in module e2e; do
   code="$(cat "$lane_dir/$lane.code" 2>/dev/null || echo 1)"
   if [ "$code" = "0" ]; then
     printf '=== [%s] ok\n' "$lane"

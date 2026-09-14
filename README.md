@@ -95,7 +95,7 @@ Or by hand, the same two steps:
 ```bash
 moon run --target native scripts/build-web.mbtx
 cd web
-./_build/native/debug/build/cmd/server/server.exe
+../_build/native/debug/build/web/cmd/server/server.exe
 ```
 
 Either way: **the server must run with `web/` as its working directory.** It
@@ -222,9 +222,10 @@ A five-line orientation for reading this repo:
 Everything else in the language — see <https://docs.moonbitlang.com/> and the
 package registry <https://mooncakes.io/>.
 
-This repo is two modules: the library + CLIs at the root, and the web frontends
-under `web/` (which has its own `moon.mod`). Build the root for the CLIs, or
-`cd web` for the page.
+This repo is one module: one `moon.mod` at the root covers the library and the
+two CLIs, the benchmark harness under `bench/`, and the page, its server and the
+static report under `web/`. A single `moon check` (native + js) and a single
+`moon test --target native` cover the whole thing.
 
 ### If the build fails
 
@@ -423,7 +424,7 @@ without paying for the calls again.
 | flag | what |
 | --- | --- |
 | `--json <file>` | every raw attempt as JSON Lines, including the full answer and reasoning text |
-| `--web-data <file>` | the page-data document the web module renders (schema in `bench/pagedata.mbt`) |
+| `--web-data <file>` | the page-data document the page renders (schema in `bench/pagedata.mbt`) |
 | `--show-cot` | stream chain-of-thought text to stderr as it arrives |
 | `--show-output` | print each answer to stderr when the run settles |
 | `--progress <file>` | append live progress events (JSON Lines) while running — this is what the page reads to show a run in flight |
@@ -448,7 +449,7 @@ cd web                     # the server resolves out/, runs/ and the case file
 MOONLLM_API_KEY=... \
 MOONLLM_BASE_URL=https://api.modelbest.cn/v1 \
 LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
-  ./_build/native/debug/build/cmd/server/server.exe
+  ../_build/native/debug/build/web/cmd/server/server.exe
 # → http://127.0.0.1:8137/
 ```
 
@@ -693,7 +694,7 @@ println(@bench.format_summaries(summaries))
 
 `@bench.parse_results` reads a run log back, `RunResult::to_json` /
 `RunResult::from_json` round-trip a single attempt, and `page_data_json` builds
-the document the web module renders.
+the document the page renders.
 
 Errors are flattened into `ClientError` (`Transport` / `Status` / `Decode`) so
 callers do not need to import the transport packages.
@@ -717,16 +718,15 @@ a *synchronous* callback, and a synchronous callback cannot call
 `@stdio.stdout.write`, so fragments could not be written out as they arrived.
 The dependency was then removed outright rather than kept for the one-shot path.
 
-**`web/` is a separate module that does not depend on the library.**
-`rabbita` needs `moonbitlang/async` 0.21.x while the library pins 0.20.1. Putting
-both in one workspace forces a single async version, and that breaks the
-library. So the numbers are computed once, in `bench`, and handed over as JSON —
-across a process boundary for live runs, and as a file for the static report.
-
-That pin no longer has an external cause. With no client library left, the
-library could move to 0.21.x, the two modules could share a workspace, and the
-subprocess boundary and the JSON hand-off would become unnecessary. That is a
-separate change and has not been made.
+**`web/` does not call into the library; it consumes `bench`'s `data.json`.**
+The page and the library used to sit in different modules because of a version
+split: `rabbita` needs `moonbitlang/async` 0.21.x, the library pinned 0.20.1, and
+one workspace can only hold one version of a dependency. That gap is gone — the
+library is on 0.21.3 now — so the page, the server and the report live in the
+same module as the library, behind the one root `moon.mod`. The boundary that is
+still there is the data hand-off: the numbers are computed once, in `bench`, and
+handed over as JSON — across a process boundary for live runs, and as a file for
+the static report. That is what keeps the statistics in one implementation.
 
 **Run state lives in files, not in server memory.**
 The server keeps no per-run state in memory: the bench process is spawned directly
@@ -749,7 +749,7 @@ and it is the same single command you can run locally. The targets are thin
 wrappers over the scripts, so the two cannot drift.
 
 ```bash
-make ci        # deps, check, unit tests, smoke, server API, build the page
+make ci        # two phases: check + unit tests, then smoke ∥ api ∥ web
 make e2e       # the browser test as well — needs chromium, and it is slow
 make           # list every target
 ```
@@ -757,7 +757,7 @@ make           # list every target
 Underneath:
 
 ```bash
-moon test --target native      # 58 unit tests, no network (54 + 4 in web/)
+moon test --target native      # 85 unit tests, no network
 moon run --target native scripts/smoke.mbtx   # CLI end-to-end against a local mock endpoint
 moon run --target native scripts/server-api.mbtx   # server HTTP contract, incl. key handling
 bash scripts/web-e2e.sh        # browser end-to-end (headless chromium)
@@ -844,13 +844,13 @@ bench/              the measurement harness
   runner.mbt        run_case / run_bench, retry, JSON round-trip
   metrics.mbt       Stats, summarize
   report.mbt        the human-readable report
-  pagedata.mbt      the document the web module consumes
+  pagedata.mbt      the document the page consumes
   cli.mbt           bench flag parsing
 
 cmd/faceoff/        the faceoff executable
 cmd/bench/          the bench executable
 
-web/                the frontends (own module: Rabbita + precss)
+web/                the page, its server and the report (Rabbita + precss)
   shared/           data model + result components (js + native)
   cmd/app/          interactive page (js, Rabbita TEA)
     main.mbt        the form, the run in progress, the results
@@ -861,13 +861,15 @@ web/                the frontends (own module: Rabbita + precss)
     main.mbt        routing and handlers
     store.mbt       case sets, presets, run history — files and JSON
   cmd/ssg/          static report (native)
+  cmd/build/        the page build entry point (native)
   styles/           site.scss → precss → site.css
 
 web/cases/          your case sets (one <name>.jsonl each) — gitignored
 web/presets.json    your model + parameter combinations — gitignored
 web/runs/           one directory per run — gitignored
-  shell/            index.html shell for the interactive page
-  build-web.mbtx    one-command build (run from the repository root)
+web/data.json       page data exported from a run — gitignored
+web/out/            built page + static report, from scripts/build-web.mbtx
+web/shell/          index.html shell for the interactive page
 
 scripts/
   demo.mbtx             offline, no-API-key demo of all three paths
@@ -899,7 +901,8 @@ docs/               library survey, benchmark notes
 ## 10. Contributing
 
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — build requirements, the house rules
-  (no Python, why there are two modules), and what to run before a pull request.
+  (no Python, why the page consumes `bench`'s `data.json`), and what to run
+  before a pull request.
 - [`SECURITY.md`](SECURITY.md) — how to report a vulnerability, and what happens
   to your API key.
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed between versions, including the

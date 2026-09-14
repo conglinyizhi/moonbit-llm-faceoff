@@ -23,7 +23,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.moon
-          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod', 'web/moon.mod') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod') }}
 
       - name: Install MoonBit
         run: |
@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.moon
-          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod', 'web/moon.mod') }}
+          key: moon-${{ runner.os }}-${{ hashFiles('moon.mod') }}
 
       - name: Install MoonBit
         shell: pwsh
@@ -97,17 +97,11 @@ jobs:
         shell: pwsh
         run: |
           moon update
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Set-Location web
-          moon update
           exit $LASTEXITCODE
 
       - name: Unit tests
         shell: pwsh
         run: |
-          moon test --target native
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Set-Location web
           moon test --target native
           exit $LASTEXITCODE
 

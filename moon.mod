@@ -19,12 +19,14 @@ repository = "https://github.com/conglinyizhi/moonbit-llm-faceoff"
 
 license = "MIT"
 
-keywords = [ "moonbit", "llm", "openai", "benchmark", "comparison" ]
+keywords = [ "moonbit", "llm", "openai", "benchmark", "comparison", "rabbita" ]
 
 preferred_target = "native"
 
-description = "OpenAI-compatible LLM client plus a harness that compares multiple models on the same case set, written in MoonBit."
+description = "OpenAI-compatible LLM client, a harness that compares multiple models on the same case set, and a browser UI for the results — all in MoonBit."
 
 import {
+  "conglinyizhi/precss@0.1.3",
+  "moonbit-community/rabbita@0.15.7",
   "moonbitlang/async@0.21.3",
 }

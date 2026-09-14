@@ -26,16 +26,13 @@ help:  ## list these targets
 # 缺依赖时 moon check 会自己报错，比默默花掉半分钟更好懂
 deps:  ## fetch deps / refresh the registry (run by hand, not part of ci)
 	$(MOON) update
-	cd web && $(MOON) update
 
-check:  ## type-check the root (native) and web (native + js)
+check:  ## type-check everything: native (library, CLIs, server) and js (the page)
 	$(MOON) check --target native
-	cd web && $(MOON) check --target native
-	cd web && $(MOON) check --target js
+	$(MOON) check --target js
 
-test:  ## unit tests, both modules
+test:  ## unit tests
 	$(MOON) test --target native
-	cd web && $(MOON) test --target native
 
 smoke:  ## the CLIs end to end, against a local mock endpoint
 	$(MOON) run --target native scripts/smoke.mbtx
@@ -84,7 +81,7 @@ serve:  ## build, then serve the page from web/ (Ctrl-C to stop)
 	$(MOON) run --target native scripts/build-web.mbtx
 	@echo
 	@echo "打开 http://127.0.0.1:$${LLM_WEB_PORT:-8137}/  （Ctrl-C 停）"
-	cd web && ./_build/native/debug/build/cmd/server/server.exe
+	cd web && ../_build/native/debug/build/web/cmd/server/server.exe
 
 dev:  ## dev server: build, serve, rebuild on change (Ctrl-C to stop)
 	bash scripts/dev.sh
@@ -98,12 +95,10 @@ serve-demo:  ## demo: mock endpoint + demo data + page (Ctrl-C to stop)
 fmt:  ## format, and refresh the generated .mbti
 	$(MOON) fmt
 	$(MOON) info
-	cd web && $(MOON) fmt
-	cd web && $(MOON) info
 
-# ci 的真身在 scripts/ci.sh：按「抢哪个构建目录」分三条通道并行
-# （root / web / e2e），通道内保持串行。Makefile 只做一层壳
-ci:  ## the deterministic suite CI runs（三条通道并行）
+# ci 的真身在 scripts/ci.sh：按「抢哪个构建目录」分两段
+# （模块检查/测试 → 端到端三个 .mbtx），段内保持串行。Makefile 只做一层壳
+ci:  ## the deterministic suite CI runs（两段）
 	bash scripts/ci.sh
 
 clean:  ## remove build outputs; keeps web/runs, which is your data

@@ -88,7 +88,7 @@ make serve          # 构建页面，然后从 web/ 起服务端
 ```bash
 moon run --target native scripts/build-web.mbtx
 cd web
-./_build/native/debug/build/cmd/server/server.exe
+../_build/native/debug/build/web/cmd/server/server.exe
 ```
 
 两种方式都记住一条：**服务端必须以 `web/` 作为工作目录。** 它的 `out/`、`runs/`、
@@ -196,7 +196,7 @@ moon run --target native scripts/real-gateway.mbtx   # → docs/real-gateway-run
 
 语言本身看 <https://docs.moonbitlang.com/>，包生态看 <https://mooncakes.io/>。
 
-本仓库是两个模块：根目录是库和命令行工具，`web/` 是前端（它有自己的 `moon.mod`）。要命令行就构建根目录，要网页就 `cd web`。
+本仓库是一个模块：根目录一份 `moon.mod` 覆盖库和两个命令行工具、`bench/` 里的评测 harness，以及 `web/` 下的页面、服务端和静态报告。一条 `moon check`（native + js）、一条 `moon test --target native` 就覆盖全部。
 
 ### 构建失败怎么办
 
@@ -376,7 +376,7 @@ $bench --from-json bench/results-example.jsonl --no-key --web-data web/data.json
 | 参数 | 内容 |
 | --- | --- |
 | `--json <file>` | 每次尝试一行 JSON Lines，含完整回答与思考文本 |
-| `--web-data <file>` | 网页模块渲染用的页面数据文档（schema 见 `bench/pagedata.mbt`） |
+| `--web-data <file>` | 页面渲染用的页面数据文档（schema 见 `bench/pagedata.mbt`） |
 | `--show-cot` | 思考文本实时刷到 stderr |
 | `--show-output` | 每次运行结束后把回答打到 stderr |
 | `--progress <文件>` | 运行过程中追加实时进度事件（JSON Lines）；页面上的「正在生成」就是读它 |
@@ -400,7 +400,7 @@ cd web               # 服务端的 out/、runs/ 和用例文件都按当前工�
 MOONLLM_API_KEY=... \
 MOONLLM_BASE_URL=https://api.modelbest.cn/v1 \
 LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
-  ./_build/native/debug/build/cmd/server/server.exe
+  ../_build/native/debug/build/web/cmd/server/server.exe
 # → http://127.0.0.1:8137/
 ```
 
@@ -602,7 +602,7 @@ let summaries = @bench.summarize_all(models, results)
 println(@bench.format_summaries(summaries))
 ```
 
-`@bench.parse_results` 把运行日志读回来，`RunResult::to_json` / `RunResult::from_json` 做单次尝试的往返，`page_data_json` 生成网页模块渲染的那份文档。
+`@bench.parse_results` 把运行日志读回来，`RunResult::to_json` / `RunResult::from_json` 做单次尝试的往返，`page_data_json` 生成页面渲染的那份文档。
 
 错误统一收敛成 `ClientError`（`Transport` / `Status` / `Decode`），调用方不需要 import 传输层包。
 
@@ -617,10 +617,8 @@ println(@bench.format_summaries(summaries))
 
 当初试过把流式交给一个库，后来拆了：那个入口收的是**同步**回调，而同步回调里调不了 `@stdio.stdout.write`，碎片没法实时写出去。之后就干脆把依赖整个拿掉，没有只为了保留一次性路径而留着它。
 
-**`web/` 是独立模块，不依赖本库。**
-`rabbita` 需要 `moonbitlang/async` 0.21.x，而本库钉在 0.20.1。放进同一个 workspace 会强制统一 async 版本，**进而把库编译打坏**。所以统计只在 `bench` 里算一次，然后用 JSON 交出去——实时运行走进程边界，静态报告走文件。
-
-这个版本钉子现在已经没有外部原因了。第三方 LLM 包拿掉之后，库完全可以升到 0.21.x，两个模块就能并进同一个 workspace，子进程边界和 JSON 中转也就不再必要。那是一次独立的改动，还没做。
+**`web/` 不调库的代码，消费的是 `bench` 导出的 `data.json`。**
+页面和库过去分在不同的模块里，起因是版本分歧：`rabbita` 需要 `moonbitlang/async` 0.21.x，而本库钉在 0.20.1，同一个 workspace 只能装一个版本。这个障碍已经没了——库现在就在 0.21.3——所以页面、服务端和静态报告和库在同一个模块里，共用根目录那一份 `moon.mod`。留下来的边界是数据交接：统计只在 `bench` 里算一次，然后用 JSON 交出去——实时运行走进程边界，静态报告走文件。这是为了让统计只有一份实现。
 
 **运行状态落在文件里，不在服务端内存里。**
 服务端不在内存里保存任何一次运行的状态：bench 进程**直接起**（不经 shell，也就没有 POSIX 依赖、没有要转义的命令串），由一个挂在服务器生命周期上的任务等它退干净并把退出码写进文件；**那个文件出现就是完成信号**，而 `runs.jsonl` 的行数就是进度。运行 id 靠**建目录**来分配——目录已存在时 `mkdir` 会失败，这个失败本身就是原子的 test-and-set——所以两个并发请求不可能选到同一个 id。服务端里唯一的锁是一把信号量，用来串行化 `stderr` 写入：`@stdio.stderr` 是全局单句柄，并发写会让进程直接 abort。
@@ -633,7 +631,7 @@ println(@bench.format_summaries(summaries))
 各 target 只是脚本的薄封装，两边不会跑偏。
 
 ```bash
-make ci        # deps + check + 单测 + smoke + 服务端 API + 构建页面
+make ci        # 两段：check + 单测，然后 smoke ∥ api ∥ web
 make e2e       # 再加上浏览器测试——需要 chromium，比较慢
 make           # 列出全部 target
 ```
@@ -641,7 +639,7 @@ make           # 列出全部 target
 底下实际执行的是：
 
 ```bash
-moon test --target native      # 58 个单测，不联网（54 + web/ 里 4 个）
+moon test --target native      # 85 个单测，不联网
 moon run --target native scripts/smoke.mbtx   # 命令行端到端，对着本地假端点
 moon run --target native scripts/server-api.mbtx   # 服务端 HTTP 契约，含密钥处理
 bash scripts/web-e2e.sh        # 浏览器端到端（无头 chromium）
@@ -699,13 +697,13 @@ bench/              测试工具
   runner.mbt        run_case / run_bench、重试、JSON 往返
   metrics.mbt       Stats、summarize
   report.mbt        人类可读报告
-  pagedata.mbt      网页模块消费的数据文档
+  pagedata.mbt      页面消费的数据文档
   cli.mbt           bench 参数解析
 
 cmd/faceoff/        faceoff 可执行文件
 cmd/bench/          bench 可执行文件
 
-web/                前端（独立模块：Rabbita + precss）
+web/                页面、服务端与静态报告（Rabbita + precss）
   shared/           数据模型 + 结果组件（js + native 共用）
   cmd/app/          交互页（js，Rabbita TEA）
     main.mbt        表单、运行中的进度、结果
@@ -716,13 +714,15 @@ web/                前端（独立模块：Rabbita + precss）
     main.mbt        路由与处理函数
     store.mbt       测试集 / 预设 / 运行历史——文件与 JSON
   cmd/ssg/          静态报告（native）
+  cmd/build/        页面构建入口（native）
   styles/           site.scss → precss → site.css
 
 web/cases/          你的测试集（一套一个 <名字>.jsonl）——在 gitignore 里
 web/presets.json    你的「模型 + 参数」组合——在 gitignore 里
 web/runs/           一次运行一个目录——在 gitignore 里
-  shell/            交互页的 index.html 外壳
-  build.sh          一条命令构建
+web/data.json       从一次运行导出的页面数据——在 gitignore 里
+web/out/            构建出来的页面 + 静态报告，由 scripts/build-web.mbtx 产出
+web/shell/          交互页的 index.html 外壳
 
 scripts/
   demo.mbtx             离线、免 API key 的三路径演示
@@ -748,7 +748,7 @@ docs/               选型调查、基准复盘
 
 ## 10. 参与贡献
 
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 构建要求、几条硬规矩（不用 Python、为什么分成两个模块），以及提 PR 前该跑什么。
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) —— 构建要求、几条硬规矩（不用 Python、网页为什么消费 `bench` 的 `data.json`），以及提 PR 前该跑什么。
 - [`SECURITY.md`](SECURITY.md) —— 怎么报漏洞，以及你的 API key 会经过哪里、不会去哪里。
 - [`CHANGELOG.md`](CHANGELOG.md) —— 各版本改了什么，包括从 `llm_client` 改名这一条。
 

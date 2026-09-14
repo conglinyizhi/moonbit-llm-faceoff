@@ -1,9 +1,9 @@
 # Project guide for agents
 
-A MoonBit project. Two modules: the root holds the library and the two CLIs,
-`web/` holds the interactive page and the static report generator. `README.md`
-describes what it does; this file is what an agent needs before touching it.
-`CONTRIBUTING.md` has the same rules aimed at humans.
+A MoonBit project. One module at the root holds the library, the two CLIs, the
+benchmark harness under `bench/`, and the page, its server and the static report
+under `web/`. `README.md` describes what it does; this file is what an agent
+needs before touching it. `CONTRIBUTING.md` has the same rules aimed at humans.
 
 ## Commands
 
@@ -11,13 +11,13 @@ describes what it does; this file is what an agent needs before touching it.
 the targets, and the Makefile sets `MOON_CC` for you.
 
 ```bash
-make ci                       # check, tests, smoke, server API, page build
+make ci                       # two phases: check + tests; then smoke ∥ api ∥ web
 make e2e                      # add the browser test (real Chromium; slow)
 make serve                    # one-shot: build the page, then serve it from web/
 make dev                      # same, but rebuild on change (page → page; server → restart)
 moon run --target native scripts/server-api.mbtx   # server HTTP contract; asserts the key handling
 moon run --target native scripts/real-gateway.mbtx   # the same probes against a real gateway; needs a key (not in CI)
-moon test --target native     # 85 tests (root 69 + web 16)
+moon test --target native     # 85 tests, one run
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 moon run --target native scripts/smoke.mbtx   # the CLIs end to end against a local mock endpoint
 moon run --target native scripts/demo.mbtx   # zero-API-key demo
@@ -32,12 +32,15 @@ you should not reach for a real endpoint to do it.
 
 Breaking any of these produces a confusing failure, not a clean error.
 
-- **`web/` does not depend on the root module.** The two used to be pinned to
-  different `moonbitlang/async` versions; that gap closed (both are on 0.21.x
-  now), so merging them is possible — but `web/` still reads `bench`'s exported
-  `data.json` rather than calling into it. That boundary is what keeps the
-  statistics in one implementation, so treat merging them as a design decision,
-  not cleanup.
+- **`web/` does not call into the root library; it consumes `bench`'s exported
+  `data.json`.** The page used to live in its own module because `rabbita` and
+  the library needed different `moonbitlang/async` versions, and one workspace
+  can only hold one. That conflict is gone — everything is on 0.21.3 — and this
+  is now a single module behind the root `moon.mod`. The boundary that is still
+  load-bearing is the data hand-off: the statistics are computed once, in
+  `bench`, and passed over as JSON (a live run crosses a process boundary; the
+  static report reads the file). Keep `web/` off the library's API — the moment
+  it calls into `bench`, the statistics gain a second implementation.
 - **No Python.** Test utilities are `.mbtx` scripts run with
   `moon run <file>.mbtx --target native` — the default target is wasm and cannot
   open a socket.

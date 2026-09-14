@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "conglinyizhi/moonbit-llm-faceoff/web/cmd/ssg"
+package "conglinyizhi/moonbit-llm-faceoff/web/cmd/build"
 
 // Values
 

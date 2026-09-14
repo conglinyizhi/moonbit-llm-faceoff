@@ -32,7 +32,7 @@ trap cleanup EXIT INT TERM
 
 echo "==> 构建页面与服务端"
 MOON_CC="${MOON_CC:-gcc}" moon run --target native scripts/build-web.mbtx >/dev/null
-(cd web && MOON_CC="${MOON_CC:-gcc}" moon build cmd/server --target native)
+MOON_CC="${MOON_CC:-gcc}" moon build web/cmd/server --target native
 
 echo "==> 起本地假端点"
 mkdir -p "$demo_dir/runs" "$demo_dir/cases"
@@ -60,7 +60,7 @@ echo "==> 起页面（演示数据都在临时目录里）"
   LLM_WEB_WORK="$demo_dir/runs" \
   LLM_WEB_CASES_DIR="$demo_dir/cases" \
   LLM_WEB_PRESETS="$demo_dir/presets.json" \
-  ./_build/native/debug/build/cmd/server/server.exe >"$demo_dir/web.port" 2>"$demo_dir/server.log") &
+  ../_build/native/debug/build/web/cmd/server/server.exe >"$demo_dir/web.port" 2>"$demo_dir/server.log") &
 server_pid=$!
 for _ in $(seq 1 200); do
   [ -s "$demo_dir/web.port" ] && break

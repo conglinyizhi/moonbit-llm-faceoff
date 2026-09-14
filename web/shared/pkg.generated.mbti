@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "conglinyizhi/moonbit-llm-faceoff-web/shared"
+package "conglinyizhi/moonbit-llm-faceoff/web/shared"
 
 import {
   "moonbit-community/rabbita/cmd",
@@ -24,6 +24,8 @@ pub fn array_field(Map[String, Json], String) -> Array[Json]
 
 pub fn as_object(Json) -> Map[String, Json]
 
+pub fn bool_field(Map[String, Json], String, Bool) -> Bool
+
 pub fn case_block(CaseBlock, mode? : String, editor? : (String, String) -> @html.Html, context? : (String) -> @html.Html) -> @html.Html
 
 pub fn collapse_same(Array[DiffLine], Int) -> Array[DiffLine]
@@ -37,6 +39,8 @@ pub fn diff_block(Answer, Answer) -> @html.Html
 pub fn diff_chars(String, String) -> Array[DiffPart]
 
 pub fn diff_lines(String, String) -> Array[DiffLine]
+
+pub fn display_text(String) -> String
 
 pub fn el(String, String, Array[@html.Html]) -> @html.Html
 
@@ -130,6 +134,8 @@ pub fn Answer::not_equal(Self, Self) -> Bool
 
 pub(all) struct CaseBlock {
   id : String
+  prompt : String
+  system : String
   answers : Array[Answer]
 } derive(Eq)
 pub fn CaseBlock::equal(Self, Self) -> Bool

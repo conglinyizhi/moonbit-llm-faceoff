@@ -78,6 +78,8 @@ pub(all) struct Settings {
   mut temperature : Double?
   mut max_tokens : Int?
   mut timeout_ms : Int
+  mut enable_thinking : Bool
+  mut reasoning_effort : String?
 } derive(Eq)
 pub fn Settings::chat_completions_url(Self) -> String
 pub fn Settings::equal(Self, Self) -> Bool

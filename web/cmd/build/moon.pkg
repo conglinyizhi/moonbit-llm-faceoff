@@ -1,0 +1,12 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/fs" @fs,
+  "moonbitlang/async/io" @io,
+  "moonbitlang/async/process" @process,
+  "moonbitlang/async/stdio" @stdio,
+  "moonbitlang/core/env",
+}
+
+supported_targets = "native"
+
+pkgtype(kind: "executable")

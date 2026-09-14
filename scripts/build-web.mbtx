@@ -1,17 +1,16 @@
-///| 构建前端。
+///| 构建前端：先把评测结果导出成页面数据，再让包里的页面构建器干活。
 ///
 ///   moon run --target native scripts/build-web.mbtx [path/to/results.jsonl]
 ///
-///   web/styles/site.scss   → precss        → web/out/site.css
-///   web/cmd/app  (js)      → moon build    → web/out/app.js     交互页（工作台）
-///   web/shell/index.html   → 复制          → web/out/index.html 交互页外壳
-///   web/cmd/ssg  (native)  → Rabbita SSR   → web/out/report.html 静态报告
+///   results.jsonl → bench（replay） → web/data.json   页面数据（静态报告用）
+///   web/data.json → web/cmd/build   → web/out/        交互页 + 静态报告
+///
+/// 页面构建（ssg 出 site.css/report.html、app 出 app.js、复制外壳）只有一份实现：
+/// web/cmd/build。它在包里，从 mooncakes 下载模块的人用的是同一个入口。这里只多做
+/// 前面那一步导出，因为它要用 bench CLI。
 ///
 /// 不带参数就用 bench/results-example.jsonl。只重新导出页面数据时不需要真的调用
 /// 模型：bench --from-json 走 replay 路径。
-///
-/// 这是 web/build.sh 的 .mbtx 版，逻辑一一对应；放在 scripts/ 而不是 web/ 里，
-/// 是因为它属于根模块（web/ 自己的模块钉的是另一套 async 版本）。
 import {
   "moonbitlang/async@0.21.3",
   "moonbitlang/async@0.21.3/fs" @fs,
@@ -39,15 +38,6 @@ async fn note(message : String) -> Unit {
   @stdio.stderr.write(message + "\n") catch { _ => () }
 }
 
-
-///|
-async fn copy_file(from : String, to : String) -> Bool {
-  let content = @fs.read_file(from) catch { _ => return false }
-  @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
-    _ => return false
-  }
-  true
-}
 
 ///|
 async fn exists(path : String) -> Bool {
@@ -87,6 +77,20 @@ async fn run(
 }
 
 ///|
+/// 同一个二进制的两种可能命名。
+/// 用存在性判断，不靠 spawn 失败——失败原因有很多，分不清是「没这个文件」还是别的。
+async fn run_binary(
+  cwd : String,
+  path_without_suffix : String,
+  args : Array[String],
+) -> (Int, String, String) {
+  if exists(path_without_suffix + ".exe") {
+    return run(path_without_suffix + ".exe", args, cwd)
+  }
+  run(path_without_suffix, args, cwd)
+}
+
+///|
 async fn main {
   let args = @env.args().filter(fn(arg) { arg != "--" })
   let root = match @env.current_dir() {
@@ -122,10 +126,10 @@ async fn main {
       c_exit(1)
       return
     }
-    let (code, _, err) = run(
-      root + "/_build/native/debug/build/cmd/bench/bench.exe",
-      ["--from-json", results, "--no-key", "--web-data", data_path],
+    let (code, _, err) = run_binary(
       root,
+      root + "/_build/native/debug/build/cmd/bench/bench",
+      ["--from-json", results, "--no-key", "--web-data", data_path],
     )
     if code != 0 {
       note(err)
@@ -141,75 +145,24 @@ async fn main {
   }
 
   let web = root + "/web"
-  let (update_code, _, update_err) = run("moon", ["update"], web)
-  if update_code != 0 {
-    note(update_err)
-  }
   @fs.mkdir(web + "/out", recursive=true) catch { _ => () }
 
-  say("==> 编译样式（precss）与页面")
-  let (ssg_code, _, ssg_err) = run(
+  say("==> 页面构建（交给包里的 web/cmd/build，同一份实现）")
+  let (page_code, page_out, page_err) = run(
     "moon",
-    ["build", "cmd/ssg", "--target", "native"],
-    web,
+    ["run", "--target", "native", "web/cmd/build"],
+    root,
   )
-  if ssg_code != 0 {
-    note(ssg_err)
-    c_exit(1)
-    return
-  }
-  let (report_code, report_out, report_err) = run(
-    web + "/_build/native/debug/build/cmd/ssg/ssg.exe",
-    [],
-    web,
-  )
-  if report_code != 0 {
-    note(report_err)
-    c_exit(1)
-    return
-  }
-  @stdio.stdout.write(report_out) catch { _ => () }
-
-  say("==> 编译交互页（js）")
-  let (app_code, _, app_err) = run("moon", ["build", "cmd/app", "--target", "js"], web)
-  if app_code != 0 {
-    note(app_err)
-    c_exit(1)
-    return
-  }
-  if !copy_file(
-    web + "/_build/js/debug/build/cmd/app/app.js",
-    web + "/out/app.js",
-  ) {
-    note("拷贝 app.js 失败")
+  @stdio.stdout.write(page_out) catch { _ => () }
+  if page_code != 0 {
+    note(page_err)
     c_exit(1)
     return
   }
 
-  say("==> 外壳")
-  if !copy_file(web + "/shell/index.html", web + "/out/index.html") {
-    note("拷贝外壳失败")
-    c_exit(1)
-    return
-  }
-
-  say("")
-  say("产物（在 web/out/ 下）：")
-  for name in [
-    "app.js",
-    "index.html",
-    "report.html",
-    "site.css",
-  ] {
-    // 0.20.1 的 @fs 没有 file_size，这里就不报大小了：只是给人看一眼，
-    // 为此把 app.js 整个读一遍不值当。
-    if exists(web + "/out/" + name) {
-      say("  " + name)
-    }
-  }
   say("")
   say("启动：")
   say("  make serve        # 构建页面 + 从 web/ 起服务端")
-  say("  或者手动：cd web && ./_build/native/debug/build/cmd/server/server.exe")
+  say("  或者手动：cd web && ../_build/native/debug/build/web/cmd/server/server.exe")
   say("  然后打开 http://127.0.0.1:8137/")
 }

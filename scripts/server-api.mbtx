@@ -427,33 +427,25 @@ let body_preset_dup : String =
 // 注意：可执行文件路径要**绝对**，即使同时给了 cwd。
 // 带 cwd 的相对路径在 POSIX 上没事（fork 之后再 exec，路径那时才解析），
 // 而 Windows 的 CreateProcess 不是这么干的——它会「找不到文件」（真的踩过）。
-/// 页面构建（web/build.sh 的最小版）：`GET /` 那条断言需要 out/index.html。
+/// 页面构建（`web/cmd/build` 的最小版）：`GET /` 那条断言需要 out/index.html。
 /// 只做页面本身，不导出 data.json——交互页启动后会自己去问 /api/meta。
-async fn ensure_page(cwd : String) -> Bool {
-  if (@fs.exists(cwd + "/out/index.html") catch { _ => false }) {
+/// 构建逻辑不在这里重复一份：调包里的 web/cmd/build，它按模块根解析路径。
+async fn ensure_page(root : String) -> Bool {
+  if (@fs.exists(root + "/web/out/index.html") catch { _ => false }) {
     return true
   }
   println("==> 构建页面（GET / 的断言需要它）")
-  for spec in [["build", "cmd/ssg", "--target", "native"],
-               ["build", "cmd/app", "--target", "js"]] {
-    let built = run("moon", spec, {}, cwd)
-    if built.code != 0 {
-      @stdio.stderr.write(built.err + "\n") catch { _ => () }
-      return false
-    }
-  }
-  let ssg = run(cwd + "/_build/native/debug/build/cmd/ssg/ssg.exe", [], {}, cwd)
-  if ssg.code != 0 {
-    @stdio.stderr.write(ssg.err + "\n") catch { _ => () }
+  let built = run(
+    "moon",
+    ["run", "--target", "native", "web/cmd/build"],
+    {},
+    root,
+  )
+  if built.code != 0 {
+    @stdio.stderr.write(built.err + "\n") catch { _ => () }
     return false
   }
-  if !copy_file(
-    cwd + "/_build/js/debug/build/cmd/app/app.js",
-    cwd + "/out/app.js",
-  ) {
-    return false
-  }
-  copy_file(cwd + "/shell/index.html", cwd + "/out/index.html")
+  true
 }
 
 ///|
@@ -471,16 +463,16 @@ async fn main {
   }
   let web_bin = run(
     "moon",
-    ["build", "cmd/server", "--target", "native"],
+    ["build", "web/cmd/server", "--target", "native"],
     {},
-    root + "/web",
+    root,
   )
   if web_bin.code != 0 {
     @stdio.stderr.write(web_bin.err + "\n") catch { _ => () }
     bail("web 构建失败")
     return
   }
-  if !ensure_page(root + "/web") {
+  if !ensure_page(root) {
     bail("页面构建失败")
     return
   }
@@ -540,7 +532,7 @@ async fn main {
     }
     let server = @process.spawn(
       group,
-      root + "/web/_build/native/debug/build/cmd/server/server.exe",
+      root + "/_build/native/debug/build/web/cmd/server/server.exe",
       [],
       extra_env={
         "MOONLLM_BASE_URL": "http://127.0.0.1:1/v1",

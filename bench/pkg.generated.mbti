@@ -13,9 +13,11 @@ pub fn format_summaries(Array[ModelSummary]) -> String
 
 pub fn metric_names() -> Array[String]
 
-pub fn page_data_json(String, Array[String], Array[RunResult]) -> Json
+pub fn page_data_json(String, Array[String], Array[RunResult], cases? : Array[Case], system? : String) -> Json
 
 pub fn parse_cases(String) -> Array[Case] raise CaseError
+
+pub fn parse_parallel(String) -> Result[String, String]
 
 pub fn parse_results(String) -> Array[RunResult]
 
@@ -38,6 +40,7 @@ pub(all) suberror BenchConfigError {
   BadNumber(flag~ : String, value~ : String)
   MissingValue(flag~ : String)
   UnknownFlag(flag~ : String)
+  BadParallel(value~ : String)
 }
 pub fn BenchConfigError::to_string(Self) -> String
 
@@ -58,6 +61,10 @@ pub(all) struct BenchCli {
   max_tokens : Int
   temperature : Double?
   system : String
+  system_override : Bool
+  cot_thinking : Array[String]
+  cot_effort : Array[String]
+  parallel : String
   show_cot : Bool
   show_output : Bool
   json_path : String?
@@ -76,6 +83,10 @@ pub(all) struct BenchOptions {
   max_tokens : Int
   temperature : Double?
   system : String
+  system_override : Bool
+  cot_thinking : Array[String]
+  cot_effort : Array[String]
+  parallel : String
   retry : Int
   retry_backoff_ms : Int
   pace_ms : Int

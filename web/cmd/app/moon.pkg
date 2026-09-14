@@ -1,5 +1,5 @@
 import {
-  "conglinyizhi/moonbit-llm-faceoff-web/shared",
+  "conglinyizhi/moonbit-llm-faceoff/web/shared",
   "moonbit-community/rabbita",
   "moonbit-community/rabbita/cmd",
   "moonbit-community/rabbita/html",

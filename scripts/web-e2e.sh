@@ -49,7 +49,7 @@ fail() {
 echo "==> 构建"
 moon build cmd/bench --target native >/dev/null
 moon run --target native scripts/build-web.mbtx >/dev/null
-(cd web && moon build cmd/server --target native >/dev/null)
+moon build web/cmd/server --target native >/dev/null
 
 # 临时目录放系统临时区，不放仓库根目录。
 #
@@ -147,7 +147,7 @@ mock_port=$(cat "$tmp/mock.port")
   LLM_WEB_STATIC="$tmp/static" \
   LLM_WEB_CASES_DIR="$tmp/cases" \
   LLM_WEB_PRESETS="$tmp/presets.json" \
-  ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web.port" 2>"$tmp/server.log") &
+  ../_build/native/debug/build/web/cmd/server/server.exe >"$tmp/web.port" 2>"$tmp/server.log") &
 web_pid=$!
 for _ in $(seq 1 200); do
   [ -s "$tmp/web.port" ] && break
@@ -1172,7 +1172,7 @@ echo "==> autorun 在拿不到 key 时不该开跑"
   LLM_WEB_WORK="$tmp/runs-nokey" \
   LLM_WEB_STATIC="$tmp/static" \
   LLM_WEB_PORT=0 \
-  ./_build/native/debug/build/cmd/server/server.exe >"$tmp/web2.port" 2>/dev/null) &
+  ../_build/native/debug/build/web/cmd/server/server.exe >"$tmp/web2.port" 2>/dev/null) &
 web2_pid=$!
 for _ in $(seq 1 200); do [ -s "$tmp/web2.port" ] && break; sleep 0.05; done
 PORT2=$(tr -d '\n' <"$tmp/web2.port" 2>/dev/null)
@@ -1343,7 +1343,7 @@ mkdir -p "$tmp/nocfg/runs" "$tmp/nocfg/cases"
   LLM_WEB_STATIC="$tmp/static" \
   LLM_WEB_CASES_DIR="$tmp/nocfg/cases" \
   LLM_WEB_PRESETS="$tmp/nocfg/presets.json" \
-  ./_build/native/debug/build/cmd/server/server.exe >"$tmp/nocfg.port" 2>"$tmp/nocfg.log") &
+  ../_build/native/debug/build/web/cmd/server/server.exe >"$tmp/nocfg.port" 2>"$tmp/nocfg.log") &
 nocfg_pid=$!
 for _ in $(seq 1 200); do
   [ -s "$tmp/nocfg.port" ] && break

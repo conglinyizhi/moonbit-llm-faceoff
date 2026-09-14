@@ -25,11 +25,11 @@ trap 'rm -f "$port_file"' EXIT
 # 注意 find 的收尾都带 || true：路径写错（比如曾经的 web/moon.pkg）会让 find 非零，
 # 而 pipefail + set -e 会因此**静默**退出整个脚本——日志里什么都不留，极难查
 page_files() {
-  find web/cmd/app web/cmd/ssg web/shared web/styles web/shell \
+  find web/cmd/app web/cmd/ssg web/cmd/build web/shared web/styles web/shell \
     scripts/build-web.mbtx -type f 2>/dev/null || true
 }
 server_files() {
-  find web/cmd/server web/shared web/moon.mod -type f 2>/dev/null || true
+  find web/cmd/server web/shared -type f 2>/dev/null || true
 }
 
 # 一组文件里最新的 mtime。变了就重建：够用，且不依赖 inotifywait 这类额外命令
@@ -44,7 +44,7 @@ stamp() {
 }
 
 build_page() { MOON_CC="$moon_cc" moon run --target native scripts/build-web.mbtx >/dev/null; }
-build_server() { (cd web && MOON_CC="$moon_cc" moon build cmd/server --target native); }
+build_server() { MOON_CC="$moon_cc" moon build web/cmd/server --target native; }
 
 server_pid=""
 port=""
@@ -64,7 +64,7 @@ trap 'stop_server; exit 0' INT TERM
 start_server() {
   local want="$1"
   : >"$port_file"
-  (cd web && exec env LLM_WEB_PORT="$want" ./_build/native/debug/build/cmd/server/server.exe) \
+  (cd web && exec env LLM_WEB_PORT="$want" ../_build/native/debug/build/web/cmd/server/server.exe) \
     >"$port_file" 2>&1 &
   server_pid=$!
   local bound=""

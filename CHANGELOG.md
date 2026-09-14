@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **The `web/` half is no longer a module of its own.** The library, the two
+  CLIs, `bench/` and `web/` are now one module behind the root `moon.mod`; the
+  `web/` manifest is gone. The split existed for one reason: the library pinned
+  `moonbitlang/async` 0.20.1 while Rabbita needed 0.21.x, and one workspace can
+  only hold one version. The library has since moved to 0.21.3, so that reason
+  is gone. What is kept is the data boundary: `web/` still consumes `bench`'s
+  exported `data.json` instead of calling into the library, so the statistics
+  stay a single implementation. Commands that changed: `make check` covers both
+  targets from the one module, `make test` runs the 85 unit tests in one pass
+  (was 69 + 16), and `make ci` is two phases — check + tests, then
+  smoke ∥ api ∥ web.
+
+### Changed
+
 - **`conglinyizhi/precss` 0.1.1 → 0.1.3**, and it turns out 0.1.1 was doing arithmetic
   in `calc()` / `min()` and in multi-value properties by evaluating the expression
   instead of passing it through: `min(100% - 2rem, 1100px)` came out as

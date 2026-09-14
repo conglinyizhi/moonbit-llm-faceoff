@@ -100,7 +100,7 @@ cleanup() {
 # 而所有探针都是在 timeout 下跑的——超时那几次就把服务端和 chrome 留成孤儿了
 trap cleanup EXIT INT TERM HUP
 
-server_bin="$root/web/_build/native/debug/build/cmd/server/server.exe"
+server_bin="$root/_build/native/debug/build/web/cmd/server/server.exe"
 
 # 假端点：复用 web-e2e 那套 build_mbtx（先 build 再复制成独立名字，否则 $! 拿到的是
 # moon 包装进程，kill 不掉真正的服务）
@@ -111,7 +111,7 @@ if [ ! -x "$root/$MOCK_BIN" ]; then
     { echo "假端点编译失败" >&2; exit 2; }
 fi
 mock_bin="$root/$MOCK_BIN"
-[ -x "$server_bin" ] || { echo "先建服务端：cd web && moon build cmd/server --target native" >&2; exit 2; }
+[ -x "$server_bin" ] || { echo "先建服务端：moon build web/cmd/server --target native" >&2; exit 2; }
 
 mkdir -p "$tmp/home" "$tmp/cases"
 cp -n "$root"/web/cases/*.jsonl "$tmp/cases/" 2>/dev/null || true
@@ -127,7 +127,7 @@ mock_port=$(cat "$tmp/mock.port")
 # 服务端也要重建：页面读的是当前源码，服务端要是旧二进制，新页面去解旧 JSON
 # 就会报 Missing field（踩过一次，排查了半天）
 echo "==> 重建服务端与页面" >&2
-(cd "$root/web" && MOON_CC=gcc moon build cmd/server --target native >/dev/null 2>&1) || {
+(cd "$root" && MOON_CC=gcc moon build web/cmd/server --target native >/dev/null 2>&1) || {
   echo "服务端构建失败" >&2; exit 1; }
 "$root/scripts/build-web.sh" >/dev/null 2>&1 || \
   (cd "$root" && MOON_CC=gcc moon run --target native scripts/build-web.mbtx >/dev/null 2>&1) || {

@@ -20,7 +20,7 @@ export MOON_CC=gcc
 
 ```bash
 make                # list every target
-make ci             # deps, type check, unit tests, smoke, build the page
+make ci             # two phases: check + unit tests; then smoke ∥ api ∥ web
 make e2e            # the browser test as well (needs chromium, slow)
 make demo           # ask a question, then benchmark two models — no API key
 ```
@@ -29,14 +29,15 @@ Those are thin wrappers over the raw commands, which you can also run directly:
 
 ```bash
 moon check --target native
+moon check --target js
 moon test --target native
 moon run --target native scripts/smoke.mbtx
 bash scripts/web-e2e.sh
 moon run --target native scripts/build-web.mbtx
 ```
 
-The first four each start their own mock endpoint, so none of them need a key or
-network access.
+The test and end-to-end commands each start their own mock endpoint, so none of
+them need a key or network access.
 
 `scripts/real-gateway.mbtx` is the exception, and it is the one you do not run by
 reflex: it talks to a **real** endpoint, needs `MOONLLM_BASE_URL`,
@@ -51,14 +52,13 @@ gateway, not to check a change.
 the default target is wasm, which cannot open a socket. Keeping the test path on
 the same toolchain as the code is the whole point.
 
-**Two modules, on purpose.** The root module and `web/` are separate MoonBit
-modules, and `web/` deliberately does not depend on the root. The reason is a
-version conflict: the library pins `moonbitlang/async` 0.20.1 while Rabbita
-requires 0.21.x, and one workspace can only hold one version of a dependency.
-`web/` therefore consumes `bench`'s exported `data.json` rather than calling
-`bench` directly, so there is still only one implementation of the statistics.
-Merging the modules means upgrading the library's `async` first — that is a real
-change with its own risks, not a cleanup.
+**One module, with `web/` off the library's API.** The library, the CLIs, the
+harness and the page are one MoonBit module behind the root `moon.mod`. `web/`
+deliberately does not call into the library: it consumes `bench`'s exported
+`data.json` instead. That keeps the statistics in one implementation. The page
+used to live in its own module because the library pinned `moonbitlang/async`
+0.20.1 while Rabbita requires 0.21.x and one workspace can only hold one
+version; the library is on 0.21.3 now, so that split is history.
 
 **`.mbti` files are generated.** Run `moon info` and read the diff; never edit
 them by hand. `moon info && moon fmt` before committing is the habit. If nothing
