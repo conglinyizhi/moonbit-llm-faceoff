@@ -476,30 +476,54 @@ async fn import_case_set(
     Some(obj) => obj
     None => return
   }
+  // 两种来路：path 是「服务端自己去读某个路径」（命令行式用法），text 是页面把
+  // 文件内容直接送上来（浏览器里选的文件，服务端看不到它）。页面走后者
   let path = str_field(obj, "path").trim(chars=" \t\r\n").to_owned()
-  if path == "" {
-    send_text(conn, 400, "body needs a `path`")
+  let inline = str_field(obj, "text")
+  let source = if path != "" {
+    path
+  } else if inline != "" {
+    "（浏览器里选的文件）"
+  } else {
+    ""
+  }
+  let text = if path != "" {
+    if !(@fs.exists(path) catch { _ => false }) {
+      send_text(conn, 404, "no such file: " + path)
+      return
+    }
+    // 别拿它当通用文件读取器：只收文本文件，且有大小上限
+    let size = @fs.file_size(path) catch { _ => -1L }
+    if size < 0L {
+      send_text(conn, 500, "cannot stat: " + path)
+      return
+    }
+    if size > max_import_bytes {
+      send_text(
+        conn,
+        400,
+        "file is too large (\{size} bytes, limit \{max_import_bytes})",
+      )
+      return
+    }
+    read_text(path)
+  } else if inline != "" {
+    if inline.length().to_int64() > max_import_bytes {
+      send_text(
+        conn,
+        400,
+        "text is too large (\{inline.length()} chars, limit \{max_import_bytes})",
+      )
+      return
+    }
+    inline
+  } else {
+    ""
+  }
+  if source == "" {
+    send_text(conn, 400, "body needs a path or text")
     return
   }
-  if !(@fs.exists(path) catch { _ => false }) {
-    send_text(conn, 404, "no such file: " + path)
-    return
-  }
-  // 别拿它当通用文件读取器：只收文本文件，且有大小上限
-  let size = @fs.file_size(path) catch { _ => -1L }
-  if size < 0L {
-    send_text(conn, 500, "cannot stat: " + path)
-    return
-  }
-  if size > max_import_bytes {
-    send_text(
-      conn,
-      400,
-      "file is too large (\{size} bytes, limit \{max_import_bytes})",
-    )
-    return
-  }
-  let text = read_text(path)
   if text == "" {
     send_text(conn, 400, "file is empty or not readable as UTF-8 text")
     return
@@ -541,14 +565,16 @@ async fn import_case_set(
     return
   }
   write_text(case_set_path(config.cases_dir, name), serialize_case_set(cases))
-  note("case set '\{name}' imported from \{path} (\{cases.length()} case(s))")
+  note(
+    "case set '\{name}' imported from \{source} (\{cases.length()} case(s))",
+  )
   send_json(
     conn,
     200,
     Json::object({
       "name": Json::string(name),
       "count": Json::number(cases.length().to_double()),
-      "source": Json::string(path),
+      "source": Json::string(source),
       "sets": Json::array(case_sets(config)),
       "defaultCaseSet": Json::string(default_case_set(config)),
     }),
