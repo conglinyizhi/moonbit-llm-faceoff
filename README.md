@@ -620,12 +620,12 @@ web/runs/<id>/
 | `LLM_WEB_CASES_DIR` | `cases` — one `<name>.jsonl` per case set |
 | `LLM_WEB_CASES` | `../bench/cases.example.jsonl` — only a seed for `cases/default.jsonl` |
 | `LLM_WEB_PRESETS` | `presets.json` |
-| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` — the default menu; a run may name any model |
+| `LLM_WEB_MODELS` | — (no menu; type model ids in the box instead) |
 | `LLM_WEB_SYSTEM` | a system prompt to prefill the run-level box with. Set it once and every run starts from it (the page shows it, so you can still change it per run) |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
 | `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
-| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | — (the page asks for one) |
 
 ### Static report
 

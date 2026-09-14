@@ -44,6 +44,10 @@ struct Meta {
   defaults : Defaults
   hasKey : Bool
   baseUrl : String
+  /// 网关地址是配的还是没有
+  baseUrlConfigured : Bool
+  /// LLM_WEB_MODELS 没设时，模型表是编出来占位的
+  modelsConfigured : Bool
 } derive(Eq, FromJson)
 
 ///|
@@ -2372,7 +2376,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         param_row(model, emit),
         parallel_row(model, emit),
         confirm_summary(model, emit),
-        issue_lists(model),
+        issue_lists(model, emit),
         action_row(model, emit),
         if model.autorun_held {
           el("p", "notice", [
@@ -2649,55 +2653,87 @@ fn confirm_summary(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 /// 丢一条就行，渲染与拦截逻辑都不用动
 ///
 /// 返回 (错误, 警告)。
-fn run_issues(model : AppModel) -> (Array[String], Array[String]) {
-  let errors : Array[String] = []
-  let warnings : Array[String] = []
-  // 网关：空着用服务端配的那个；填了就必须像个 http(s) 地址
-  let base = model.base_url.trim(chars=" \t\r\n").to_owned()
-  let server_default = match model.meta {
-    Some(meta) => meta.baseUrl
-    None => ""
+struct Issue {
+  text : String
+  /// 点「去填」时滚过去并高亮的那个选择器
+  target : String
+} derive(Eq)
+
+///|
+fn run_issues(model : AppModel) -> (Array[Issue], Array[Issue]) {
+  let errors : Array[Issue] = []
+  let warnings : Array[Issue] = []
+  // 服务端给的值分两种：配置的，和内置兜底。字段空着 + 只剩兜底 = 谁都没配过，
+  // 按下去会去连一个根本没打算用的地址——这种要拦住，不能当「能用」放过去
+  let (configured_base, server_has_key) = match model.meta {
+    Some(meta) => (meta.baseUrlConfigured, meta.hasKey)
+    None => (false, false)
   }
+  // 网关：填了就必须像个 http(s) 地址；空着看服务端配没配
+  let base = model.base_url.trim(chars=" \t\r\n").to_owned()
   if base != "" {
     if !base.has_prefix("http://") && !base.has_prefix("https://") {
-      errors.push("网关地址要以 http:// 或 https:// 开头")
+      errors.push({ text: "网关地址要以 http:// 或 https:// 开头", target: "base-url" })
     }
-  } else if server_default == "" {
-    errors.push("没有可用的网关地址：上面填一个，或让服务端配一个")
+  } else if !configured_base {
+    errors.push({
+      text: "网关地址没填，服务端也没配：先在上面填一个",
+      target: "base-url",
+    })
   }
   // 模型：至少一个
   let models = effective_models(model)
   if models.length() == 0 {
-    errors.push("至少选一个模型")
+    errors.push({ text: "至少选一个模型", target: "extra-models" })
   } else if models.length() > max_models {
-    errors.push("最多同时对比 \{max_models} 个模型，现在有 \{models.length()} 个")
+    errors.push({
+      text: "最多同时对比 \{max_models} 个模型，现在有 \{models.length()} 个",
+      target: "extra-models",
+    })
+  }
+
+  // 密钥：本地网关常常不要填，但一个都没有时先说一句
+  if model.api_key.trim(chars=" \t\r\n") == "" && !server_has_key {
+    warnings.push({ text: "没填 API key：需要鉴权的网关会回 401", target: "api-key" })
   }
   // 跑什么：勾了用例，或者填了临时提示词
   if model.uses_prompt() {
     if model.prompt.trim(chars=" \t\r\n") == "" {
-      errors.push("临时提示词是空的")
+      errors.push({ text: "临时提示词是空的", target: "prompt" })
     }
   } else if model.selected_cases.length() == 0 {
-    errors.push("测试集里一条用例都没勾，临时提示词也是空的")
+    errors.push({ text: "测试集里一条用例都没勾，临时提示词也是空的", target: "case-set" })
   }
   // 橙线：勾了覆盖、但文本框空着——这次跑起来其实不会覆盖任何东西
   if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
-    warnings.push("勾了覆盖测试集内的 System Prompt，但文本框是空的，这次不会生效")
+    warnings.push({
+      text: "勾了覆盖测试集内的 System Prompt，但文本框是空的，这次不会生效",
+      target: "system",
+    })
   }
   (errors, warnings)
 }
 
 ///|
 /// 把两条总线渲染成两个无序列表：红的在上，橙的在下
-fn issue_lists(model : AppModel) -> @html.Html {
+fn issue_lists(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let (errors, warnings) = run_issues(model)
-  let items = fn(class_ : String, title : String, list : Array[String]) {
+  let items = fn(class_ : String, title : String, list : Array[Issue]) {
     if list.length() == 0 {
       return @html.fragment([])
     }
     el("ul", class_, [
       el("li", "issue-title", [txt(title)]),
-      ..list.map(fn(text) { el("li", "", [txt(text)]) }),
+      ..list.map(fn(issue) {
+        el("li", "issue-row", [
+          el("span", "issue-text", [txt(issue.text)]),
+          @html.button(
+            class="link-btn issue-locate",
+            on_click=emit(Msg::Spot(issue.target)),
+            [txt("去填")],
+          ),
+        ])
+      }),
     ])
   }
   el("div", "issues", [
@@ -2787,7 +2823,7 @@ fn gateway_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let base_hint = match model.meta {
     Some(meta) =>
       if meta.baseUrl == "" {
-        ""
+        "例如 https://your-gateway.example/v1"
       } else {
         "留空用服务端的：" + meta.baseUrl
       }

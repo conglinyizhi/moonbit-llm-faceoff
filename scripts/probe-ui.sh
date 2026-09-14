@@ -46,6 +46,7 @@ seed_repeats=1
 delay=0.05
 system_text=""
 keep=0
+no_config=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -53,7 +54,10 @@ while [ $# -gt 0 ]; do
     --wait) wait_ms="$2"; shift 2 ;;
     --script-wait) script_wait="$2"; shift 2 ;;
     --shot) shot="$2"; shift 2 ;;
-    --seed) seed=1; shift ;;
+    --no-config)
+    no_config=1
+    shift ;;
+  --seed) seed=1; shift ;;
     --seed-repeats) seed_repeats="$2"; shift 2 ;;
     --delay) delay="$2"; shift 2 ;;
     --system) system_text="$2"; shift 2 ;;
@@ -116,11 +120,26 @@ for _ in $(seq 1 200); do [ -s "$tmp/mock.port" ] && break; sleep 0.05; done
 mock_port=$(cat "$tmp/mock.port")
 [ -n "$mock_port" ] || { echo "假端点没起来" >&2; exit 1; }
 
+# 页面每次重建：探针要验的是当前源码，不是上次留下的 web/out
+# （这里不重建的话，探针会安安静静地验一个旧 bundle——踩过）
+echo "==> 重建页面" >&2
+"$root/scripts/build-web.sh" >/dev/null 2>&1 || \
+  (cd "$root" && MOON_CC=gcc moon run --target native scripts/build-web.mbtx >/dev/null 2>&1) || {
+    echo "页面构建失败" >&2; exit 1; }
+
+# --no-config：服务端什么都不配。用来复现「字段空着、服务端也没配」那一类现场；
+# 空字符串与不设置得当作同一件事（服务端那侧也是这么判的）
+if [ "$no_config" = "1" ]; then
+  gw_env=""; key_env=""; models_env=""
+else
+  gw_env="http://127.0.0.1:$mock_port/v1"; key_env="test-key"; models_env="mock-a,mock-b"
+fi
+
 (
   cd "$root/web" && exec env \
-    MOONLLM_BASE_URL="http://127.0.0.1:$mock_port/v1" \
-    MOONLLM_API_KEY="test-key" \
-    LLM_WEB_MODELS="mock-a,mock-b" \
+    MOONLLM_BASE_URL="$gw_env" \
+    MOONLLM_API_KEY="$key_env" \
+    LLM_WEB_MODELS="$models_env" \
     LLM_WEB_PORT=0 \
     LLM_WEB_WORK="$tmp/runs" \
     LLM_WEB_CASES_DIR="$tmp/cases" \

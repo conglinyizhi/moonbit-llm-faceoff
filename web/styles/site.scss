@@ -2190,6 +2190,41 @@ button.ghost {
     }
   }
 
+  // 每条提示一行：文字在左、去填在右。按钮本身很矮，别把行高撑开
+  .issue-row {
+    align-items: baseline;
+    display: flex;
+    gap: 0.6rem;
+    justify-content: space-between;
+    padding-left: 0;
+
+    &::before {
+      content: none;
+    }
+  }
+
+  .issue-text {
+    padding-left: 1rem;
+    position: relative;
+
+    &::before {
+      content: "・";
+      left: 0;
+      position: absolute;
+    }
+  }
+
+  .issue-locate {
+    color: inherit;
+    flex: none;
+    font-size: 0.78rem;
+    opacity: 0.75;
+
+    &:hover {
+      opacity: 1;
+    }
+  }
+
   .issue-title {
     color: $title;
     padding-left: 0;

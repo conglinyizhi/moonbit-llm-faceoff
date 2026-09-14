@@ -455,6 +455,31 @@ echo "$sprobe" | grep -q '"dead":\[\]' ||
   fail "这些「调整」点了没反应：$sprobe"
 echo "ok: 开始前确认的每一个「调整」都能定位（$(echo "$sprobe" | sed -n 's/.*"rows":\([0-9]*\).*/\1/p') 个）"
 
+echo "==> 配置有问题时要报出来，而且每条都能点「去填」"
+# 全部取消勾选 → 该报「至少选一个模型」这条红线
+issue_probe='(async () => {
+  document.querySelectorAll("input[id^=model-]").forEach((b) => { if (b.checked) { b.click(); } });
+  await new Promise((r) => setTimeout(r, 400));
+  const rows = Array.from(document.querySelectorAll(".issue-row"));
+  const first = document.querySelector(".issue-locate");
+  if (first) {
+    first.click();
+    await new Promise((r) => setTimeout(r, 600));
+  }
+  return {
+    reds: rows.map((r) => r.querySelector(".issue-text").textContent.trim()),
+    allHaveBtn: rows.length > 0 && rows.every((r) => !!r.querySelector(".issue-locate")),
+    spotted: Array.from(document.querySelectorAll(".spot")).map((e) => e.id || e.className),
+    startCls: document.querySelector("[data-name=start-run-btn]").className,
+  };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/issue.html" "$issue_probe" 2000 "$DUMP_READY_FORM"
+iprobe=$(grep -o 'SCRIPT .*' "$tmp/issue.html.err" | sed 's/^SCRIPT //')
+echo "$iprobe" | grep -q '"allHaveBtn":true' || fail "红线没有「去填」按钮：$iprobe"
+echo "$iprobe" | grep -q '"spotted":\["extra-models"\]' || fail "点了「去填」没有定位到模型输入框：$iprobe"
+echo "$iprobe" | grep -q "blocked" || fail "有红线时开始按钮没有被拦住：$iprobe"
+echo "ok: 配置红线会报出来、带「去填」、点下去能定位、按钮被拦"
+
 echo "==> 用例多的时候默认只露两行"
 # 真实规模（几十条）下，勾选区是整页最吵的一块，所以默认收成两行。
 # 默认集只有 6 条、碰不到阈值，这里造一套 24 条的集来盖：默认收起、

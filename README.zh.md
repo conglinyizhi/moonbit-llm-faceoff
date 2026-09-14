@@ -542,7 +542,7 @@ web/runs/<id>/
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
 | `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
-| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | — (the page asks for one) |
 
 ### 静态报告
 
