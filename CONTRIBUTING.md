@@ -20,7 +20,7 @@ export MOON_CC=gcc
 
 ```bash
 make                # list every target
-make ci             # two phases: check + unit tests; then smoke ∥ api ∥ web
+make ci             # fmt, then check + unit tests; then smoke ∥ api ∥ web
 make e2e            # the browser test as well (needs chromium, slow)
 make demo           # ask a question, then benchmark two models — no API key
 ```

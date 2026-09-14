@@ -11,7 +11,7 @@ needs before touching it. `CONTRIBUTING.md` has the same rules aimed at humans.
 the targets, and the Makefile sets `MOON_CC` for you.
 
 ```bash
-make ci                       # two phases: check + tests; then smoke ∥ api ∥ web
+make ci                       # fmt, then check + tests; then smoke ∥ api ∥ web
 make e2e                      # add the browser test (real Chromium; slow)
 make serve                    # one-shot: build the page, then serve it from web/
 make dev                      # same, but rebuild on change (page → page; server → restart)

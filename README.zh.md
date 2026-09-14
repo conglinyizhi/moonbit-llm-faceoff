@@ -633,7 +633,7 @@ println(@bench.format_summaries(summaries))
 各 target 只是脚本的薄封装，两边不会跑偏。
 
 ```bash
-make ci        # 两段：check + 单测，然后 smoke ∥ api ∥ web
+make ci        # 先格式检查，再 check + 单测，然后 smoke ∥ api ∥ web
 make e2e       # 再加上浏览器测试——需要 chromium，比较慢
 make           # 列出全部 target
 ```
@@ -641,6 +641,7 @@ make           # 列出全部 target
 底下实际执行的是：
 
 ```bash
+moon fmt --check               # 格式，以工具链的规矩为准
 moon test --target native      # 85 个单测，不联网
 moon run --target native scripts/smoke.mbtx   # 命令行端到端，对着本地假端点
 moon run --target native scripts/server-api.mbtx   # 服务端 HTTP 契约，含密钥处理

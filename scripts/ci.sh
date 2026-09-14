@@ -43,7 +43,14 @@ run_lane() {
 }
 
 start=$(date +%s)
-echo "== 两段：模块检查/测试（native + js）→ 端到端（smoke∥api∥web）"
+echo "== 前级：格式检查；之后两段：模块检查/测试（native + js）→ 端到端（smoke∥api∥web）"
+
+# 前级：格式检查。它最便宜（两三秒），失败原因也最直白，所以放在最前面：
+# 格式没过就不必再花时间编译和跑测试。修法就是跑一次 make fmt
+if ! moon fmt --check; then
+  printf '=== 格式检查未通过：跑一次 make fmt\n'
+  exit 1
+fi
 
 # 一个模块，一条通道：check 两种目标 + 单测都写在同一把 _build 锁上，
 # 拆开并行只会排队，还会把输出搅在一起

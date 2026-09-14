@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `make ci` runs `moon fmt --check` before anything else, so a formatting
+  deviation fails in seconds instead of after the build. The Windows job checks
+  formatting too.
+
 ## [0.1.0] - 2026-09-14
 
 First release: the library, the two CLIs, the harness and the web half, in one

@@ -99,6 +99,13 @@ jobs:
           moon update
           exit $LASTEXITCODE
 
+      # 最便宜的一步放最前面：格式不过就不必跑后面的单测与两个套件
+      - name: Formatting
+        shell: pwsh
+        run: |
+          moon fmt --check
+          exit $LASTEXITCODE
+
       - name: Unit tests
         shell: pwsh
         run: |

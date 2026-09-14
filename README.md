@@ -751,7 +751,7 @@ and it is the same single command you can run locally. The targets are thin
 wrappers over the scripts, so the two cannot drift.
 
 ```bash
-make ci        # two phases: check + unit tests, then smoke ∥ api ∥ web
+make ci        # fmt first, then check + unit tests, then smoke ∥ api ∥ web
 make e2e       # the browser test as well — needs chromium, and it is slow
 make           # list every target
 ```
@@ -759,6 +759,7 @@ make           # list every target
 Underneath:
 
 ```bash
+moon fmt --check               # formatting, as the toolchain defines it
 moon test --target native      # 85 unit tests, no network
 moon run --target native scripts/smoke.mbtx   # CLI end-to-end against a local mock endpoint
 moon run --target native scripts/server-api.mbtx   # server HTTP contract, incl. key handling

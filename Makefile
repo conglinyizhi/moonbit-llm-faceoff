@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web serve dev serve-demo real-gateway install uninstall fmt ci clean
+.PHONY: help deps check test fmt-check smoke api e2e demo web serve dev serve-demo real-gateway install uninstall fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -33,6 +33,11 @@ check:  ## type-check everything: native (library, CLIs, server) and js (the pag
 
 test:  ## unit tests
 	$(MOON) test --target native
+
+# 格式不是个人口味问题：moon fmt 的规矩由工具链定，本地跑一次就一致。
+# 检查失败时会把差异打出来（很难看，但一眼知道该跑 make fmt）
+fmt-check:  ## verify formatting (moon fmt --check)
+	$(MOON) fmt --check
 
 smoke:  ## the CLIs end to end, against a local mock endpoint
 	$(MOON) run --target native scripts/smoke.mbtx
