@@ -699,6 +699,11 @@ fn main {
   // 所以这层名字在 DOM 上补，与渲染、状态都无关。放在 mount 之前与之后都行，
   // 它自己会等 body 就绪、并用 MutationObserver 跟上重渲染
   deploy_data_names()
+  // 弹窗打开时锁住背后那页的滚动。同样用 MutationObserver 看 DOM，
+  // 弹窗将来多一个也自动适用
+  install_scroll_lock()
+  // 模型输入框里按回车 = 点「识别」（Rabbita 的 input 没有 on_keydown，见该文件）
+  install_enter_to_identify()
   // 注意：rabbita 的 mount 走的是 document.getElementById(id)，参数是裸 id，
   // 不是 CSS 选择器——传 "#app" 会查不到元素并在 unwrap 处 panic。
   app().mount("app")
