@@ -268,9 +268,13 @@ fn toggle_model(model : AppModel, id : String) -> AppModel {
     return { ..model, preset_applied: false, selected_models: next }
   }
   // 勾满之后再勾一个新的：把最早那个摘掉（数组是按点击顺序追加的）。
-  // 用户看到的是「勾第三个，第一个自己弹掉」——这比默默拒绝更好懂
+  // 用户看到的是「勾第三个，第一个自己弹掉」——这比默默拒绝更好懂。
+  //
+  // 起点是「长度 - max_models」（保留最后 max_models 个），不是直接从下标
+  // max_models 开始：后者在队列长 3 时只会留下 1 个（把最早两个一起弹掉）
   let kept : Array[String] = []
-  for i = max_models; i < next.length(); i = i + 1 {
+  let start = next.length() - max_models
+  for i = start; i < next.length(); i = i + 1 {
     kept.push(next[i])
   }
   { ..model, preset_applied: false, selected_models: kept }
