@@ -96,7 +96,9 @@ cleanup() {
     rm -rf "$tmp" 2>/dev/null || true
   fi
 }
-trap cleanup EXIT
+# INT/TERM 也要收：bash 默认被 SIGTERM 打死时不跑 EXIT trap，
+# 而所有探针都是在 timeout 下跑的——超时那几次就把服务端和 chrome 留成孤儿了
+trap cleanup EXIT INT TERM HUP
 
 server_bin="$root/web/_build/native/debug/build/cmd/server/server.exe"
 
@@ -122,7 +124,11 @@ mock_port=$(cat "$tmp/mock.port")
 
 # 页面每次重建：探针要验的是当前源码，不是上次留下的 web/out
 # （这里不重建的话，探针会安安静静地验一个旧 bundle——踩过）
-echo "==> 重建页面" >&2
+# 服务端也要重建：页面读的是当前源码，服务端要是旧二进制，新页面去解旧 JSON
+# 就会报 Missing field（踩过一次，排查了半天）
+echo "==> 重建服务端与页面" >&2
+(cd "$root/web" && MOON_CC=gcc moon build cmd/server --target native >/dev/null 2>&1) || {
+  echo "服务端构建失败" >&2; exit 1; }
 "$root/scripts/build-web.sh" >/dev/null 2>&1 || \
   (cd "$root" && MOON_CC=gcc moon run --target native scripts/build-web.mbtx >/dev/null 2>&1) || {
     echo "页面构建失败" >&2; exit 1; }

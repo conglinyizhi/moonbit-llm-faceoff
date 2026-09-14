@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web serve real-gateway install uninstall fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web serve dev real-gateway install uninstall fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -78,11 +78,12 @@ web:  ## build the page and the static report
 
 # 服务端必须从 web/ 启动：out/、runs/、cases/、presets.json 都是按工作目录解析的，
 # 从仓库根起会「/api 通、页面全 404」。这个目标把 cd 做掉，省得每次记。
-serve:  ## build the page, then start the server from web/ (Ctrl-C to stop)
-	$(MOON) run --target native scripts/build-web.mbtx
-	@echo
-	@echo "打开 http://127.0.0.1:$${LLM_WEB_PORT:-8137}/  （Ctrl-C 停）"
-	cd web && ./_build/native/debug/build/cmd/server/server.exe
+# 开发服务器：先构建（服务端 + 页面），再盯着源码改——页面改动只重建页面，
+# 服务端改动才重启（并尽量沿用端口，免得浏览器标签失效）
+serve:  ## dev server: build, serve, rebuild on change (Ctrl-C to stop)
+	bash scripts/dev.sh
+
+dev: serve  ## alias for serve
 
 fmt:  ## format, and refresh the generated .mbti
 	$(MOON) fmt
