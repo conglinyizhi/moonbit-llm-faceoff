@@ -365,6 +365,8 @@ fn set_row(meta : Meta, model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   el("div", "set-row", [
     @html.select(
       class="set-select",
+      // 「开始前确认」那一行的「调整」要定位到这里
+      id="case-set",
       on_change=emit.map(fn(name) { SelectCaseSet(name) }),
       options,
     ),

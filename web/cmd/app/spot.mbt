@@ -14,7 +14,10 @@
 /// 也没必要让每次输入都触发一遍 vdom diff。
 extern "js" fn spot_field(selector : String) -> Unit =
   #|(selector) => {
-  #|  const el = document.querySelector(selector)
+  #|  // 两种写法都收：裸 id（base-url）与 CSS 选择器（.parallel-row / #extra-models）。
+  #|  // 早先这里只认 id，改成 querySelector 之后裸 id 会被当成标签名查——
+  #|  // 于是十个「调整」静默失效
+  #|  const el = document.getElementById(selector) || document.querySelector(selector)
   #|  if (!el) return
   #|  el.scrollIntoView({ block: "center", behavior: "smooth" })
   #|  el.classList.add("spot")

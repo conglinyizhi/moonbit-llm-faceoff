@@ -432,6 +432,29 @@ grep -q 'e2e-preset' "$tmp/presets.json" ||
   fail "页面说存了预设，但磁盘上没有"
 echo "ok: 页面上能用测试集（编辑→保存落到磁盘）与预设（保存→出现在列表）"
 
+echo "==> 开始前确认里每个「调整」都要真的定位到东西"
+# 这条是给一个真 bug 加的：spot_field 从 getElementById 改成 querySelector 之后，
+# 传裸 id 的那十个「调整」被当成标签名查，静默什么都不做（只有传 CSS 选择器的
+# 两个还能亮）。逐个点过去，谁没反应就报谁的名字
+spot_probe='(async () => {
+  const rows = Array.from(document.querySelectorAll(".confirm-row"));
+  const dead = [];
+  for (const row of rows) {
+    const label = row.querySelector(".confirm-label").textContent.trim();
+    row.querySelector("button").click();
+    await new Promise((r) => setTimeout(r, 260));
+    if (!document.querySelector(".spot")) { dead.push(label); }
+    document.querySelectorAll(".spot").forEach((n) => n.classList.remove("spot"));
+    await new Promise((r) => setTimeout(r, 90));
+  }
+  return { rows: rows.length, dead };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/spot.html" "$spot_probe" 2000 "$DUMP_READY_FORM"
+sprobe=$(grep -o 'SCRIPT .*' "$tmp/spot.html.err" | sed 's/^SCRIPT //')
+echo "$sprobe" | grep -q '"dead":\[\]' ||
+  fail "这些「调整」点了没反应：$sprobe"
+echo "ok: 开始前确认的每一个「调整」都能定位（$(echo "$sprobe" | sed -n 's/.*"rows":\([0-9]*\).*/\1/p') 个）"
+
 echo "==> 用例多的时候默认只露两行"
 # 真实规模（几十条）下，勾选区是整页最吵的一块，所以默认收成两行。
 # 默认集只有 6 条、碰不到阈值，这里造一套 24 条的集来盖：默认收起、
