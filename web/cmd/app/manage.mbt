@@ -303,7 +303,8 @@ fn case_panel(
 ///|
 /// 临时提示词那一页：一条 user prompt，填了就算启用。
 fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  let filled = model.uses_prompt()
+  // 「填了」指框里有字，不是指切到了这一页：空着就会去跑选中的测试集
+  let filled = model.prompt.trim(chars=" \t\r\n") != ""
   el("div", "prompt-tab", [
     @html.textarea(
       class="prompt-input",
@@ -314,14 +315,18 @@ fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       on_input=emit.map(fn(text) { PromptChanged(text) }),
       ([] : Array[@html.Html]),
     ),
-    el("p", if filled { "notice" } else { "hint" }, [
-      txt(
-        if filled {
-          "填了内容 = 这次只跑这一条：模型、system 与参数照用，上面那套测试集不参与"
-        } else {
-          "留空将会运行测试集。这里填上内容就只跑这一条"
-        },
-      ),
+    // 只用一个类（.hint）：以前在 .hint / .notice 之间切类名，两边边距不同，块会跟着
+    // 跳。空着时那段话上黄：它是「什么都不填就会去跑测试集」的提醒
+    el("p", "hint", [
+      if filled {
+        txt("已经填写内容，测试集选项将被忽略；测试中将会发起这一条消息作为 Prompt 的请求")
+      } else {
+        el("span", "hint-warn", [
+          txt(
+            "当前文本框为空，将会运行选中的测试集；填写内容后会将这里的文本视为完整的一条 Prompt 发起测试",
+          ),
+        ])
+      },
     ]),
   ])
 }
