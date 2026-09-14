@@ -244,11 +244,27 @@ async fn build_mbtx(src : String, out_base : String) -> String? {
       leaf = part.to_owned()
     }
   }
-  let single_exe = dir + "/" + leaf + "/native/debug/build/single/single.exe"
-  let single = if (@fs.exists(single_exe) catch { _ => false }) {
-    single_exe
-  } else {
-    dir + "/" + leaf + "/native/debug/build/single/single"
+  // 产物落在哪一层跟平台有关：Linux 上 target-dir 之下还会再拼一层源文件名，
+  // Windows 上不拼（CI 日志里的路径就没有那一层）。四个候选挨个试，别猜平台
+  let candidates : Array[String] = [
+    dir + "/" + leaf + "/native/debug/build/single/single.exe",
+    dir + "/" + leaf + "/native/debug/build/single/single",
+    dir + "/native/debug/build/single/single.exe",
+    dir + "/native/debug/build/single/single",
+  ]
+  let mut single = ""
+  for candidate in candidates {
+    if (@fs.exists(candidate) catch { _ => false }) {
+      single = candidate
+      break
+    }
+  }
+  if single == "" {
+    @stdio.stderr.write("找不到构建产物。试过：\n") catch { _ => () }
+    for candidate in candidates {
+      @stdio.stderr.write("  " + candidate + "\n") catch { _ => () }
+    }
+    return None
   }
   // 平台怎么命名构建产物，副本就怎么命名：Windows 上必须是 .exe
   let target = if single.has_suffix(".exe") {
