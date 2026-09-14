@@ -6,12 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-14
+
 ### Changed
 
 - **The server's user data and configuration moved out of the repository:** runs and case sets default to `$XDG_DATA_HOME/faceoff`, presets to `$XDG_CONFIG_HOME/faceoff/presets.json` (`%LOCALAPPDATA%\faceoff` for all three on Windows, the XDG defaults on macOS), and `moon run --target native web/cmd/server -- --print-dirs` prints the four resolved paths. An explicit `LLM_WEB_WORK` / `LLM_WEB_CASES_DIR` / `LLM_WEB_PRESETS` still wins, and the old in-repo positions (`web/runs/`, `web/cases/`, `web/presets.json`) keep working until the new location exists, with a one-line stderr notice and the `mv` command to run.
 - `make ci` runs `moon fmt --check` before anything else, so a formatting
   deviation fails in seconds instead of after the build. The Windows job checks
   formatting too.
+- The READMEs are a front page now, and the reference detail moved into
+  `docs/cli.md`, `docs/web.md`, `docs/library.md` and `docs/testing.md`.
+
+### Fixed
+
+- **`make serve` did not build the server binary,** so a fresh checkout built the
+  page and then ran a binary that did not exist yet (shell exit 127).
+  `web/cmd/build` now builds the server as well.
 
 ## [0.1.0] - 2026-09-14
 

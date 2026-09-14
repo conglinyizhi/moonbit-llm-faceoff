@@ -63,3 +63,20 @@ Supporting pieces that showed up in the search and are worth knowing:
 5. **`@fs.write_file` does not create by default.** Omitting `create` resolves `create_mode` to `TruncateExisting`, so writing a new results file fails with `No such file or directory`. Needs `create_mode=@fs.CreateOrTruncate`.
 
 6. **`pub extend` noise.** `derive(Eq)`/`derive(Debug)` on public types emits `implicit_impl_as_method` warnings unless the methods are also re-exported via `pub extend`. Applied to `SseEvent`, `Settings`, `TokenUsage`, `StreamPart` and `Case`.
+
+## Re-checked 2026-09-14, with everything on one async version
+
+The survey above was made while the library and the page were still two modules on different
+`async` versions. Now that both are on `moonbitlang/async` 0.21.3, the same question has a
+sharper answer, because one module can hold only one `async`:
+
+| package | declared `async` | result |
+| --- | --- | --- |
+| `mizchi/llm` 0.3.2, the popular one at 150k downloads | 0.20.5 | **does not compile.** Its HTTP layer still does `headers[key.to_lower()]`, and the key type is now `@moonbitlang/async/http.CaseInsensitiveString`, which has no `to_lower` (11 errors) |
+| `DC-Z-lab/moonllm` 0.1.0 | 0.20.1 | compiles once `async` is raised to 0.21.3. The synchronous streaming callback described above is unchanged, so the reason it could not be the streaming path still holds |
+| `marianoguerra/llm` 0.4.1 | 0.21.3 | compiles. A different shape from the others: an LLM IR, one dialect per wire protocol, a provider registry, a transport a browser can implement |
+| `tonyfettes/openai` 0.1.1 | no transport at all | **does not compile on its own** (12 errors): `ChatCompletionChunkServiceTier` is undefined in the published 0.1.1 |
+
+`rabbita` needs `async` 0.21.x, so anything pinned to 0.20.x cannot share a module with the
+page. That is what rules the first one out, and it is a version constraint rather than a
+judgement about the library.
