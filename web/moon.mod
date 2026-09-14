@@ -19,6 +19,12 @@ preferred_target = "native"
 
 description = "Static page for the faceoff benchmark results (Rabbita SSG + precss)"
 
+readme = "README.md"
+
+repository = "https://github.com/conglinyizhi/moonbit-llm-faceoff"
+
+keywords = [ "moonbit", "rabbita", "llm", "benchmark", "report" ]
+
 import {
   "moonbit-community/rabbita@0.15.7",
   "moonbitlang/async@0.21.2",
