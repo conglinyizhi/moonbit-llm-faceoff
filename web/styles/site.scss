@@ -1409,6 +1409,70 @@ button.ghost {
 //
 // 双阴影：左上一点亮、右下压深，看起来像从面板里浮起来，而不是贴着一张描边。
 // 深色主题下这两道光都得很淡，否则会变成「发光边框」。
+// 「覆盖测试集内的 System Prompt」是点一下切换的控件，不是文本：别让拖拽把它
+// 连带选中 —— 选中之后下一次点击会变成「取消选中」而不是切换勾选框
+.check.system-override {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+// 外面那层 .issues 只是两个列表的容器：div.issues 是容器，里面两个 ul 也带
+// issues 类，所以只能用元素名限定外层。它自己的 padding / margin 会和列表的
+// 叠在一起，把卡片整体右移 14px、底下还多空一截，跟上面的行对不齐
+// （卡片自己的内边距保留，只清外层）
+div.issues {
+  margin: 0;
+  padding: 0;
+}
+
+// 这些行高和间距长得都一样，悬停一下就知道鼠标正落在哪一条上
+.issue-row:hover {
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: 0.25rem;
+}
+
+.issue-row:hover .issue-locate {
+  opacity: 1;
+}
+
+// 表单上的说明文字不是内容：拖拽选取它们只会碍事（选中之后下一次点击
+// 会变成「取消选中」而不是操作控件）。输入框里的文本该能选，所以单独放行
+.hero .field,
+.hero .picker-items,
+.hero .picker-items .check,
+.hero .parallel-option,
+.hero label.check.system-override {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.hero input,
+.hero textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+// 环境变量没给模型时那行说明：看着像禁用的 checkbox，但不碰 disabled 属性——
+// Rabbita 的 vdom diff 不会把 disabled 摘掉，开关一次元素就永久死掉（踩过）。
+// 只用 class：变淡 + 吃掉点击。注意这两条必须待在顶层：
+// 插到 .picker 里面会编译成 .picker.check-disabled（同一个元素上要同时有两个类，永不命中）
+.check-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+// 「识别」按钮跟在模型输入框右边
+.model-add {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+
+  input[type="text"] {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
+
 .modal-backdrop {
   align-items: center;
   background: rgba(3, 6, 12, 0.72);
@@ -1418,6 +1482,14 @@ button.ghost {
   padding: 4vh 1rem;
   position: fixed;
   z-index: 40;
+}
+
+// 弹窗开着时锁住后面那页：滚轮只落在弹窗里，背景不会跟着滚、
+// 也不会在弹窗滚到底之后被「传染」。
+// padding-right 补回滚动条消失让出的宽度，否则整页会横跳一下
+html.modal-open {
+  overflow: hidden;
+  padding-right: var(--scrollbar-gap, 0);
 }
 
 .modal {
@@ -1581,9 +1653,14 @@ button.ghost {
     width: 100%;
   }
 
-  .notice,
   .hint {
     margin: 0.45rem 0 0;
+  }
+
+  // 空着时那段话上黄：提醒「什么都不填就会去跑测试集」。
+  // 类名不换（只用 .hint），颜色挂在里面的 span 上——换类名会让边距跟着跳
+  .hint-warn {
+    color: $warn;
   }
 }
 
@@ -2167,6 +2244,19 @@ button.ghost {
   > .notice {
     color: $warn;
   }
+
+  // 勾选框下面那句要贴着勾选框：它顶上的 0.45rem 让它离上一行远一截。
+  // #1（后备字段那句）用同一条规则，所以拿更具体的选择器只改这一个，
+  // 而且 hint / notice 两种状态都要改——只改一边的话一勾选间距就跳
+  > p.hint,
+  > p.notice {
+    margin-top: 0;
+  }
+
+  // 「勾了却没写」后面跟的那句：只是换个字色，不加底色、不加边框、不动间距
+  .notice-bad {
+    color: $danger;
+  }
 }
 
 // 两条配置总线：红的是拦路的，橙的是提醒。都放在开始按钮上面，
@@ -2308,4 +2398,17 @@ button.primary.blocked {
 .history-dialog-more {
   display: flex;
   justify-content: center;
+}
+
+// 侧栏只铺 10 条，弹窗里这条虚线就是那道界线：往下都是侧栏没展示的。
+// 淡蓝 = $accent 的低透明度版本，比正文轻，但比普通分隔线重
+.history-dialog-divider {
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px dashed rgba(88, 166, 255, 0.45);
+  border-radius: 0.3rem;
+  color: $accent;
+  display: block;
+  font-size: 0.78rem;
+  padding: 0.5rem 0.75rem;
+  text-align: center;
 }
