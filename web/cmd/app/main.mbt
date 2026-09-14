@@ -2320,7 +2320,7 @@ fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       ([] : Array[@html.Html]),
     ),
     el("div", "hint", [
-      txt("留空就是不带 system"),
+      txt("测试集用例内，不包含 System Prompt 的测试条目，将使用这里填写的内容"),
     ]),
     // 用例级 system 与运行级 system 到底谁赢：以前是写死「用例级优先」，
     // 现在交给用户勾
@@ -2334,19 +2334,19 @@ fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       el("span", "", [txt("覆盖测试集内的 System Prompt")]),
     ]),
     el("p", if model.system_override { "notice" } else { "hint" }, [
-      txt(
-        if model.system_override {
-          // 勾了但空着要说实话：规则是空的就不发，所以上面那句会变成假的。
-          // 这是提醒（黄），不是拦路——空着照样能跑，只是不会覆盖任何东西
-          if model.system.trim(chars=" \t\r\n") == "" {
-            "勾了覆盖，但上面是空的：这次不会覆盖任何东西。填一条，或者取消勾选"
-          } else {
-            "勾上了：每个请求都发上面这条；测试集里逐条的 system 不再生效"
-          }
-        } else {
-          "不勾：测试集里逐条写的 system 优先，用例没写的才落到上面这条"
-        },
-      ),
+      if model.system_override {
+        txt("勾选：测试集里逐条写的 System Prompt 将会被忽略")
+      } else {
+        txt("不勾：测试集里逐条写的 System Prompt 优先，用例没写的才落到上面这条")
+      },
+      // 勾了但没写：这句单独标红，因为它是「你得做点什么」而不是说明
+      if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
+        el("span", "notice-bad", [
+          txt(" 请输入一些文本作为 System Prompt 否则该功能无法生效"),
+        ])
+      } else {
+        @html.fragment([])
+      },
     ]),
   ])
 }
@@ -2758,19 +2758,20 @@ fn run_issues(model : AppModel) -> (Array[Issue], Array[Issue]) {
   if model.api_key.trim(chars=" \t\r\n") == "" && !server_has_key {
     warnings.push({ text: "没填 API key：需要鉴权的网关会回 401", target: "api-key" })
   }
-  // 跑什么：勾了用例，或者填了临时提示词
-  if model.uses_prompt() {
-    if model.prompt.trim(chars=" \t\r\n") == "" {
-      errors.push({ text: "临时提示词是空的", target: "prompt" })
-    }
-  } else if model.selected_cases.length() == 0 {
+  // 跑什么：勾了用例，或者填了临时提示词。
+  //
+  // 以前这里还有一条「停在临时提示词那页但文本框是空的」的红线，但它写成了
+  // uses_prompt() && prompt 为空 —— uses_prompt() 本身就是「文本框非空」，
+  // 两个条件不可能同时成立，是死代码。空文本框的意思就是「跑测试集」
+  if !model.uses_prompt() && model.selected_cases.length() == 0 {
     errors.push({ text: "测试集里一条用例都没勾，临时提示词也是空的", target: "case-set" })
   }
   // 橙线：勾了覆盖、但文本框空着——规则是空的就不发，这次什么都不会覆盖。
   // 不拦路：空着跑照样有意义，只是这条覆盖不生效
   if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
     warnings.push({
-      text: "勾了覆盖测试集内的 System Prompt，但文本框是空的：这次不会覆盖任何东西",
+      // 与字段里那行同一套说法：总线是纯文本，红字那不适用，所以拼在一起
+      text: "勾选：测试集里逐条写的 System Prompt 将会被忽略 请输入一些文本作为 System Prompt 否则该功能无法生效",
       target: "system",
     })
   }
