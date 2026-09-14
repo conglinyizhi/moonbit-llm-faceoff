@@ -55,6 +55,23 @@ jobs:
       - name: make ci
         run: make ci
 
+      # 用户数据默认落在用户目录，且默认值不能退化回仓库内的相对路径。
+      # 断言的是「值以 faceoff/runs 结尾」，这样无论 XDG_DATA_HOME 有没有被 runner
+      # 设过都成立；真正验 Windows 映射的那条在 windows job 里。
+      - name: Default data directories
+        timeout-minutes: 5
+        run: |
+          out=$(moon run --target native web/cmd/server -- --print-dirs)
+          echo "$out"
+          case "$out" in
+            *"runs="*"faceoff/runs"*) ;;
+            *) echo "runs/ did not resolve into the user directory"; exit 1 ;;
+          esac
+          case "$out" in
+            *"presets="*"faceoff/presets.json"*) ;;
+            *) echo "presets.json did not resolve into the user directory"; exit 1 ;;
+          esac
+
   # The same scripts on Windows. This job exists because "the scripts are
   # MoonBit now, so they are cross-platform" is a claim, and a claim without a
   # runner is a guess: everything here goes through @process, @fs and @http
@@ -105,6 +122,24 @@ jobs:
         run: |
           moon fmt --check
           exit $LASTEXITCODE
+
+      # 单测把「Windows 的映射」当字符串验过（LOCALAPPDATA 存在时用 %LOCALAPPDATA%），
+      # 但真实环境只有真 Windows 上才看得见。走环境变量而不用命令行参数：参数的传递
+      # 方式不值得赌，万一没传进去服务端会起来并卡住，所以超时也兜了一层。
+      - name: Default data directories
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $env:LLM_WEB_PRINT_DIRS = "1"
+          $out = moon run --target native web/cmd/server
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Output $out
+          if ($out -notlike "*$env:LOCALAPPDATA\faceoff\runs*") {
+            Write-Error "runs/ is not under LOCALAPPDATA"; exit 1
+          }
+          if ($out -notlike "*$env:LOCALAPPDATA\faceoff\presets.json*") {
+            Write-Error "presets.json is not under LOCALAPPDATA"; exit 1
+          }
 
       - name: Unit tests
         shell: pwsh

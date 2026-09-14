@@ -1,5 +1,5 @@
 ///|
-/// 构建页面（交互页 + 静态报告），一步到位。
+/// 构建 web 这一半：页面、静态报告、服务端二进制。
 ///
 ///   cd <模块根> && moon run --target native web/cmd/build
 ///
@@ -7,11 +7,14 @@
 ///                                                              → web/out/report.html
 ///   web/cmd/app     (js)  → moon build                        → web/out/app.js
 ///   web/shell/index.html  → 复制                              → web/out/index.html
+///   web/cmd/server (native) → moon build                      → _build/.../server
+///
+/// 服务端也在这里构建：`make serve` 只跑这个入口，然后就直接执行那个二进制。少这一步，
+/// 新克隆上 `make serve` 会以「没有那个文件或目录」失败（踩过）。
 ///
 /// 构建入口放在包里而不是只放在仓库的 scripts/ 下：从 mooncakes 下载这个模块的人
-/// 手上没有 scripts/build-web.mbtx，也应该能把页面构建出来、起服务端跑起来。
-/// scripts/build-web.mbtx 只多做一件事：先用 bench 导出 data.json（那一步要用 CLI），
-/// 页面构建本身只有这一份实现。
+/// 手上没有 scripts/build-web.mbtx，也应该能一条命令把页面与服务端都准备好。
+/// scripts/build-web.mbtx 只多做一件事：先用 bench 导出 data.json（那一步要用 CLI）。
 ///
 /// 路径都相对当前目录（模块根）。out/ 特意留在 web/ 下：服务端是从 web/ 起的，
 /// 它按工作目录解析 out/、runs/、cases/、presets.json。
@@ -158,6 +161,18 @@ async fn main {
     return
   }
 
+  say("==> 编译服务端（web/cmd/server）")
+  let (srv_code, _, srv_err) = run(
+    "moon",
+    ["build", "web/cmd/server", "--target", "native"],
+    root,
+  )
+  if srv_code != 0 {
+    note(srv_err)
+    c_exit(1)
+    return
+  }
+
   say("==> 外壳")
   if !copy_file(web + "/shell/index.html", web + "/out/index.html") {
     note("拷贝外壳失败")
@@ -172,11 +187,19 @@ async fn main {
       say("  " + name)
     }
   }
+  say(
+    "  _build/.../web/cmd/server/ 下的服务端二进制（Windows 上带 .exe）",
+  )
   say("")
   say(
-    "启动（服务端要从 web/ 起，它按工作目录找 out/、runs/、cases/）：",
+    "启动（服务端要从 web/ 起，它按工作目录找 out/；数据走用户目录，见下方 --print-dirs）：",
   )
-  say("  cd web && moon run --target native web/cmd/server")
+  say(
+    "  cd web && ../_build/native/debug/build/web/cmd/server/server（Windows 上带 .exe）",
+  )
+  say(
+    "  想看数据放在哪：moon run --target native web/cmd/server -- --print-dirs",
+  )
   say(
     "  端口打印在 stdout 第一行；换端口或数据目录：LLM_WEB_PORT / LLM_WEB_WORK / LLM_WEB_CASES_DIR …",
   )

@@ -10,6 +10,7 @@ import {
   "moonbitlang/async/stdio",
   "moonbitlang/core/env",
   "moonbitlang/core/json",
+  "conglinyizhi/moonbit-llm-faceoff/web/userdirs",
   "moonbitlang/core/string",
 }
 

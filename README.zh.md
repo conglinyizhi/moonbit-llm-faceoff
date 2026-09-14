@@ -56,7 +56,7 @@ make dev            # 一样，但盯着源码：页面改了重建页面，服�
 make serve-demo     # 假端点 + 演示数据 + 页面，最快的整体一瞥
 ```
 
-两种方式都记住一条：**服务端必须以 `web/` 作为工作目录。** 它的 `out/`、`runs/`、`cases/`、`presets.json` 都按当前工作目录解析；从仓库根启动的话，`/api` 通、页面一律 404。`make serve` 替你做了那次 `cd`，不用 make 就是 `moon run --target native scripts/build-web.mbtx`、`moon build web/cmd/server --target native`，再在 `web/` 里跑服务端二进制。要连真实网关，要么启动前导出 `MOONLLM_BASE_URL` / `MOONLLM_API_KEY`，要么干脆不配 key、**在页面上填**：它只对这一次运行生效，也不会写到磁盘。
+两种方式都记住一条：**服务端必须以 `web/` 作为工作目录。** 这条要求现在只剩下两条按当前工作目录解析的路径：静态目录 `out/` 和种子文件 `../bench/cases.example.jsonl`；runs、测试集和预设已经解析成用户目录下的绝对路径。从仓库根启动的话，`/api` 通、页面一律 404。`make serve` 替你做了那次 `cd`，不用 make 就是 `moon run --target native scripts/build-web.mbtx`、`moon build web/cmd/server --target native`，再在 `web/` 里跑服务端二进制。你的数据放在用户目录里，`moon run --target native web/cmd/server -- --print-dirs` 会把解析出来的四个路径打出来就退出。要连真实网关，要么启动前导出 `MOONLLM_BASE_URL` / `MOONLLM_API_KEY`，要么干脆不配 key、**在页面上填**：它只对这一次运行生效，也不会写到磁盘。
 
 ### 4. 换成真实网关，跑一次对比
 
@@ -83,15 +83,17 @@ moon run --target native scripts/real-gateway.mbtx                    # → docs
 
 ### 5. 产生的文件都在哪
 
-服务端按自己的工作目录（`web/`）解析这几个路径：
+运行记录、测试集和预设都不在仓库里，放在用户目录下。Linux 上是 `~/.local/share/faceoff/` 和 `~/.config/faceoff/`；Windows 上三者都在 `%LOCALAPPDATA%\faceoff\` 下；macOS 走 XDG 那套默认值。`moon run --target native web/cmd/server -- --print-dirs` 会按服务端的解析结果把那四个路径打出来就退出，不建目录，也不起服务。
 
 | 路径 | 内容 |
 | --- | --- |
-| `web/cases/default.jsonl` | 自动生成的测试集：服务端首次启动、用例目录为空时，从 `bench/cases.example.jsonl` 播种；你自己的集也放这里，gitignore |
-| `web/presets.json` | 预设：模型加参数，gitignore |
-| `web/runs/` | 运行记录，一次运行一个目录，gitignore |
-| `web/data.json` | 从一次运行导出的页面数据，gitignore |
-| `web/out/` | 页面产物与静态报告，由 `scripts/build-web.mbtx` 产出 |
+| `$XDG_DATA_HOME/faceoff/cases/default.jsonl` | 自动生成的测试集：服务端首次启动、用例目录为空时，从 `bench/cases.example.jsonl` 播种；你自己的集也放这里 |
+| `$XDG_CONFIG_HOME/faceoff/presets.json` | 预设：模型加参数 |
+| `$XDG_DATA_HOME/faceoff/runs/` | 运行记录，一次运行一个目录 |
+| `web/data.json` | 从一次运行导出的页面数据；仓库内的构建产物，gitignore |
+| `web/out/` | 页面产物与静态报告，由 `scripts/build-web.mbtx` 产出；仓库内的构建产物，gitignore |
+
+`web/cases/`、`web/presets.json`、`web/runs/` 是搬家前的位置。检出里还留着其中某个、而新位置还没就时，服务端继续用旧的，启动时在 stderr 提示一行并给出照抄就能用的 `mv` 命令，它自己不动你的文件。
 
 ### 已知边界
 

@@ -7,12 +7,12 @@ The page runs a case set against several OpenAI-compatible models, shows the ans
 ```bash
 moon run --target native scripts/build-web.mbtx    # the page into web/out/
 moon build web/cmd/server --target native          # the server binary
-cd web            # the server resolves out/, runs/ and the case file relative to its working directory, so run it here
+cd web            # out/ and ../bench/cases.example.jsonl are resolved relative to the working directory, so run it here
 MOONLLM_API_KEY=... MOONLLM_BASE_URL=https://api.modelbest.cn/v1 LLM_WEB_MODELS=MiniCPM5-1B,MiniCPM5-2B \
   ../_build/native/debug/build/web/cmd/server/server.exe   # → http://127.0.0.1:8137/
 ```
 
-`make serve` does the build and that `cd` for you, `make dev` does the same while watching the sources (a page change rebuilds the page, a server change restarts it), and `make serve-demo` starts a mock endpoint plus demo data plus the page for a quick look. Started from the repository root instead, the server answers `/api/meta` and then 404s every page request, because `out/`, `runs/`, `cases/` and `presets.json` are all resolved relative to its working directory.
+`make serve` does the build and that `cd` for you, `make dev` does the same while watching the sources (a page change rebuilds the page, a server change restarts it), and `make serve-demo` starts a mock endpoint plus demo data plus the page for a quick look. Started from the repository root instead, the server answers `/api/meta` and then 404s every page request, because `out/` and the seed file `../bench/cases.example.jsonl` are still resolved relative to its working directory. Runs, case sets and presets no longer depend on it: they resolve to absolute paths under your user directories (`$XDG_DATA_HOME/faceoff` for the runs and the case sets, `$XDG_CONFIG_HOME/faceoff` for the presets), and `moon run --target native web/cmd/server -- --print-dirs` prints the four of them and exits.
 
 ## What the page does
 
@@ -22,7 +22,7 @@ From the page you can:
 - set the **gateway address and API key** for that one run (they sit at the top of the form, above the model picker), so a local `ollama` or a second provider does not need a server restart; both fields are optional and fall back to the server's environment;
 - write one **system prompt** for the run and let the cases be nothing but user prompts, with the fixed half and the varying half in separate places. A case that carries its own `system` overrides it, and 请求上下文 marks which ones did;
 - choose what to run in one panel with two tabs: a **test set** (tick the cases) or a single **临时 First User Prompt**. Typing anything into the prompt box is what selects it, there is no checkbox to forget, and both tabs say the consequence out loud: "I filled in a prompt, so this run is that one question and the test set sits out";
-- **keep your suites in the page**: the case panel switches between case sets (`web/cases/<name>.jsonl`), ticks the cases to run, and edits them in place, meaning prompt, id, and per-case `system` / `max_tokens` / `temperature` under a folded "more fields". Saving writes the file and does not touch fields it never showed. Its import box takes pasted text a line at a time, with blank lines and `#` skipped, and 追加导入 / 替换为这些行 decide whether the new lines follow the old ones or replace them; a whole set can also be **created from a plain text file** (a `.jsonl` case set works too), with the server reading the path you give it, since it is running on your machine anyway;
+- **keep your suites in the page**: the case panel switches between case sets (`$XDG_DATA_HOME/faceoff/cases/<name>.jsonl`), ticks the cases to run, and edits them in place, meaning prompt, id, and per-case `system` / `max_tokens` / `temperature` under a folded "more fields". Saving writes the file and does not touch fields it never showed. Its import box takes pasted text a line at a time, with blank lines and `#` skipped, and 追加导入 / 替换为这些行 decide whether the new lines follow the old ones or replace them; a whole set can also be **created from a plain text file** (a `.jsonl` case set works too), with the server reading the path you give it, since it is running on your machine anyway;
 - use **presets**, which live in the sidebar next to the run history: a preset covers models, test set, system prompt, gateway and the parameters, and turns a combination you keep going back to (the usual two models, three repeats, 2048 tokens) into one click instead of a retyped form;
 - watch progress, the live failure/retry/truncation counts, and a collapsible tail of the run's `stderr`. **Go back to any earlier run** from the left column, which lists every run with its time, models, scale and counters: open one to read its results (read-only, exports follow it), rerun it with exactly the parameters it ran with, or delete it;
 - **compare two runs**: tick two entries in the history and the main area becomes a comparison, including what parameters actually differ (so "I changed one thing" is visible rather than remembered), the median of every metric side by side with a Δ column, and the two runs' answers for the same case next to each other, chain of thought included. The Δ column is deliberately not coloured: the same direction is good for throughput and bad for latency, and this layer has no per-metric polarity to colour by;
@@ -34,7 +34,7 @@ From the page you can:
 - **come back to a run at any address**: the run you are looking at is in the URL fragment (`#run=<id>`), so a refresh or a link sent to someone else lands on the same run. A run still in progress shows up in the sidebar with a 看进度 button, which is the only way back if you opened something else while it ran; deleting a run asks twice, and an id that does not exist says so instead of showing an empty page;
 - export the result: copy the report as Markdown, copy a shareable URL, or download `runs.jsonl`, `data.json`, or a self-contained `report.html`.
 
-Those runs go through the same `POST /api/runs` as the workbench (with `inlineCases` + `system`), so they land in the history and can be rerun. 存成测试集 writes the current system + prompts into `web/cases/`, which is how a prompt that turned out to be interesting becomes a repeatable test.
+Those runs go through the same `POST /api/runs` as the workbench (with `inlineCases` + `system`), so they land in the history and can be rerun. 存成测试集 writes the current system + prompts into the case directory (`$XDG_DATA_HOME/faceoff/cases/`), which is how a prompt that turned out to be interesting becomes a repeatable test.
 
 A key typed into the page stays in the tab's memory, is passed to the child process through the environment rather than its command line, and is stripped out of the run's `request.json` before it is written. A key the *server* holds is never handed to the browser. Either way, if an upstream error echoes the key back, the body is masked before it reaches the page or the disk, see [`SECURITY.md`](../SECURITY.md).
 
@@ -60,20 +60,23 @@ Supported: `models`, `cases`, `prompt`, `repeats`, `maxTokens`, `temperature`, `
 | `GET /api/cases` · `GET`/`PUT`/`DELETE /api/cases/<name>` · `POST /api/cases/<name>/import` | `{sets: [{name, count}]}`; the raw case records with all fields / whole-set write (`{cases: [...]}`, and an unknown name creates the set) / remove a set; create a set from a text file with `{"path": "..."}`, one prompt per line (a `.jsonl` case set is accepted as-is) |
 | `GET` · `PUT /api/presets` | `{presets: [...]}` / whole-list write; a preset is a name plus a model list and the run parameters |
 
-A **case set** is one `<name>.jsonl` under `LLM_WEB_CASES_DIR`, and names are `[A-Za-z0-9._-]` and nothing else, because the name is a path segment. Case sets and presets both live in files the server reads and writes directly (`web/cases/` and `web/presets.json`, both gitignored, because they are your data and prompts can be private).
+A **case set** is one `<name>.jsonl` under `LLM_WEB_CASES_DIR`, and names are `[A-Za-z0-9._-]` and nothing else, because the name is a path segment. Case sets and presets both live in files the server reads and writes directly (`$XDG_DATA_HOME/faceoff/cases/` and `$XDG_CONFIG_HOME/faceoff/presets.json`, both outside the repository, because they are your data and prompts can be private).
 
-`data` is the same document the static report consumes. A run is a **subprocess** (`bench --json … --web-data …`), and its whole state lives in files under `web/runs/<id>/`: `request.json` (what was asked for), `cases.jsonl` (the filtered suite), `runs.jsonl` (bench's raw output, growing as it runs, which is why progress is its line count), `stdout.log` / `stderr.log`, `exit_code` (written when the bench process is reaped, and its presence means "finished"), and `data.json` (the final page-data document).
+`data` is the same document the static report consumes. A run is a **subprocess** (`bench --json … --web-data …`), and its whole state lives in files under `$XDG_DATA_HOME/faceoff/runs/<id>/`: `request.json` (what was asked for), `cases.jsonl` (the filtered suite), `runs.jsonl` (bench's raw output, growing as it runs, which is why progress is its line count), `stdout.log` / `stderr.log`, `exit_code` (written when the bench process is reaped, and its presence means "finished"), and `data.json` (the final page-data document).
 
 ## Server environment
 
 | variable | default |
 | --- | --- |
-| `LLM_WEB_PORT` / `LLM_WEB_STATIC` / `LLM_WEB_WORK` | `8137` / `out` / `runs` |
-| `LLM_WEB_CASES_DIR` / `LLM_WEB_CASES` | `cases` (one `<name>.jsonl` per case set) / `../bench/cases.example.jsonl`, only a seed for `cases/default.jsonl` |
-| `LLM_WEB_PRESETS` / `LLM_WEB_MODELS` | `presets.json` / none, so there is no menu and you type model ids in the box |
+| `LLM_WEB_PORT` / `LLM_WEB_STATIC` / `LLM_WEB_WORK` | `8137` / `out` (relative to the working directory) / `<data>/faceoff/runs` |
+| `LLM_WEB_CASES_DIR` / `LLM_WEB_CASES` | `<data>/faceoff/cases` (one `<name>.jsonl` per case set) / `../bench/cases.example.jsonl` (relative to the working directory), only a seed for `cases/default.jsonl` |
+| `LLM_WEB_PRESETS` / `LLM_WEB_MODELS` | `<config>/faceoff/presets.json` / none, so there is no menu and you type model ids in the box |
+| `LLM_WEB_PRINT_DIRS` | unset. Set it to anything and the server prints the four resolved paths and exits, without starting or creating a directory. It is what the CI check uses, and it is the same output as `--print-dirs` |
 | `LLM_WEB_SYSTEM` | a system prompt to prefill the run-level box with. Set it once and every run starts from it (the page shows it, so you can still change it per run) |
 | `LLM_BENCH_BIN` / `LLM_WEB_SSG` | `../_build/native/debug/build/cmd/bench/bench.exe` / `../_build/native/debug/build/web/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` / `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | none (the page asks for a gateway) |
+
+`<data>` is `$XDG_DATA_HOME/faceoff` and `<config>` is `$XDG_CONFIG_HOME/faceoff`: `~/.local/share/faceoff` and `~/.config/faceoff` by default on Linux and macOS, and both from `%LOCALAPPDATA%\faceoff` on Windows. An explicit `LLM_WEB_WORK` / `LLM_WEB_CASES_DIR` / `LLM_WEB_PRESETS` wins over all of it, and a relative value is resolved against the working directory. A pre-move in-repo position is used only until the new one exists, with a one-line notice on stderr and the `mv` command to run. `moon run --target native web/cmd/server -- --print-dirs` prints the four resolved paths and exits.
 
 ## Static report and styling
 
@@ -83,11 +86,13 @@ A **case set** is one `<name>.jsonl` under `LLM_WEB_CASES_DIR`, and names are `[
 
 | path | contents |
 | --- | --- |
-| `web/cases/default.jsonl` | an automatically generated case set: on the server's first start with an empty case directory it is seeded from `bench/cases.example.jsonl`. Your own sets live here too, gitignored |
-| `web/presets.json` | presets: models + parameters, gitignored |
-| `web/runs/` | run records, one directory per run, gitignored |
-| `web/data.json` | page data exported from a run, gitignored |
-| `web/out/` | built page and static reports, produced by `scripts/build-web.mbtx` |
+| `$XDG_DATA_HOME/faceoff/cases/default.jsonl` | an automatically generated case set: on the server's first start with an empty case directory it is seeded from `bench/cases.example.jsonl`. Your own sets live here too |
+| `$XDG_CONFIG_HOME/faceoff/presets.json` | presets: models + parameters |
+| `$XDG_DATA_HOME/faceoff/runs/` | run records, one directory per run |
+| `web/data.json` | page data exported from a run; a build artifact inside the repository, gitignored |
+| `web/out/` | built page and static reports, produced by `scripts/build-web.mbtx`; a build artifact inside the repository |
+
+The three user paths are the ones `--print-dirs` prints; `web/runs/`, `web/cases/` and `web/presets.json` were their pre-move positions and are only recognized until the new ones exist.
 
 ## See also
 

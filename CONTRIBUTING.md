@@ -73,7 +73,7 @@ The test and end-to-end commands each start their own mock endpoint, so none of 
 
 **`.mbti` files are generated.** Run `moon info` and read the diff; never edit them by hand. `moon info && moon fmt` before committing is the habit. If nothing in a `.mbti` changed, your change did not alter the public surface.
 
-**Never commit a key.** You never need one to run the tests. `web/runs/` holds run output and is gitignored, but see `SECURITY.md` before sharing anything from it.
+**Never commit a key.** You never need one to run the tests. Run output lives outside the repository, under your user directories (see `SECURITY.md` for the exact paths), but see that file before sharing anything from it.
 
 ## Commits
 

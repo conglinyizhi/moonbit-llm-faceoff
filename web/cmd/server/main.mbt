@@ -1,23 +1,29 @@
 ///|
 /// 交互式评测服务：静态文件 + JSON API，评测以子进程方式调用 bench。
 ///
-/// 为什么用子进程而不是直接调用 bench 包：bench 依赖库，库钉在
-/// moonbitlang/async 0.20.1，本模块用 async 0.21.x + rabbita。放进同一个
-/// workspace 会强制统一版本并打坏库，所以这里只通过 CLI 边界通信。
-/// （库已不依赖任何第三方 LLM 包，这个分歧只剩 async 版本。）
+/// bench 走 CLI 边界而不是直接调库：页面的数据源就是它导出的 data.json，统计因此
+/// 只有一份实现。理由记在 AGENTS.md 的约束清单里。
 ///
 /// 运行状态全部落在文件里（runs/<id>/），不做进程内共享状态：
 ///   请求参数写在 request.json，进度靠数 runs.jsonl 的行数，
 ///   退出码由外层 sh 追加到 exit_code，最终数据在 data.json。
 ///
+/// 用户数据与配置默认放在用户目录下（XDG Base Directory；Windows 用 %LOCALAPPDATA%，
+/// macOS 走 XDG 那套默认值），不放在仓库里：
+///   <data>/faceoff/runs/            运行记录
+///   <data>/faceoff/cases/           测试集
+///   <config>/faceoff/presets.json   预设
+/// 实际路径启动时打在 stderr 上，也可以 `--print-dirs` 单独问一次。仓库里还留着旧
+/// 位置（web/runs 等）时继续用旧的，只提示一次，不替用户搬文件。
+///
 /// 环境变量：
 ///   LLM_WEB_PORT    监听端口（默认 8137）
-///   LLM_WEB_STATIC  静态目录（默认 out）
-///   LLM_WEB_WORK    运行目录（默认 runs）
+///   LLM_WEB_STATIC  静态目录（默认 out，相对当前工作目录）
+///   LLM_WEB_WORK    运行目录（默认 <data>/faceoff/runs）
 ///   LLM_WEB_CASES   旧的单文件用例（默认 ../bench/cases.example.jsonl）；
 ///                   只在测试集目录为空时当种子读一次
-///   LLM_WEB_CASES_DIR  测试集目录，每个集一个 <名字>.jsonl（默认 cases）
-///   LLM_WEB_PRESETS    预设文件（默认 presets.json）
+///   LLM_WEB_CASES_DIR  测试集目录，每个集一个 <名字>.jsonl（默认 <data>/faceoff/cases）
+///   LLM_WEB_PRESETS    预设文件（默认 <config>/faceoff/presets.json）
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
 ///   LLM_WEB_SSG    静态报告生成器（默认 ../_build/native/debug/build/web/cmd/ssg/ssg.exe）
 ///   LLM_WEB_MODELS  默认模型菜单，逗号分隔（请求也可使用其它模型）
@@ -27,13 +33,56 @@
 async fn main {
   let port = int_env("LLM_WEB_PORT", 8137)
   let static_dir = @env.get_env_var("LLM_WEB_STATIC").unwrap_or("out")
-  let work_dir = @env.get_env_var("LLM_WEB_WORK").unwrap_or("runs")
+  // 用户数据与配置的位置：显式环境变量 > 仓库内的旧位置 > 平台默认
+  // （XDG Base Directory；Windows 用 %LOCALAPPDATA%）。解析逻辑在 web/userdirs。
+  let env_lookup = fn(name : String) { @env.get_env_var(name) }
+  let data_dir = @userdirs.default_data_dir(env_lookup)
+  let config_dir = @userdirs.default_config_dir(env_lookup)
+  let work_target = if data_dir == "" {
+    ""
+  } else {
+    @userdirs.join_child(data_dir, "runs")
+  }
+  let cases_target = if data_dir == "" {
+    ""
+  } else {
+    @userdirs.join_child(data_dir, "cases")
+  }
+  let presets_target = if config_dir == "" {
+    ""
+  } else {
+    @userdirs.join_child(config_dir, "presets.json")
+  }
+  // 旧位置的两个候选：`runs` 是「在 web/ 里启动」那套老约定的相对路径，`web/runs` 是
+  // 从仓库根启动时的同一份数据。哪个在就用哪个。
+  let (work_dir, work_legacy) = pick_user_path(
+    @env.get_env_var("LLM_WEB_WORK"),
+    ["runs", "web/runs"],
+    work_target,
+  )
+  let (cases_dir, cases_legacy) = pick_user_path(
+    @env.get_env_var("LLM_WEB_CASES_DIR"),
+    ["cases", "web/cases"],
+    cases_target,
+  )
+  let (presets_path, presets_legacy) = pick_user_path(
+    @env.get_env_var("LLM_WEB_PRESETS"),
+    ["presets.json", "web/presets.json"],
+    presets_target,
+  )
+  // 还在用旧位置时给出可以直接照抄的搬法。服务端自己不动用户的文件
+  let legacy_moves : Array[String] = []
+  if work_legacy {
+    legacy_moves.push("  mv " + work_dir + " " + work_target)
+  }
+  if cases_legacy {
+    legacy_moves.push("  mv " + cases_dir + " " + cases_target)
+  }
+  if presets_legacy {
+    legacy_moves.push("  mv " + presets_path + " " + presets_target)
+  }
   let cases_path = @env.get_env_var("LLM_WEB_CASES").unwrap_or(
     "../bench/cases.example.jsonl",
-  )
-  let cases_dir = @env.get_env_var("LLM_WEB_CASES_DIR").unwrap_or("cases")
-  let presets_path = @env.get_env_var("LLM_WEB_PRESETS").unwrap_or(
-    "presets.json",
   )
   let bench_bin = @env.get_env_var("LLM_BENCH_BIN").unwrap_or(
     "../_build/native/debug/build/cmd/bench/bench.exe",
@@ -63,16 +112,49 @@ async fn main {
     api_key: first_env(["MOONLLM_API_KEY", "OPENAI_API_KEY"]).unwrap_or(""),
     default_system,
   }
-  @fs.mkdir(work_dir, recursive=true) catch {
-    _ => ()
+
+  // `--print-dirs`（或环境变量 `LLM_WEB_PRINT_DIRS`）：只把解析出来的路径打出来就退出。
+  // 给「我的数据到底在哪」以及跨平台核对用，既不起服务端也不创建目录，所以放在建目录之前。
+  // 环境变量那条是留给 CI 的：命令行的 `--` 参数在各平台怎么传不值得赌，而环境变量在
+  // 服务端里到处都在用，Windows job 上也验过。
+  let mut print_dirs_only = false
+  for arg in @env.args() {
+    if arg == "--print-dirs" {
+      print_dirs_only = true
+    }
+  }
+  if @env.get_env_var("LLM_WEB_PRINT_DIRS").unwrap_or("") != "" {
+    print_dirs_only = true
+  }
+  if print_dirs_only {
+    @stdio.stdout.write(paths_line(config) + "\n") catch {
+      _ => ()
+    }
+    return
+  }
+  for dir in [work_dir, cases_dir] {
+    @fs.mkdir(dir, recursive=true) catch {
+      _ => ()
+    }
+  }
+  if config_dir != "" {
+    @fs.mkdir(config_dir, recursive=true) catch {
+      _ => ()
+    }
   }
   seed_case_sets(config)
   if config.api_key == "" {
     note("warning: no MOONLLM_API_KEY / OPENAI_API_KEY in the environment")
   }
-  note(
-    "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_dir}  presets=\{config.presets_path}",
-  )
+  note(paths_line(config))
+  if legacy_moves.length() > 0 {
+    note(
+      "还在用仓库内的数据。新位置已经就绪，搬过去就能把它和代码分开：",
+    )
+    for line in legacy_moves {
+      note(line)
+    }
+  }
   // 静态目录是按当前工作目录解析的（默认 out，就在 web/ 里）。从别处启动
   // 时服务端本身跑得起来、/api 也通，只有页面一律 404，很难看出是为什么。
   // 与其让人去猜，不如直接说出来。
@@ -2053,4 +2135,50 @@ async fn note(message : String) -> Unit {
   @stdio.stderr.write(message + "\n") catch {
     _ => ()
   }
+}
+
+///|
+/// 三个用户路径的选法：显式环境变量 > 仓库内的旧位置 > 平台默认。
+///
+/// 「旧位置」是模块合并之前那套仓库内路径：`runs` 对应「在 `web/` 里启动」的老约定，
+/// `web/runs` 是从仓库根启动时的同一份数据，所以 `legacy` 收一组候选，哪个在就用哪个。
+/// 只有在新位置还没有时才继续用旧的，并且只在启动时提示一次，绝不替用户搬文件。
+///
+/// 返回 (实际用的路径, 是否仍在用旧位置)。判不出平台默认位置时退回第一个候选。
+async fn pick_user_path(
+  explicit : String?,
+  legacy : Array[String],
+  platform : String,
+) -> (String, Bool) {
+  match explicit {
+    Some(value) => (value, false)
+    None => {
+      let platform_exists = if platform == "" {
+        false
+      } else {
+        @fs.exists(platform) catch {
+          _ => false
+        }
+      }
+      if !platform_exists {
+        for candidate in legacy {
+          let found = @fs.exists(candidate) catch { _ => false }
+          if found {
+            return (candidate, true)
+          }
+        }
+      }
+      if platform != "" {
+        (platform, false)
+      } else {
+        (legacy[0], false)
+      }
+    }
+  }
+}
+
+///|
+/// 各路径落在哪，一行打完。启动时打一次，`--print-dirs` 用的是同一份文本。
+fn paths_line(config : ServerConfig) -> String {
+  "static=\{config.static_dir}  runs=\{config.work_dir}  cases=\{config.cases_dir}  presets=\{config.presets_path}"
 }

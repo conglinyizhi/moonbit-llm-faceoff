@@ -1,0 +1,6 @@
+// 用户数据与配置目录的位置：XDG Base Directory（Unix）、%LOCALAPPDATA%（Windows）。
+//
+// 单独一个包，而不是塞进 web/shared：它跟解析、统计、渲染没有关系，调用方只有服务端。
+// 代码是纯的（不读环境、不碰文件系统），所以能单测，也能在 Linux 上验证 Windows 的映射。
+
+supported_targets = "+native"

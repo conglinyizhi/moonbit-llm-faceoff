@@ -56,7 +56,7 @@ make dev            # the same, but watching the sources: a page change rebuilds
 make serve-demo     # mock endpoint + demo data + page: the quickest look at the whole thing
 ```
 
-Either way, remember one thing: **the server must run with `web/` as its working directory.** It resolves `out/`, `runs/`, `cases/` and `presets.json` relative to it; started from the repository root it answers `/api/meta` and then 404s on every page request. `make serve` does that `cd` for you, and without make it is `moon run --target native scripts/build-web.mbtx`, `moon build web/cmd/server --target native`, then the server binary from inside `web/`. Against a real gateway, either export `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` before starting it, or start it without a key and **type the key into the page**: it is used for that one run, and it is not written to disk.
+Either way, remember one thing: **the server must run with `web/` as its working directory.** That requirement is now down to the two paths it still resolves against the cwd, the static directory `out/` and the seed file `../bench/cases.example.jsonl`; runs, case sets and presets resolve to absolute paths under your user directories. Started from the repository root it answers `/api/meta` and then 404s on every page request. `make serve` does that `cd` for you, and without make it is `moon run --target native scripts/build-web.mbtx`, `moon build web/cmd/server --target native`, then the server binary from inside `web/`. Your data lives in your user directory, and `moon run --target native web/cmd/server -- --print-dirs` prints the four resolved paths and exits. Against a real gateway, either export `MOONLLM_BASE_URL` / `MOONLLM_API_KEY` before starting it, or start it without a key and **type the key into the page**: it is used for that one run, and it is not written to disk.
 
 ### 4. Point it at a real endpoint, and run a comparison
 
@@ -83,15 +83,17 @@ Two things to get right the first time: **send `--json` somewhere of your own** 
 
 ### 5. Where the files land
 
-The server resolves these paths relative to its own working directory, which is `web/`:
+Runs, case sets and presets live outside the repository, in your user directories. On Linux that is `~/.local/share/faceoff/` and `~/.config/faceoff/`; on Windows all three are under `%LOCALAPPDATA%\faceoff\`; macOS uses the XDG defaults. `moon run --target native web/cmd/server -- --print-dirs` prints the four paths as the server resolved them and exits, without creating a directory or starting anything.
 
 | path | what |
 | --- | --- |
-| `web/cases/default.jsonl` | the generated case set: seeded from `bench/cases.example.jsonl` the first time the server starts with an empty cases directory. Your own sets live here too, gitignored |
-| `web/presets.json` | presets: models plus parameters, gitignored |
-| `web/runs/` | run history, one directory per run, gitignored |
-| `web/data.json` | page data exported from a run, gitignored |
-| `web/out/` | built page and static report, produced by `scripts/build-web.mbtx` |
+| `$XDG_DATA_HOME/faceoff/cases/default.jsonl` | the generated case set: seeded from `bench/cases.example.jsonl` the first time the server starts with an empty cases directory. Your own sets live here too |
+| `$XDG_CONFIG_HOME/faceoff/presets.json` | presets: models plus parameters |
+| `$XDG_DATA_HOME/faceoff/runs/` | run history, one directory per run |
+| `web/data.json` | page data exported from a run; a build artifact inside the repository, gitignored |
+| `web/out/` | built page and static report, produced by `scripts/build-web.mbtx`; a build artifact inside the repository, gitignored |
+
+`web/cases/`, `web/presets.json` and `web/runs/` are the pre-move positions. A checkout that still has one of them keeps using it until the new location exists; the server says so on stderr at startup and prints the `mv` command to run, and it never moves your files itself.
 
 ### Known limits
 

@@ -22,12 +22,12 @@ Whichever way it arrives:
 - It is handed to the child `bench` process through the **environment, not its command line**, so it does not show up in `ps`.
 - It is sent to exactly one destination: the endpoint at `MOONLLM_BASE_URL`, or the `baseUrl` supplied with that run. There is no telemetry and no second service.
 - The server never sends a key *to* the browser. `GET /api/meta` reports only whether one is configured (`"hasKey": true|false`). The one path by which a fragment can reach the page is a masked upstream error body, described below.
-- `web/runs/<id>/request.json` has its `apiKey` field removed before it is written, so a key typed into the page does not end up in the run directory.
+- `$XDG_DATA_HOME/faceoff/runs/<id>/request.json` (`%LOCALAPPDATA%\faceoff\runs\<id>\request.json` on Windows) has its `apiKey` field removed before it is written, so a key typed into the page does not end up in the run directory.
 - The "copy share link" button builds a URL that carries the configuration but never the key.
 
 ### Upstream error bodies are redacted
 
-The client surfaces a non-2xx response body as `http <status>: <body>`, and that string is then persisted: it goes to the bench run log, to `web/runs/<id>/runs.jsonl` and `data.json`, and out to the browser. Some gateways echo the request headers in their error text, so a body like `bad authorization: Bearer <key>` would otherwise put the key in all of those places.
+The client surfaces a non-2xx response body as `http <status>: <body>`, and that string is then persisted: it goes to the bench run log, to `$XDG_DATA_HOME/faceoff/runs/<id>/runs.jsonl` and `data.json`, and out to the browser. Some gateways echo the request headers in their error text, so a body like `bad authorization: Bearer <key>` would otherwise put the key in all of those places.
 
 The configured key is therefore masked at the point where the body becomes part of an error, so it never reaches a log, a run directory or a page intact:
 
@@ -49,14 +49,16 @@ The consequence is that anything able to reach the server can read any run's res
 
 ## What never enters the repository
 
-This repository is public. The pages are built to be used with material that is not, and the boundary is drawn in `.gitignore`:
+This repository is public. The pages are built to be used with material that is not, so the server keeps its data outside the working tree. On Linux and macOS that is `$XDG_DATA_HOME/faceoff` and `$XDG_CONFIG_HOME/faceoff` (`~/.local/share/faceoff` and `~/.config/faceoff` by default); on Windows, `%LOCALAPPDATA%\faceoff` for both.
 
-- `web/cases/`: case sets. They hold the prompts you actually care about.
-- `web/presets.json`: model and parameter combinations.
-- `web/runs/`: every run directory. Prompts sent, answers received, `runs.jsonl`, and the annotations you typed while reading them.
-- `docs/real-gateway-run.md`: the output of the real-gateway smoke test, which names your endpoint and quotes its replies.
+- `$XDG_DATA_HOME/faceoff/cases/`: case sets. They hold the prompts you actually care about.
+- `$XDG_CONFIG_HOME/faceoff/presets.json`: model and parameter combinations.
+- `$XDG_DATA_HOME/faceoff/runs/`: every run directory. Prompts sent, answers received, `runs.jsonl`, and the annotations you typed while reading them.
+- `docs/real-gateway-run.md`: the output of the real-gateway smoke test, which names your endpoint and quotes its replies. This one is still in the tree, and still ignored.
 
-Ignore rules are the mechanism, but they are not the only reason these stay out: **these files are user data and are not meant to be committed even when they look harmless.** Placeholder text ("compute 17 x 23") reads fine in a screenshot and still has no business in a published history. If you add a path that holds personal material, add it here and to `.gitignore` in the same change, and check with `git status --ignored` that it is ignored rather than merely untracked.
+`moon run --target native web/cmd/server -- --print-dirs` prints the four paths the server resolved and exits, which is the quickest way to see where that data actually is on your machine.
+
+Being outside the tree is the mechanism now, and `.gitignore` still lists the pre-move positions (`web/cases/`, `web/presets.json`, `web/runs/`) so that a checkout which has not moved its files yet cannot commit them by accident. Either way, the location is not the only reason these stay out: **these files are user data and are not meant to be committed even when they look harmless.** Placeholder text ("compute 17 x 23") reads fine in a screenshot and still has no business in a published history. If you add a path that holds personal material, add it here and to `.gitignore` in the same change, and check with `git status --ignored` that it is ignored rather than merely untracked.
 
 Before publishing anything that a run produced (a report, an excerpt, a screenshot), read it. A model's answer can echo the prompt, and the prompt is often the part you did not mean to share.
 

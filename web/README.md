@@ -30,7 +30,7 @@ moon run --target native web/cmd/build    # → web/out/
 
 From a checkout, `make web` (i.e. `scripts/build-web.mbtx`) does one more step first: it runs `bench --from-json` to write `web/data.json`, the document the page and the report render. That step needs the `bench` CLI; the page build itself does not.
 
-Serving by hand is the same thing without the wrapper, but the server must be started **from `web/`**, because it resolves `out/`, `runs/`, `cases/` and `presets.json` relative to its working directory:
+Serving by hand is the same thing without the wrapper, but the server must be started **from `web/`**, because the static directory `out/` and the seed file `../bench/cases.example.jsonl` are resolved relative to its working directory:
 
 ```bash
 moon build web/cmd/server --target native   # the page build does not build this
@@ -44,12 +44,14 @@ Started from the repository root it answers `/api/meta` and then 404s every page
 
 | path | what |
 | --- | --- |
-| `web/out/` | the built page and the static report |
-| `web/data.json` | page data exported from a run, gitignored |
-| `web/runs/` | one directory per run, gitignored |
-| `web/cases/` | your case sets, one `<name>.jsonl` each, gitignored |
-| `web/presets.json` | your model + parameter combinations, gitignored |
+| `web/out/` | the built page and the static report; a build artifact inside the repository, gitignored |
+| `web/data.json` | page data exported from a run; a build artifact inside the repository, gitignored |
+| `$XDG_DATA_HOME/faceoff/runs/` | one directory per run |
+| `$XDG_DATA_HOME/faceoff/cases/` | your case sets, one `<name>.jsonl` each |
+| `$XDG_CONFIG_HOME/faceoff/presets.json` | your model + parameter combinations |
 | `web/shell/` | the `index.html` shell for the page |
+
+Runs, case sets and presets are user data and live outside the repository: on Linux `~/.local/share/faceoff/` and `~/.config/faceoff/`, on Windows `%LOCALAPPDATA%\faceoff\`. `moon run --target native web/cmd/server -- --print-dirs` prints the four paths as the server resolved them and exits. The pre-move positions (`web/runs/`, `web/cases/`, `web/presets.json`) are recognized only until the new ones exist, and the server never moves the files itself.
 
 Binaries land under the repository root, at `_build/native/debug/build/web/cmd/<name>/<name>.exe`.
 
