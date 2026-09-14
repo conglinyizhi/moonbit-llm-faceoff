@@ -839,11 +839,13 @@ context_probe='(async () => {
     promptTab.click();
     await new Promise((r) => setTimeout(r, 400));
     out.promptHintEmpty = (document.querySelector(".prompt-tab .hint") || {}).textContent || "";
+    // 空着时那段话上黄（.hint-warn 那层 span）。改类名会连带跳边距，所以钉住写法
+    out.promptEmptyWarn = !!document.querySelector(".prompt-tab .hint-warn");
     const box = document.querySelector("#prompt");
     box.value = "e2e 的临时 prompt";
     box.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 400));
-    out.promptHintFilled = (document.querySelector(".prompt-tab .notice") || {}).textContent || "";
+    out.promptHintFilled = (document.querySelector(".prompt-tab .hint") || {}).textContent || "";
     setTab.click();
     await new Promise((r) => setTimeout(r, 400));
     out.noticeOnSetTab = (document.querySelector(".case-panel .notice") || {}).textContent || "";
@@ -856,6 +858,10 @@ context_probe='(async () => {
     empty.value = "";
     empty.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((r) => setTimeout(r, 300));
+    // 删干净之后面板不能被拽回测试集那页（曾经会：PromptChanged 反向也跟着切）
+    out.tabAfterClear = !!document.querySelector("[data-name=case-panel] .prompt-tab");
+    out.hintAfterClear = (document.querySelector(".prompt-tab .hint") || {}).textContent || "";
+    out.warnAfterClear = !!document.querySelector(".prompt-tab .hint-warn");
   }
   // 下载链接不能被框架拦下来：@html.a 默认是「被捕获的链接」，点击会被
   // preventDefault（留给框架内部路由），download 于是永远不触发
@@ -886,17 +892,27 @@ context_probe='(async () => {
   out.userText = modal.querySelectorAll(".context-message pre")[1]?.textContent || "";
   out.backdrop = getComputedStyle(document.querySelector(".modal-backdrop")).position;
   out.radius = getComputedStyle(modal).borderRadius;
+  // 弹窗开着时后面那页要锁住：滚动只落在弹窗里，位置也不能被挤跳
+  out.locked = document.documentElement.classList.contains("modal-open");
+  out.lockedOverflow = getComputedStyle(document.documentElement).overflow;
   byText("关闭").click();
   await new Promise((r) => setTimeout(r, 500));
   out.closed = document.querySelector(".modal") === null;
+  out.unlocked = !document.documentElement.classList.contains("modal-open");
   return out;
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/context.html" "$context_probe" 2500 "$DUMP_READY_HISTORY"
 probe=$(grep -o 'SCRIPT .*' "$tmp/context.html.err" | sed 's/^SCRIPT //')
-echo "$probe" | grep -q '留空将会运行测试集' ||
-  fail "临时 prompt 那页没说清楚「留空会怎样」：$probe"
-echo "$probe" | grep -q '填了内容 = 这次只跑这一条' ||
+echo "$probe" | grep -q '当前文本框为空' ||
+  fail "临时 prompt 那页没说清楚「空着会怎样」：$probe"
+echo "$probe" | grep -q '"tabAfterClear":true' ||
+  fail "把临时提示词删干净之后，面板被拽回了测试集那页：$probe"
+echo "$probe" | grep -q '"warnAfterClear":true' ||
+  fail "删干净之后空态那段话没有回到黄：$probe"
+echo "$probe" | grep -q '已经填写内容，测试集选项将被忽略' ||
   fail "临时 prompt 填了之后没说清楚后果：$probe"
+echo "$probe" | grep -q '"promptEmptyWarn":true' ||
+  fail "空着那段话没有上黄：$probe"
 echo "$probe" | grep -q '测试集不参与' ||
   fail "在测试集那一页没有提醒「这次不会跑它」：$probe"
 echo "$probe" | grep -q '"importRowVisible":true' ||
@@ -923,7 +939,13 @@ echo "$probe" | grep -q '"radius":"[1-9]' ||
   fail "对话框没有圆角（拟态的浮起感全在阴影和圆角上）：$probe"
 echo "$probe" | grep -q '"closed":true' ||
   fail "点关闭之后对话框还在：$probe"
-echo "ok: 请求上下文（按钮 → 拟态对话框 → system/user → 关闭）"
+echo "$probe" | grep -q '"locked":true' ||
+  fail "弹窗开着时没有锁住背景滚动：$probe"
+echo "$probe" | grep -q '"lockedOverflow":"hidden"' ||
+  fail "锁住的方式不对（html 的 overflow 不是 hidden）：$probe"
+echo "$probe" | grep -q '"unlocked":true' ||
+  fail "关掉弹窗之后背景还锁着：$probe"
+echo "ok: 请求上下文（按钮 → 拟态对话框 → system/user → 关闭；开着时锁背景滚动）"
 
 echo "==> 人工标注"
 # 打开历史里的一次运行 → 给第一条答案打「不行」+ 备注 → 徽章出现、写进磁盘、
@@ -1334,20 +1356,100 @@ curl -sf -o /dev/null "http://127.0.0.1:$NOCFG_PORT/api/meta" ||
 
 nocfg_probe='(async () => {
   const t = document.body.innerText;
+  const hintEl = document.querySelector(".picker-items .check-disabled");
+  const cs = hintEl ? getComputedStyle(hintEl) : null;
   return {
     fake: /MiniCPM5|api\.openai\.com/.test(t),
     models: document.querySelectorAll("input[id^=model-]").length,
     reds: document.querySelectorAll(".issues.errors .issue-row").length,
     blocked: document.querySelector("[data-name=start-run-btn]").className,
+    envHint: hintEl ? hintEl.textContent.trim() : "",
+    envHintInert: cs ? cs.pointerEvents : "",
   };
 })()'
 dump_page_script "http://127.0.0.1:$NOCFG_PORT/" 8000 "$tmp/nocfg.html" "$nocfg_probe" 2000 "$DUMP_READY_FORM"
 nocfg=$(grep -o 'SCRIPT .*' "$tmp/nocfg.html.err" | sed 's/^SCRIPT //')
 echo "$nocfg" | grep -q '"fake":false' || fail "无配置时页面上有编造的兜底值：$nocfg"
 echo "$nocfg" | grep -q '"models":0' || fail "无配置时模型菜单不是空的：$nocfg"
+echo "$nocfg" | grep -q 'LLM_WEB_MODELS' ||
+  fail "环境变量没给模型时，没有告诉用户该怎么配置：$nocfg"
+echo "$nocfg" | grep -q '"envHintInert":"none"' ||
+  fail "那行提示不是「看着禁用」的样子（pointer-events 不是 none）：$nocfg"
 echo "$nocfg" | grep -qv '"reds":0' || fail "无配置时没有红线：$nocfg"
 echo "$nocfg" | grep -q blocked || fail "无配置时开始按钮没被拦住：$nocfg"
 echo "ok: 服务端没配时页面说实话（空菜单 / 红线 / 拦住 / 无兜底值）"
+
+echo "==> 手输模型名 + 「识别」：先成为候选，勾了才跑"
+# 以前的语义是「输入框里有什么就跑什么」：一个没打完的名字会被原样送进请求。
+# 现在手输只是候选，跑哪两个得靠勾选
+ident_probe='(async () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const ids = () => Array.from(document.querySelectorAll("input[id^=model-]")).map((i) => i.id);
+  const row = () => {
+    const r = Array.from(document.querySelectorAll(".confirm-row"))
+      .find((x) => x.querySelector(".confirm-label").textContent.trim() === "模型");
+    return r.querySelector(".confirm-value").textContent.trim();
+  };
+  const out = { before: ids(), rowBefore: row() };
+  const ta = document.querySelector("#extra-models");
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+  setter.call(ta, "e2e-custom-model");
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  await wait(250);
+  out.rowWhileTyping = row();
+  const btn = Array.from(document.querySelectorAll(".model-add button"))
+    .find((b) => b.textContent.trim() === "识别");
+  out.hasBtn = !!btn;
+  btn.click();
+  await wait(400);
+  out.after = ids();
+  out.checked = Array.from(document.querySelectorAll("input[id^=model-]")).filter((i) => i.checked).map((i) => i.id);
+  out.rowAfterIdentify = row();
+  // 队列容量 = 2：先只留 mock-a、mock-b 勾着，再勾这个自定义的，最早的应该被弹掉
+  const click = async (id) => { document.getElementById(id).click(); await wait(500); };
+  for (const i of Array.from(document.querySelectorAll("input[id^=model-]"))) {
+    if (i.checked) { await click(i.id); }
+  }
+  await click("model-mock-a");
+  await click("model-mock-b");
+  out.queueBefore = row();
+  await click("model-e2e-custom-model");
+  out.queueRow = row();
+  out.queueChecked = Array.from(document.querySelectorAll("input[id^=model-]")).filter((i) => i.checked).map((i) => i.id.replace("model-", ""));
+  // 回车 = 按「识别」：输入法上屏中的回车不算
+  setter.call(ta, "e2e-enter-model");
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  await wait(250);
+  const beforeEnter = ids().length;
+  ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+  await wait(300);
+  out.composingIgnored = ids().length === beforeEnter;
+  ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await wait(400);
+  out.enterAdded = ids().includes("model-e2e-enter-model");
+  out.enterCleared = ta.value === "";
+  return out;
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/ident.html" "$ident_probe" 2000 "$DUMP_READY_FORM"
+ident=$(grep -o 'SCRIPT .*' "$tmp/ident.html.err" | sed 's/^SCRIPT //')
+echo "$ident" | grep -q '"hasBtn":true' || fail "模型区没有「识别」按钮：$ident"
+echo "$ident" | grep -q 'model-e2e-custom-model' ||
+  fail "按了「识别」之后没有多出候选 checkbox：$ident"
+echo "$ident" | grep -qE '"rowWhileTyping":"[^"]*mock-a' ||
+  fail "还没按「识别」，打字就已经影响运行了：$ident"
+echo "$ident" | grep -qE '"rowAfterIdentify":"[^"]*mock-a' ||
+  fail "按了「识别」就直接进运行了（应该先成为候选）：$ident"
+echo "$ident" | grep -qv '"checked":\[[^]]*e2e-custom-model' ||
+  fail "识别出来的候选被自动勾上了（应该由用户点）：$ident"
+echo "ok: 手输模型名 → 识别成候选 → 勾选才跑"
+echo "$ident" | grep -q '"queueBefore":"mock-a, mock-b"' ||
+  fail "队列起点不对（应该是勾着两个）：$ident"
+echo "$ident" | grep -q '"queueRow":"mock-b, e2e-custom-model"' ||
+  fail "勾第三个没有「弹掉最早那个」（队列容量 2）：$ident"
+echo "$ident" | grep -q '"composingIgnored":true' ||
+  fail "输入法上屏中的回车被当成了「识别」：$ident"
+echo "$ident" | grep -q '"enterAdded":true' ||
+  fail "在模型输入框里按回车没有等于按「识别」：$ident"
 
 echo "==> 勾了 System 覆盖却没写内容：字段里要说实话（黄），但不是拦路"
 # 放在最后：这条会把「覆盖」打开并把文本框清空，放前面会污染后面的跑用例断言。
@@ -1361,22 +1463,34 @@ e2e_sys_probe='(async () => {
   ta.dispatchEvent(new Event("input", { bubbles: true }));
   await new Promise((r) => setTimeout(r, 400));
   const p = document.querySelector("[data-name=system-prompt-field] > p");
+  const bad = p.querySelector(".notice-bad");
+  const cs = getComputedStyle(p);
   return {
     cls: p.className,
-    text: p.textContent.trim().slice(0, 44),
-    color: getComputedStyle(p).color,
+    text: p.textContent.trim(),
+    bad: !!bad,
+    badColor: bad ? getComputedStyle(bad).color : null,
+    bg: cs.backgroundColor,
     warnings: document.querySelectorAll(".issues.warnings .issue-row").length,
   };
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/sysfield.html" "$e2e_sys_probe" 2000 "$DUMP_READY_FORM"
 e2e_sys=$(grep -o 'SCRIPT .*' "$tmp/sysfield.html.err" | sed 's/^SCRIPT //')
 echo "$e2e_sys" | grep -q '"cls":"notice"' ||
-  fail "字段里那行不是黄线（或压根没换）：$e2e_sys"
-echo "$e2e_sys" | grep -q "空的" ||
-  fail "勾了覆盖又空着时，字段里没说实话：$e2e_sys"
+  fail "勾选之后字段里那行不是黄字：$e2e_sys"
+echo "$e2e_sys" | grep -q "请输入一些文本作为 System Prompt" ||
+  fail "勾了覆盖又空着时，没提醒要填文本：$e2e_sys"
+echo "$e2e_sys" | grep -q '"bad":true' ||
+  fail "那句提醒没有单独标红：$e2e_sys"
+echo "$e2e_sys" | grep -q '248, 81, 73' ||
+  fail "那句提醒的颜色不是红：$e2e_sys"
+# 不加底色、不加边框、不动间距：有人给它加个盒子就会红
+# （量出来是 rgba(0, 0, 0, 0)，即完全透明）
+echo "$e2e_sys" | grep -q '"bg":"rgba(0, 0, 0, 0)"' ||
+  fail "那行被包了一层底色/边框：$e2e_sys"
 echo "$e2e_sys" | grep -qv '"warnings":0' ||
   fail "这种状态没有出现在黄线总线上：$e2e_sys"
-echo "ok: 空文本 + 勾选覆盖 = 字段里黄字说实话，且进黄线总线"
+echo "ok: 空文本 + 勾选覆盖 = 黄字说明 + 红字提醒（没有包框），且进黄线总线"
 
 echo
 echo "web e2e: 全部通过"
