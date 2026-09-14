@@ -106,10 +106,28 @@ async fn copy_file(from : String, to : String) -> Bool {
 ///
 /// 返回路径而不是 Bool：Windows 上可执行文件必须带 .exe，而复制过来的副本
 /// 名字是我们起的——不带后缀的话 spawn 会找不到它（真的这么踩过）。
+///|
+/// 每个子脚本用**自己的** target-dir。
+///
+/// 默认情况下所有 .mbtx 的单文件产物都落在同一个 single/single.exe 上，于是两个
+/// 脚本同时构建就会互相顶掉。按子脚本文件名分开之后，各自的构建互不相干，
+/// 并发的目标才敢同时跑
+fn mbtx_dir(src : String) -> String {
+  let mut base = src
+  for part in src.split("/") {
+    if part != "" {
+      base = part.to_owned()
+    }
+  }
+  "scripts/_build/mbtx/" + base
+}
+
+///|
 async fn build_mbtx(src : String, out_base : String) -> String? {
+  let dir = mbtx_dir(src)
   let (code, _, err) = @process.collect_output(
     "moon",
-    ["build", "--target", "native", src],
+    ["build", "--target", "native", "--target-dir", dir, src],
     inherit_env=true,
   ) catch {
     err => {
@@ -121,11 +139,18 @@ async fn build_mbtx(src : String, out_base : String) -> String? {
     @stdio.stderr.write(text_of(err) + "\n") catch { _ => () }
     return None
   }
-  let single_exe = "scripts/_build/native/debug/build/single/single.exe"
+  // moon 在 target-dir 之下又会拼一层源文件名，所以产物在 dir/<源文件名>/... 下
+  let mut leaf = ""
+  for part in dir.split("/") {
+    if part != "" {
+      leaf = part.to_owned()
+    }
+  }
+  let single_exe = dir + "/" + leaf + "/native/debug/build/single/single.exe"
   let single = if (@fs.exists(single_exe) catch { _ => false }) {
     single_exe
   } else {
-    "scripts/_build/native/debug/build/single/single"
+    dir + "/" + leaf + "/native/debug/build/single/single"
   }
   // 平台怎么命名构建产物，副本就怎么命名：Windows 上必须是 .exe
   let target = if single.has_suffix(".exe") {

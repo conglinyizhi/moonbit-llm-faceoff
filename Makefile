@@ -21,7 +21,10 @@ help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-8s\033[0m %s\n", $$1, $$2}'
 
-deps:  ## fetch dependencies for both modules
+# 只在动过 moon.mod / 需要刷新注册表时手动跑。ci 里不再自动跑它：
+# moon update 要走网络（实测 6-45s），本地迭代每次付这个钱不值当；
+# 缺依赖时 moon check 会自己报错，比默默花掉半分钟更好懂
+deps:  ## fetch deps / refresh the registry (run by hand, not part of ci)
 	$(MOON) update
 	cd web && $(MOON) update
 
@@ -87,9 +90,10 @@ fmt:  ## format, and refresh the generated .mbti
 	cd web && $(MOON) fmt
 	cd web && $(MOON) info
 
-ci: deps check test smoke web api  ## the deterministic suite CI runs
-	@echo
-	@echo "ci: ok"
+# ci 的真身在 scripts/ci.sh：按「抢哪个构建目录」分三条通道并行
+# （root / web / e2e），通道内保持串行。Makefile 只做一层壳
+ci:  ## the deterministic suite CI runs（三条通道并行）
+	bash scripts/ci.sh
 
 clean:  ## remove build outputs; keeps web/runs, which is your data
 	rm -rf _build scripts/_build web/_build web/out

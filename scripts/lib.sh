@@ -14,11 +14,19 @@
 #   kill 一次就干净。顺带也省掉了每次调用都重新解析 .mbtx 的开销。
 build_mbtx() {
   local src="$1" out="$2"
-  moon build --target native "$src" >/dev/null || return 1
+  # 每个子脚本用**自己的** target-dir：默认所有 .mbtx 的单文件产物都落在同一个
+  # single/single.exe 上，两个脚本同时构建就会互相顶掉。按子脚本名分家之后，
+  # 并发的目标才敢同时跑（与 scripts/*.mbtx 里 mbtx_dir 的做法一致）
+  local dir="scripts/_build/mbtx/$(basename "$src")"
+  moon build --target native --target-dir "$dir" "$src" >/dev/null || return 1
+  # moon 在 target-dir 之下又会拼一层源文件名
+  local leaf; leaf="$(basename "$src")"
+  local single="$dir/$leaf/native/debug/build/single/single.exe"
+  [ -f "$single" ] || single="$dir/$leaf/native/debug/build/single/single"
   # 先复制到临时名再 mv：直接 cp 覆盖一个正在运行的可执行文件会
   # "Text file busy"（上一次测试的进程还没退干净时就会撞上）。
   # rename 是原子的，运行中的进程继续用旧 inode，互不影响。
-  cp scripts/_build/native/debug/build/single/single.exe "$out.tmp" || return 1
+  cp "$single" "$out.tmp" || return 1
   chmod +x "$out.tmp"
   mv -f "$out.tmp" "$out"
 }

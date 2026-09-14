@@ -36,15 +36,22 @@ jobs:
           gcc --version | head -1
           make --version | head -1
 
-      # `make ci` is deps + check + test + smoke + build the page. It is the
-      # same command anyone can run locally, so there is one definition of
+      # `make ci` is check + test + smoke + build the page. It is the same
+      # command anyone can run locally, so there is one definition of
       # "passing" rather than two.
+      #
+      # deps is not part of it any more: `moon update` hits the network and
+      # costs 6-45s, which is exactly the cost a local iteration cannot afford.
+      # A fresh checkout still needs it once, hence the step above.
       #
       # scripts/web-e2e.sh is deliberately NOT part of it: it drives a real
       # Chromium and waits in real time, which makes it the flakiest thing in
       # the repo. Run it locally with `make e2e`. To run it here too, install a
       # browser and add a separate job — do not fold it into this one, or a
       # timing hiccup will start failing unrelated pull requests.
+      - name: Fetch dependencies
+        run: make deps
+
       - name: make ci
         run: make ci
 
@@ -84,9 +91,8 @@ jobs:
           moon version --all
           Get-Command cl.exe | Select-Object -ExpandProperty Source
 
-      # `make ci` starts with `make deps`; skipping it here failed the first run
-      # with "module was not found in the registry" — a fresh checkout has the
-      # bundled index, not the downloaded one.
+      # A fresh checkout has the bundled index, not the downloaded one, and
+      # `make deps` is not part of `make ci` any more (it hits the network).
       - name: Fetch dependencies
         shell: pwsh
         run: |
