@@ -64,13 +64,15 @@ Breaking any of these produces a confusing failure, not a clean error.
 - **The export routes match a fixed allowlist of names** rather than joining
   user input onto a path. Do not turn `send_run_file` into a general file
   server.
-- **A `.mbtx` cannot build another `.mbtx` while it is running — on Windows.**
-  Every `.mbtx` links to the same `_build/.../single/single.exe`, and Windows refuses
-  to overwrite a running executable (`LNK1168: cannot open ... for writing`). The
-  smoke and API suites build the mock endpoint as a child `.mbtx`, so on Windows run
-  them from a copy: `moon build … && cp single.exe scripts/_build/smoke && scripts/_build/smoke`.
-  `.github/workflows/ci.yml` does exactly that. On Linux `moon run` is fine; the
-  failure mode is `text file busy` at worst.
+- **Each `.mbtx` builds into its own target-dir** (`scripts/_build/mbtx/<name>/…`,
+  see `mbtx_dir` in `scripts/lib.sh` and in each script). They used to share
+  `_build/.../single/single.exe`, so a running suite could not build the mock
+  endpoint it spawns — Windows refuses to overwrite a running executable
+  (`LNK1168: cannot open ... for writing`). Separate directories remove that
+  collision. `.github/workflows/ci.yml`'s Windows job still builds, copies and runs
+  (so the runner needs no shell) and now locates the binary with
+  `Get-ChildItem -Recurse` instead of hardcoding the path. On Linux `moon run` is
+  fine; the failure mode is `text file busy` at worst.
 - **A copied wrapper needs the platform's executable suffix.** `@process.spawn`
   finds `scripts/_build/mock-endpoint` on Linux; on Windows `CreateProcess` will not
   append `.exe` and reports "cannot find the file specified". `build_mbtx` therefore

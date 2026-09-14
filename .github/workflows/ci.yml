@@ -113,27 +113,32 @@ jobs:
 
       # The two end-to-end suites: no shell, no curl, no grep.
       #
-      # Built, copied, then run — not `moon run`. Every .mbtx compiles to the same
-      # output path (`_build/.../single/single.exe`), and Windows refuses to
-      # overwrite an executable that is currently running (LNK1168). A .mbtx that
-      # is itself running therefore cannot build another one, which is exactly
-      # what these two do when they build the mock endpoint. Running a *copy*
-      # frees that path again. On Linux the same thing is only a "text file busy"
-      # hazard for `cp`, so `make smoke` gets away with `moon run`.
+      # Built, copied, then run — not `moon run`. Each .mbtx builds into its own
+      # target-dir now (scripts/_build/mbtx/<name>/...), so a running suite no
+      # longer collides with the mock endpoint it builds. The copy stays: the
+      # runner then holds no build output and $LASTEXITCODE is the suite's own.
+      #
+      # The built binary is *found*, not hardcoded: the path comes from
+      # --target-dir and moon appends the source file name again, so the exact
+      # depth already changed once and a hardcoded path silently rotted away.
       - name: smoke end to end
         shell: pwsh
         run: |
-          moon build --target native scripts/smoke.mbtx
+          moon build --target native --target-dir scripts/_build/mbtx/smoke.mbtx scripts/smoke.mbtx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/smoke.exe -Force
+          $single = Get-ChildItem scripts/_build/mbtx/smoke.mbtx -Recurse -Filter single.exe | Select-Object -First 1
+          if (-not $single) { Write-Error "no single.exe under scripts/_build/mbtx/smoke.mbtx"; exit 1 }
+          Copy-Item $single.FullName scripts/_build/smoke.exe -Force
           scripts/_build/smoke.exe
           exit $LASTEXITCODE
 
       - name: server HTTP contract
         shell: pwsh
         run: |
-          moon build --target native scripts/server-api.mbtx
+          moon build --target native --target-dir scripts/_build/mbtx/server-api.mbtx scripts/server-api.mbtx
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item scripts/_build/native/debug/build/single/single.exe scripts/_build/server-api.exe -Force
+          $single = Get-ChildItem scripts/_build/mbtx/server-api.mbtx -Recurse -Filter single.exe | Select-Object -First 1
+          if (-not $single) { Write-Error "no single.exe under scripts/_build/mbtx/server-api.mbtx"; exit 1 }
+          Copy-Item $single.FullName scripts/_build/server-api.exe -Force
           scripts/_build/server-api.exe
           exit $LASTEXITCODE
