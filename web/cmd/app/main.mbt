@@ -119,7 +119,6 @@ struct AppModel {
   /// 打开页面时要从 hash 里恢复的那条运行（恢复过就清掉，只做一次）。
   pending_run : String?
   /// 「从文本文件建测试集」的路径输入（服务端上的路径，服务端去读）。
-  import_path : String
   /// 「这次跑什么」面板开在哪一页：set（测试集）/ prompt（临时提示词）。
   /// 只是视图状态——真正决定跑什么的是上面那个输入框里有没有内容。
   panel_tab : String
@@ -131,12 +130,18 @@ struct AppModel {
   cot_thinking : Array[String]
   /// 这些模型带 reasoning_effort: "high"
   cot_effort : Array[String]
-  /// 运行方式：serial（默认）/ models（按模型并行）/ all（全部并发）
+  /// 并发方式：serial（默认）/ models（按模型并行）/ all（全部并发）
   parallel : String
   /// 刚套用过预设：把受影响的输入框框起来，直到用户自己改任意一个字段
   preset_applied : Bool
-  /// 「从文本文件生成新测试集」那个按钮展开了没有
-  import_open : Bool
+  /// 「查看更多」的历史弹窗开着没有
+  history_open : Bool
+  /// 弹窗里已经铺出多少条（第一步 50，之后每次 +30）
+  history_shown : Int
+  /// 「从文本文件生成新测试集」：桥接字段的原始 JSON（JS 写完派发 input）
+  import_payload : String
+  /// 刚从文件对话框里选中的文件名（用来给新集取默认名字）
+  import_file_name : String
   run_id : String?
   status : String
   done : Int
@@ -223,12 +228,57 @@ struct AppModel {
 ///|
 /// 导入文本文件时新建的那个集叫什么：优先用手填的「新集名字」，否则用文件名
 /// （去掉目录与扩展名，把不适合出现在文件名里的字符换掉）。
+/// 集名就是文件名，服务端只收 [A-Za-z0-9._-]，长度 1-64。这里先按同一套判一遍，
+/// 好在页面上说清楚为什么不行（不然用户只会看到一个没头没脑的 400）
+fn is_usable_set_name(name : String) -> Bool {
+  if name.length() == 0 || name.length() > 64 {
+    return false
+  }
+  for ch in name {
+    let ok = (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '.' ||
+      ch == '_' ||
+      ch == '-'
+    if !ok {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// 同时最多对比几个模型。
+///
+/// 不是拍脑袋定的：勾到第三个的时候，那三列的并排对比已经读不动了，而这份页面的
+/// 用处正是「同一道题，两个模型差在哪」。超出来的由 ToggleModel 自动挤掉最早的
+/// 那个（手输的 extra_models 绕不过去，那条由 run_issues 拦）
+let max_models : Int = 2
+
+///|
+fn toggle_model(model : AppModel, id : String) -> AppModel {
+  let next = toggle(model.selected_models, id)
+  if next.length() <= max_models {
+    return { ..model, preset_applied: false, selected_models: next }
+  }
+  // 勾满之后再勾一个新的：把最早那个摘掉（数组是按点击顺序追加的）。
+  // 用户看到的是「勾第三个，第一个自己弹掉」——这比默默拒绝更好懂
+  let kept : Array[String] = []
+  for i = max_models; i < next.length(); i = i + 1 {
+    kept.push(next[i])
+  }
+  { ..model, preset_applied: false, selected_models: kept }
+}
+
+///|
 fn import_set_name(model : AppModel) -> String {
   let typed = model.new_set_name.trim(chars=" \t\r\n").to_owned()
   if typed != "" {
     return typed
   }
-  let path = model.import_path.trim(chars=" \t\r\n").to_owned()
+  // 名字来自文件对话框选中的那个文件名（原来读的是手填的路径，现在没有那个框了）
+  let path = model.import_file_name.trim(chars=" \t\r\n").to_owned()
   if path == "" {
     return ""
   }
@@ -315,11 +365,13 @@ fn initial_model() -> AppModel {
     cot_effort: query_list(query, "cotEffort"),
     parallel: query.get("parallel").unwrap_or("serial"),
     preset_applied: false,
-    import_open: false,
+    history_open: false,
+    history_shown: 0,
+    import_payload: "",
+    import_file_name: "",
     viewed_error: None,
     confirm_delete: None,
     pending_run: query_run_id(query),
-    import_path: "",
     panel_tab: if query.get("prompt") is Some(_) {
       "prompt"
     } else {
@@ -492,10 +544,9 @@ enum Msg {
   CotClear
   SetParallel(String)
   SetPanelTab(String)
-  ImportPathChanged(String)
-  ToggleImport
+  PickImportFile
+  ImportFilePicked(String)
   Spot(String)
-  ImportCaseFile
   CaseFileImported(Result[Json, Error])
   MaxTokensChanged(String)
   TemperatureChanged(String)
@@ -510,6 +561,9 @@ enum Msg {
   CopyMarkdown
   CopyShareLink
   RefreshRuns
+  OpenHistory
+  CloseHistory
+  LoadMoreHistory
   RunsLoaded(Result[RunsResponse, Error])
   OpenRun(String)
   ViewedLoaded(String, Result[RunStatus, Error])
@@ -630,6 +684,10 @@ fn app() -> @rabbita.App {
 
 ///|
 fn main {
+  // 挂名字（data-name）供人 / 工具定位元素：Rabbita 没有公开的任意属性入口，
+  // 所以这层名字在 DOM 上补，与渲染、状态都无关。放在 mount 之前与之后都行，
+  // 它自己会等 body 就绪、并用 MutationObserver 跟上重渲染
+  deploy_data_names()
   // 注意：rabbita 的 mount 走的是 document.getElementById(id)，参数是裸 id，
   // 不是 CSS 选择器——传 "#app" 会查不到元素并在 unwrap 处 panic。
   app().mount("app")
@@ -727,12 +785,7 @@ fn update(
         Err(error) =>
           ({ ..model, meta_error: Some(error.to_string()), }, @cmd.none)
       }
-    ToggleModel(id) =>
-      (
-        { ..model,
-        preset_applied: false, selected_models: toggle(model.selected_models, id), },
-        @cmd.none,
-      )
+    ToggleModel(id) => (toggle_model(model, id), @cmd.none)
     ToggleCase(id) =>
       (
         { ..model, preset_applied: false, selected_cases: toggle(model.selected_cases, id), },
@@ -769,6 +822,35 @@ fn update(
       ({ ..model, copied: Some(copy_markdown(model)), }, @cmd.none)
     CopyShareLink =>
       ({ ..model, copied: Some(copy_share_link(model)), }, @cmd.none)
+    OpenHistory => {
+      // 打开时先铺第一步；并把「正在看的那条」滚到第 8 格附近，
+      // 让用户能同时看到它上下的记录（纯视觉，交给 DOM 上的小脚本）
+      let first = history_first_page
+      // 目标 = 正在看的那条（没有就看最新的）：把它放到第 8 格附近
+      let target = match (model.runs, model.viewed) {
+        (Some(runs), Some(viewed)) => {
+          let mut found = 0
+          for i = 0; i < runs.length() && i < first; i = i + 1 {
+            if runs[i].id == viewed.id {
+              found = i
+            }
+          }
+          found
+        }
+        _ => 0
+      }
+      pin_history_slot(target, history_slot)
+      ({ ..model, history_open: true, history_shown: first }, @cmd.none)
+    }
+    CloseHistory => ({ ..model, history_open: false }, @cmd.none)
+    LoadMoreHistory => {
+      let next = model.history_shown + history_more_page
+      let shown = match model.runs {
+        Some(runs) => if next > runs.length() { runs.length() } else { next }
+        None => next
+      }
+      ({ ..model, history_shown: shown }, @cmd.none)
+    }
     RefreshRuns => (model, fetch_runs(emit))
     RunsLoaded(result) =>
       match result {
@@ -1605,30 +1687,68 @@ fn update(
     CotClear => ({ ..model, cot_thinking: [], cot_effort: [] }, @cmd.none)
     SetParallel(mode) => ({ ..model, parallel: mode }, @cmd.none)
     SetPanelTab(tab) => ({ ..model, panel_tab: tab, }, @cmd.none)
-    ToggleImport => ({ ..model, import_open: !model.import_open }, @cmd.none)
+    PickImportFile => {
+      // 只是把对话框打开；结果稍后经 #import-bridge 的 input 事件回来
+      pick_text_file("import-bridge")
+      (model, @cmd.none)
+    }
+    ImportFilePicked(raw) => {
+      let parsed : Json = @json.parse(raw) catch { _ => Json::null() }
+      guard parsed is Object(obj) else { (model, @cmd.none) }
+      let name = match obj.get("name") {
+        Some(String(text)) => text
+        _ => ""
+      }
+      let text = match obj.get("text") {
+        Some(String(text)) => text
+        _ => ""
+      }
+      let failure = match obj.get("error") {
+        Some(String(text)) => Some(text)
+        _ => None
+      }
+      // 清掉桥接字段：不然同一份内容再来一次不会触发 input（值没变）
+      let next = { ..model, import_payload: "", import_file_name: name }
+      match failure {
+        Some(message) => ({ ..next, cases_error: Some(message) }, @cmd.none)
+        None =>
+          if text == "" {
+            ({ ..next, cases_error: Some("这个文件是空的") }, @cmd.none)
+          } else {
+            // 名字优先用「新集名字」，其次用文件名（import_set_name 里就是这么定的）
+            let set_name = import_set_name(next)
+            if set_name == "" {
+              (
+                {
+                  ..next,
+                  cases_error: Some("这个文件名没法当集名，先在左边填一个「新集名字」"),
+                },
+                @cmd.none,
+              )
+            } else if !is_usable_set_name(set_name) {
+              // 服务端只收 [A-Za-z0-9._-]（集名就是文件名）。
+              // 在这里先拦一道，否则用户拿到的是一句没头没脑的 400
+              (
+                {
+                  ..next,
+                  cases_error: Some(
+                    "集名只能用字母、数字、点、下划线、短横。这个文件名叫「\{set_name}」，先在上面填一个「新集名字」",
+                  ),
+                },
+                @cmd.none,
+              )
+            } else {
+              (
+                { ..next, cases_error: None, cases_saved: None },
+                import_case_text(set_name, text, emit),
+              )
+            }
+          }
+      }
+    }
     Spot(id) => {
       spot_field(id)
       (model, @cmd.none)
-    }
-    ImportPathChanged(text) => ({ ..model, import_path: text, }, @cmd.none)
-    ImportCaseFile => {
-      let name = import_set_name(model)
-      if name == "" {
-        (
-          {
-            ..model,
-            cases_error: Some(
-              "先写个新集名字，或用文件本身的名字",
-            ),
-          },
-          @cmd.none,
-        )
-      } else {
-        (
-          { ..model, cases_error: None, cases_saved: None, },
-          import_case_file(name, model, emit),
-        )
-      }
     }
     CaseFileImported(result) =>
       match result {
@@ -1637,7 +1757,7 @@ fn update(
             {
               ..model,
               cases_saved: Some("已从文本文件建好测试集"),
-              import_path: "",
+              import_file_name: "",
               panel_tab: "set",
             },
             @cmd.batch([fetch_meta(emit), fetch_case_set(json_name(json), emit)]),
@@ -1689,6 +1809,11 @@ fn update(
       if model.status == "running" || model.status == "starting" {
         (model, @cmd.none)
       } else {
+        let (errors, _) = run_issues(model)
+        if errors.length() > 0 {
+          // 按钮看着已经灰了；这里再拦一道，免得键盘/脚本绕过去
+          return (model, @cmd.none)
+        }
         let payload = RunPayload::of(model)
         (
           {
@@ -2054,6 +2179,7 @@ fn view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       ]),
     ]),
     footer(model),
+    history_dialog(model, emit),
     context_dialog(model, emit),
   ])
 }
@@ -2195,13 +2321,6 @@ fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
           "不勾：测试集里逐条写的 system 优先，用例没写的才落到上面这条"
         },
       ),
-      // 勾了但文本框是空的：这个开关此刻等于没开（后端也是这么判的），
-      // 所以补一句红色提示——否则用户会以为填了测试集之外的 system 已经生效
-      if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
-        el("span", "notice-bad", [txt("文本框还是空的，填上才生效")])
-      } else {
-        @html.fragment([])
-      },
     ]),
   ])
 }
@@ -2226,7 +2345,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         @html.h1([txt("LLM 模型对比")]),
         @html.p([
           txt(
-            "勾选或直接填模型、调好参数，点「开始评测」，进度实时回传；运行方式可选串行或并行",
+            "勾选或直接填模型、调好参数，点「开始评测」，进度实时回传；并发方式可选串行或并行",
           ),
         ]),
         @html.p([
@@ -2253,6 +2372,7 @@ fn controls(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
         param_row(model, emit),
         parallel_row(model, emit),
         confirm_summary(model, emit),
+        issue_lists(model),
         action_row(model, emit),
         if model.autorun_held {
           el("p", "notice", [
@@ -2273,6 +2393,8 @@ fn model_picker(
   model : AppModel,
   emit : @cmd.Emit[Msg],
 ) -> @html.Html {
+  // 服务端一个模型都没给时，那句「例如 deepseek-chat…」也就没有来由了
+  let models_menu_nonempty = meta.models.length() > 0
   let boxes = meta.models.map(fn(id) {
     labelled_checkbox(
       "model-" + id,
@@ -2287,14 +2409,18 @@ fn model_picker(
     el("div", "field", [
       @html.label(for_="extra-models", [
         txt(
-          "也可以直接填模型 id（逗号分隔，与服务端菜单合并）",
+          "也可以直接填模型 id（逗号分隔，与服务端菜单合并；最多同时对比 \{max_models} 个）",
         ),
       ]),
       @html.input(
         input_type=@html.InputType::Text,
         id="extra-models",
         value=model.extra_models,
-        placeholder="例如 deepseek-chat,deepseek-reasoner",
+        placeholder=if models_menu_nonempty {
+          "例如 deepseek-chat,deepseek-reasoner"
+        } else {
+          ""
+        },
         on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
       ),
     ]),
@@ -2419,7 +2545,7 @@ fn number_field(
 
 ///|
 ///|
-/// 运行方式：串行是默认（延迟数字只有串行才干净），另外两个只为了快
+/// 并发方式：串行是默认（延迟数字只有串行才干净），另外两个只为了快
 fn parallel_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let option = fn(mode : String, label : String, hint : String) {
     el("label", "check parallel-option", [
@@ -2436,7 +2562,7 @@ fn parallel_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     ])
   }
   el("div", "parallel-row", [
-    el("div", "parallel-head", [txt("运行方式")]),
+    el("div", "parallel-head", [txt("并发方式")]),
     option("serial", "串行", "延迟数字只有串行才干净，也是默认"),
     option("models", "按模型并行", "每个模型一条流，模型内仍串行"),
     option("all", "全部并发", "所有请求一起发，最快也最容易撞限流"),
@@ -2473,11 +2599,9 @@ fn confirm_summary(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     }
     if parts.length() == 0 { "无" } else { parts.join(" · ") }
   }
-  let cot_target = if models.length() > 0 {
-    "cot-thinking-" + models[0]
-  } else {
-    "extra-models"
-  }
+  // 推理开关与并发方式亮的是整组容器（不是其中一个勾）：一组控件亮一个小勾，
+  // 用户看不到；而且容器直接拿 .spot，不依赖 :has()
+  let cot_target = if models.length() > 0 { ".cot-box" } else { "#extra-models" }
   let cases = if model.uses_prompt() {
     "临时提示词 1 条"
   } else {
@@ -2511,14 +2635,83 @@ fn confirm_summary(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     row("temperature", model.temperature.to_string(), "temperature"),
     row("间隔", "\{model.pace_ms} ms", "pace-ms"),
     row("最大重试次数", "\{model.retry} 次", "retry"),
-    row("运行方式", parallel_label, "parallel-" + model.parallel),
+    row("并发方式", parallel_label, ".parallel-row"),
     ]),
+  ])
+}
+
+///|
+/// 配置检查：红线拦住不让跑，橙线只提示、可以强行跑。
+///
+/// 分成两条总线（而不是散在各自的输入框旁边）是因为：用户按下开始之前要的是一份
+/// 完整的清单——哪里错了、哪里只是提醒，一次看完；散着放就得自己扫全页去找。
+/// 顺带把「值得挂上去的后续异常」留在这里加：往后有新的配置错误，往这两个数组里
+/// 丢一条就行，渲染与拦截逻辑都不用动
+///
+/// 返回 (错误, 警告)。
+fn run_issues(model : AppModel) -> (Array[String], Array[String]) {
+  let errors : Array[String] = []
+  let warnings : Array[String] = []
+  // 网关：空着用服务端配的那个；填了就必须像个 http(s) 地址
+  let base = model.base_url.trim(chars=" \t\r\n").to_owned()
+  let server_default = match model.meta {
+    Some(meta) => meta.baseUrl
+    None => ""
+  }
+  if base != "" {
+    if !base.has_prefix("http://") && !base.has_prefix("https://") {
+      errors.push("网关地址要以 http:// 或 https:// 开头")
+    }
+  } else if server_default == "" {
+    errors.push("没有可用的网关地址：上面填一个，或让服务端配一个")
+  }
+  // 模型：至少一个
+  let models = effective_models(model)
+  if models.length() == 0 {
+    errors.push("至少选一个模型")
+  } else if models.length() > max_models {
+    errors.push("最多同时对比 \{max_models} 个模型，现在有 \{models.length()} 个")
+  }
+  // 跑什么：勾了用例，或者填了临时提示词
+  if model.uses_prompt() {
+    if model.prompt.trim(chars=" \t\r\n") == "" {
+      errors.push("临时提示词是空的")
+    }
+  } else if model.selected_cases.length() == 0 {
+    errors.push("测试集里一条用例都没勾，临时提示词也是空的")
+  }
+  // 橙线：勾了覆盖、但文本框空着——这次跑起来其实不会覆盖任何东西
+  if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
+    warnings.push("勾了覆盖测试集内的 System Prompt，但文本框是空的，这次不会生效")
+  }
+  (errors, warnings)
+}
+
+///|
+/// 把两条总线渲染成两个无序列表：红的在上，橙的在下
+fn issue_lists(model : AppModel) -> @html.Html {
+  let (errors, warnings) = run_issues(model)
+  let items = fn(class_ : String, title : String, list : Array[String]) {
+    if list.length() == 0 {
+      return @html.fragment([])
+    }
+    el("ul", class_, [
+      el("li", "issue-title", [txt(title)]),
+      ..list.map(fn(text) { el("li", "", [txt(text)]) }),
+    ])
+  }
+  el("div", "issues", [
+    items("issues errors", "还差这些才能开始", errors),
+    items("issues warnings", "可以跑，但先看一眼", warnings),
   ])
 }
 
 ///|
 fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let running = model.status == "running" || model.status == "starting"
+  // 有红线就不让跑：按钮看着是灰的，点击也会在 update 里被挡
+  let (errors, _) = run_issues(model)
+  let blocked = errors.length() > 0
   let total = effective_models(model).length() *
     (if model.uses_prompt() { 1 } else { model.selected_cases.length() }) *
     model.repeats
@@ -2528,7 +2721,13 @@ fn action_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     // `<button class="primary" disabled="">开始评测</button>`），
     // 结果不刷新页面就再也点不动。改由 class 表达忙闲，重复点击在 update 里挡。
     @html.button(
-      class=if running { "primary busy" } else { "primary" },
+      class=if running {
+        "primary busy"
+      } else if blocked {
+        "primary blocked"
+      } else {
+        "primary"
+      },
       on_click=emit(Msg::StartRun),
       [txt(if running { "运行中…" } else { "开始评测" })],
     ),
@@ -2581,18 +2780,21 @@ fn cost_hint(model : AppModel) -> @html.Html {
 
 ///|
 /// 网关覆盖项。留空就用服务端环境里的那份；填了只对本次运行生效。
+///
+/// 占位文字只在服务端**真的**给了对应的东西时才写：服务端没配网关 / 没配密钥时
+/// 就空着。不然那行灰字会写着一个并不存在的值，用户以为跑的就是它
 fn gateway_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let base_hint = match model.meta {
-    Some(meta) => "留空用服务端的：" + meta.baseUrl
+    Some(meta) =>
+      if meta.baseUrl == "" {
+        ""
+      } else {
+        "留空用服务端的：" + meta.baseUrl
+      }
     None => ""
   }
   let key_hint = match model.meta {
-    Some(meta) =>
-      if meta.hasKey {
-        "留空用服务端已配置的密钥"
-      } else {
-        "服务端没配密钥；留空表示不带 key"
-      }
+    Some(meta) => if meta.hasKey { "留空用服务端已配置的密钥" } else { "" }
     None => ""
   }
   el("div", "params gateway-row", [

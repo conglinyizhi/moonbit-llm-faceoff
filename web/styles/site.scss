@@ -1991,7 +1991,7 @@ button.ghost {
   }
 }
 
-// 运行方式：三选一，radio + 一行说明。放在参数行与开始按钮之间——
+// 并发方式：三选一，radio + 一行说明。放在参数行与开始按钮之间——
 // 它是「怎么跑」，不是「跑什么」
 .parallel-row {
   border-top: 1px solid $border-soft;
@@ -2054,7 +2054,15 @@ button.ghost {
 .spot {
   border-color: $warn !important;
   box-shadow: 0 0 0 3px rgba(210, 153, 34, 0.28) !important;
+  border-radius: 0.35rem;
   transition: box-shadow 0.15s ease;
+}
+
+// 整组当目标时的可见度：容器平时只有一条上边框，光靠 border-color 看不出什么，
+// 补一圈淡淡的底色，让「就是这一块」更明确
+.parallel-row.spot,
+.cot-box.spot {
+  background: rgba(210, 153, 34, 0.06);
 }
 
 // 开始前确认：只读的一览表 + 每行一个「调整」。放在开始按钮上面，
@@ -2121,7 +2129,7 @@ button.ghost {
   }
 }
 
-// 「调整」有时指向组里的某个控件（运行方式的 radio、推理开关的 checkbox）。
+// 「调整」有时指向组里的某个控件（并发方式的 radio、推理开关的 checkbox）。
 // 一个 14px 的 radio 亮一圈 3px 的光环，等于没亮——所以用 :has() 把整组一起点亮，
 // 同时把那个控件自己身上的光环收掉，只留组这一层
 .parallel-row:has(.spot),
@@ -2161,9 +2169,108 @@ button.ghost {
   }
 }
 
-// 勾了覆盖、但文本框空着——这行红的跟在提示后面，说明此刻开关等于没开。
-// 只加一层红字，不再开一个方框：它紧贴着上面那句，独立成块又会变回"告警条"
-.picker-core .notice-bad {
+// 两条配置总线：红的是拦路的，橙的是提醒。都放在开始按钮上面，
+// 因为用户按下之前要的是一份完整清单
+.issues {
+  list-style: none;
+  margin: 0 0 0.9rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.65;
+
+  li {
+    padding-left: 1rem;
+    position: relative;
+
+    &::before {
+      content: "・";
+      left: 0;
+      position: absolute;
+    }
+  }
+
+  .issue-title {
+    color: $title;
+    padding-left: 0;
+
+    &::before {
+      content: "";
+    }
+  }
+}
+
+.issues.errors {
+  background: rgba(248, 81, 73, 0.08);
+  border: 1px solid rgba(248, 81, 73, 0.35);
   color: $danger;
-  margin-left: 0.4rem;
+}
+
+.issues.warnings {
+  background: rgba(210, 153, 34, 0.07);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  color: $warn;
+
+  .issue-title {
+    color: $warn;
+  }
+}
+
+// 有红线时按钮看着是灰的（不用 disabled 属性，见 action_row 的注释）
+button.primary.blocked {
+  background: $panel-2;
+  border-color: $border;
+  color: $muted;
+  cursor: not-allowed;
+}
+
+// 文件选择的着陆点：JS 把读到的内容写进这个字段再派发 input，页面这边当普通输入
+// 接住。用户不该看到它
+.import-bridge {
+  display: none;
+}
+
+// 「查看更多」那张卡片：跟记录卡同形，但只在右下角放一个动作
+.history-item.history-more {
+  align-items: center;
+  border-style: dashed;
+  display: flex;
+  gap: 0.6rem;
+  justify-content: space-between;
+
+  .history-more-line {
+    color: $muted;
+    font-size: 0.78rem;
+  }
+}
+
+// 条目里那截内部 id：小、淡、等宽，便于和弹窗里的顺序对齐
+.run-id {
+  @include value-text;
+  color: $muted;
+  font-size: 0.74rem;
+  margin-right: 0.35rem;
+}
+
+// 历史弹窗：列表自己滚，高度按视口给（大约十六七条，目标落在第 8 格时
+// 上下都有七八条邻居）
+.history-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+.history-dialog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  max-height: 62vh;
+  padding-right: 0.3rem;
+}
+
+.history-dialog-more {
+  display: flex;
+  justify-content: center;
 }

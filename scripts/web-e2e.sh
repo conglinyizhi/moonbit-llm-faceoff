@@ -504,7 +504,7 @@ compare_probe='(async () => {
   const out = {};
   const pickBtn = (item) =>
     Array.from(item.querySelectorAll(".history-actions button")).find((b) => b.textContent.includes("对比"));
-  const items = Array.from(document.querySelectorAll(".history-item"));
+  const items = Array.from(document.querySelectorAll(".history-item:not(.history-more)"));
   out.items = items.length;
   if (items.length < 2) { return out; }
   pickBtn(items[0]).click();
@@ -630,7 +630,7 @@ ctx2_probe='(async () => {
   }
   byText("刷新").click();
   await sleep(1200);
-  const items = [...document.querySelectorAll(".history-item")];
+  const items = [...document.querySelectorAll(".history-item:not(.history-more)")];
   const modelsOfNth = async (n) => {
     items[n].querySelectorAll(".history-actions button")[0].click();
     await sleep(1500);
@@ -1202,9 +1202,12 @@ echo "ok: 真实 run id（直接打开那次运行，表单照常）"
 
 echo "==> 删除一条历史"
 delete_probe='(async () => {
-  const before = document.querySelectorAll(".history-item").length;
+  const before = document.querySelectorAll(".history-item:not(.history-more)").length;
   const item = document.querySelector(".history-item");
   if (!item) { return { error: "no history item" }; }
+  // 侧栏只显示前 10 条，所以「条数变短」不是可靠的判据（有 11 次以上历史时
+  // 删掉一条仍然显示 10）。改成认那条自己的 id 还在不在
+  const goneId = (item.querySelector(".run-id") || {}).textContent || "";
   const find = (text) => Array.from(item.querySelectorAll(".history-actions button"))
     .find((b) => b.textContent === text);
   const del = find("删除");
@@ -1214,15 +1217,19 @@ delete_probe='(async () => {
   await new Promise((r) => setTimeout(r, 600));
   const confirm = find("确认删除");
   const hasCancel = !!find("取消");
-  const confirmFirst = document.querySelectorAll(".history-item").length;
+  const confirmFirst = document.querySelectorAll(".history-item:not(.history-more)").length;
   if (!confirm) { return { before: before, after: confirmFirst, noConfirm: true }; }
   confirm.click();
   await new Promise((r) => setTimeout(r, 1500));
+  const stillThere = Array.from(document.querySelectorAll(".history-item:not(.history-more) .run-id"))
+    .some((n) => n.textContent === goneId);
   return {
     before: before,
     afterFirstClick: confirmFirst,
     hasCancel: hasCancel,
-    after: document.querySelectorAll(".history-item").length,
+    after: document.querySelectorAll(".history-item:not(.history-more)").length,
+    goneId: goneId,
+    stillThere: stillThere,
   };
 })()'
 dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/delete.html" "$delete_probe" 2000 "$DUMP_READY_HISTORY"
@@ -1234,11 +1241,10 @@ before_first=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')
 first=$(echo "$probe" | sed -n 's/.*"afterFirstClick":\([0-9]*\).*/\1/p')
 [ -n "$before_first" ] && [ "$first" = "$before_first" ] ||
   fail "第一次点删除就把记录删了（$before_first → $first）:$probe"
-before=$(echo "$probe" | sed -n 's/.*"before":\([0-9]*\).*/\1/p')
-after=$(echo "$probe" | sed -n 's/.*"after":\([0-9]*\).*/\1/p')
-[ -n "$before" ] && [ -n "$after" ] && [ "$after" -lt "$before" ] ||
-  fail "点「删除」之后列表没变短（$before → $after）：$probe"
-echo "ok: 点「删除」之后那条从列表里消失（$before → $after）"
+# 判据是「被删的那条不见了」而不是条数：侧栏有 10 条上限，历史更多时条数不会变
+echo "$probe" | grep -q '"stillThere":false' ||
+  fail "点「删除」之后那条还在列表里：$probe"
+echo "ok: 点「删除」之后那条从列表里消失"
 
 echo
 echo "web e2e: 全部通过"

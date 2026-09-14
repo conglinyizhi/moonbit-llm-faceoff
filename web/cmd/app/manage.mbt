@@ -169,13 +169,12 @@ fn validate_drafts(drafts : Array[CaseDraft]) -> String? {
 /// 你自己填的；而浏览器读本地文件要先把内容读进页面、再 POST 传回来——多一道
 /// 没有意义的搬运。文件里一行一条 prompt，空行与 `#` 开头跳过；JSONL 用例文件
 /// 也能直接吃。
-fn import_case_file(
-  name : String,
-  model : AppModel,
-  emit : @cmd.Emit[Msg],
-) -> @cmd.Cmd {
+/// 把浏览器里选中的文件内容送到服务端建集。
+///
+/// 发的是 text 而不是 path：文件在用户机器上，服务端拿不到那个路径
+fn import_case_text(name : String, text : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
   @http.post("/api/cases/" + name + "/import")
-  .with_json(Json::object({ "path": Json::string(model.import_path) }))
+  .with_json(Json::object({ "text": Json::string(text) }))
   .expect_json(emit.map(fn(result) { CaseFileImported(result) }))
 }
 
@@ -330,37 +329,23 @@ fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
 ///|
 /// 从纯文本文件建测试集：一行一条 prompt。服务端读这个路径（它就在你机器上）。
 fn import_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
-  // 收成一个按钮：平时只有它一个，点开才露出路径输入框。
-  // 不能用原生文件选择器——导入要在**服务端**读文件，而浏览器选中的是本机文件，
-  // 服务端看不到。所以这里要的是「服务端能读到的路径」。
-  if !model.import_open {
-    return el("div", "import-row", [
-      @html.button(class="link-btn", on_click=emit(Msg::ToggleImport), [
-        txt("从文本文件生成新测试集"),
-      ]),
-    ])
-  }
   el("div", "import-row", [
-    el("span", "muted", [txt("从纯文本文件新建")]),
-    @html.input(
-      input_type=@html.InputType::Text,
-      class="set-name",
-      id="import-path",
-      value=model.import_path,
-      placeholder="文件路径，例如 /home/you/text.txt",
-      on_input=emit.map(fn(text) { ImportPathChanged(text) }),
-    ),
-    @html.button(class="ghost", on_click=emit(Msg::ImportCaseFile), [
-      txt("导入为新集"),
-    ]),
-    @html.button(class="link-btn", on_click=emit(Msg::ToggleImport), [
-      txt("收起"),
+    @html.button(class="link-btn", on_click=emit(Msg::PickImportFile), [
+      txt("从文本文件生成新测试集"),
     ]),
     el("span", "hint", [
-      txt(
-        "一行一条 prompt，空行与 # 跳过；集名用上面的「新集名字」，留空就用文件名",
-      ),
+      txt("选一个文本文件就行，一行一条 prompt，空行与 # 跳过；集名默认取文件名"),
     ]),
+    // JS 读完文件后的着陆点：它把 {"name", "text"} 写进来再派发 input，
+    // 这边当普通输入事件接住。平时它是隐藏的，用户看不到也不碰
+    @html.textarea(
+      class="import-bridge",
+      id="import-bridge",
+      value=model.import_payload,
+      rows=1,
+      on_input=emit.map(fn(text) { ImportFilePicked(text) }),
+      ([] : Array[@html.Html]),
+    ),
   ])
 }
 

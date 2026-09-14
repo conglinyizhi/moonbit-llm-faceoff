@@ -229,7 +229,30 @@ fn history_panel(
           ]),
         ]
       } else {
-        runs.map(fn(info) { run_item(model, info, emit) })
+        // 侧栏只铺前 10 条：它不是主角，全铺出来会把整页推得很长
+        let items : Array[@html.Html] = []
+        let limit = if runs.length() < history_panel_limit {
+          runs.length()
+        } else {
+          history_panel_limit
+        }
+        for i = 0; i < limit; i = i + 1 {
+          items.push(run_item(model, runs[i], emit))
+        }
+        if runs.length() > limit {
+          items.push(
+            // 「查看更多」本身就是一张卡片，和上面的记录长在一起
+            el("article", "history-item history-more", [
+              el("div", "history-more-line", [
+                txt("还有 \{runs.length() - limit} 次没有显示"),
+              ]),
+              @html.button(class="link-btn", on_click=emit(Msg::OpenHistory), [
+                txt("查看更多"),
+              ]),
+            ]),
+          )
+        }
+        items
       }
   }
   let error = match model.runs_error {
@@ -294,7 +317,12 @@ fn run_item(
   let running = info.status == "running"
   el("article", classes, [
     el("div", "history-row", [
-      el("span", "history-time", [txt(format_time(info.startedAt))]),
+      el("span", "history-time", [
+        // 把内部 id 露出来：弹窗与侧栏的顺序要能对上，用户才能确认
+        // 「我正在看的就是这一条」
+        el("span", "run-id", [txt(info.id)]),
+        txt(" " + format_time(info.startedAt)),
+      ]),
       el("span", "badges", badges),
     ]),
     el("div", "history-models", [txt(info.models_label())]),
