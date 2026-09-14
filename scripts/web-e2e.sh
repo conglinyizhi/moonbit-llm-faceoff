@@ -76,7 +76,7 @@ cleanup() {
   local pid
   local pids=(
     "${webkit_pid:-}" "${chrome_pid:-}" "${web_pid:-}" "${web2_pid:-}"
-    "${mock_pid:-}"
+    "${mock_pid:-}" "${nocfg_pid:-}"
   )
   for pid in "${pids[@]}"; do
     if [ -n "$pid" ]; then
@@ -235,6 +235,12 @@ dump_page_script() {
 start_browser
 dump_page "http://127.0.0.1:$PORT/" 6000 "$tmp/form.html" "$DUMP_READY_FORM"
 
+# 页面自己报的错也算败：cdp-dump 把 Runtime.exceptionThrown 与 console.error 收进
+# stderr（这里就是 form.html.err）。一条都不许有——这张网很便宜，而且盖住一整类
+# 「页面看着还在、其实已经炸了/数据对不上」的问题，这类 bug 以前全靠人眼碰
+load_errors=$(grep -E '^(EXCEPTION|CONSOLE\.error)' "$tmp/form.html.err" || true)
+[ -z "$load_errors" ] || fail "页面首次加载就报了错：$load_errors" "$tmp/form.html.err"
+
 grep -q 'id="model-mock-a"' "$tmp/form.html" || fail "表单里没有模型选项" "$tmp/form.html"
 grep -q 'id="model-mock-b"' "$tmp/form.html" || fail "表单里没有第二个模型" "$tmp/form.html"
 grep -q 'id="case-math-short"' "$tmp/form.html" || fail "表单里没有用例选项" "$tmp/form.html"
@@ -254,6 +260,15 @@ grep -q 'id="extra-models"' "$tmp/form.html" || fail "表单里没有手输模�
 grep -q 'id="base-url"' "$tmp/form.html" || fail "表单里没有网关地址输入框" "$tmp/form.html"
 grep -q 'id="api-key"' "$tmp/form.html" || fail "表单里没有 API key 输入框" "$tmp/form.html"
 grep -q 'type="password"' "$tmp/form.html" || fail "API key 输入框不是 password 类型" "$tmp/form.html"
+
+# 元素标注（data-name）是运行时注入的：Rabbita 没有公开的任意属性入口，所以它们
+# 在 DOM 上补。注入一旦不跑了（选择器表改了、MutationObserver 掉了），页面看着
+for mark in start-run-btn gateway-url-input api-key-input extra-models-input \
+  system-prompt-input system-override-toggle confirm-adjust-btn case-checkbox; do
+  grep -q "data-name=\"$mark\"" "$tmp/form.html" ||
+    fail "元素标注丢了：$mark（deploy_data_names 没跑，或者表里改了名）" "$tmp/form.html"
+done
+echo "ok: 关键元素的 data-name 都在（运行时注入还活着）"
 # 「这次跑什么」的两页：测试集 / 临时提示词
 grep -q 'panel-tabs' "$tmp/form.html" || fail "「这次跑什么」没有做成两页" "$tmp/form.html"
 grep -q '临时提示词' "$tmp/form.html" || fail "没有临时提示词那一页" "$tmp/form.html"
@@ -1293,6 +1308,75 @@ first=$(echo "$probe" | sed -n 's/.*"afterFirstClick":\([0-9]*\).*/\1/p')
 echo "$probe" | grep -q '"stillThere":false' ||
   fail "点「删除」之后那条还在列表里：$probe"
 echo "ok: 点「删除」之后那条从列表里消失"
+
+echo "==> 服务端什么都没配时，页面要说实话（不许出现编造的默认值）"
+# 这一类出过两次：服务端没配网关/模型时，字段空着、页面却当没事，按下去会去连一个
+# 谁都没配过的地址（兜底曾是 api.openai.com 加两个编造的模型名）。这里起第二个
+# 服务端，什么都不给它，然后要求页面：空菜单 / 没有兜底值 / 红线 / 拦住开始
+mkdir -p "$tmp/nocfg/runs" "$tmp/nocfg/cases"
+(cd web && exec env \
+  MOONLLM_BASE_URL= MOONLLM_API_KEY= LLM_WEB_MODELS= \
+  LLM_WEB_PORT=0 \
+  LLM_WEB_WORK="$tmp/nocfg/runs" \
+  LLM_WEB_STATIC="$tmp/static" \
+  LLM_WEB_CASES_DIR="$tmp/nocfg/cases" \
+  LLM_WEB_PRESETS="$tmp/nocfg/presets.json" \
+  ./_build/native/debug/build/cmd/server/server.exe >"$tmp/nocfg.port" 2>"$tmp/nocfg.log") &
+nocfg_pid=$!
+for _ in $(seq 1 200); do
+  [ -s "$tmp/nocfg.port" ] && break
+  sleep 0.05
+done
+NOCFG_PORT=$(tr -d '\n' < "$tmp/nocfg.port" 2>/dev/null)
+[ -n "$NOCFG_PORT" ] || fail "无配置的服务端没吐出端口" "$tmp/nocfg.log"
+curl -sf -o /dev/null "http://127.0.0.1:$NOCFG_PORT/api/meta" ||
+  fail "无配置的服务端 /api/meta 不通" "$tmp/nocfg.log"
+
+nocfg_probe='(async () => {
+  const t = document.body.innerText;
+  return {
+    fake: /MiniCPM5|api\.openai\.com/.test(t),
+    models: document.querySelectorAll("input[id^=model-]").length,
+    reds: document.querySelectorAll(".issues.errors .issue-row").length,
+    blocked: document.querySelector("[data-name=start-run-btn]").className,
+  };
+})()'
+dump_page_script "http://127.0.0.1:$NOCFG_PORT/" 8000 "$tmp/nocfg.html" "$nocfg_probe" 2000 "$DUMP_READY_FORM"
+nocfg=$(grep -o 'SCRIPT .*' "$tmp/nocfg.html.err" | sed 's/^SCRIPT //')
+echo "$nocfg" | grep -q '"fake":false' || fail "无配置时页面上有编造的兜底值：$nocfg"
+echo "$nocfg" | grep -q '"models":0' || fail "无配置时模型菜单不是空的：$nocfg"
+echo "$nocfg" | grep -qv '"reds":0' || fail "无配置时没有红线：$nocfg"
+echo "$nocfg" | grep -q blocked || fail "无配置时开始按钮没被拦住：$nocfg"
+echo "ok: 服务端没配时页面说实话（空菜单 / 红线 / 拦住 / 无兜底值）"
+
+echo "==> 勾了 System 覆盖却没写内容：字段里要说实话（黄），但不是拦路"
+# 放在最后：这条会把「覆盖」打开并把文本框清空，放前面会污染后面的跑用例断言。
+# 不拿 blocked 当判据——前面那段断言已经取消了所有模型，那时 blocked 是别的原因
+e2e_sys_probe='(async () => {
+  const box = document.querySelector("#system-override");
+  if (!box.checked) { box.click(); }
+  const ta = document.querySelector("#system");
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+  setter.call(ta, "");
+  ta.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 400));
+  const p = document.querySelector("[data-name=system-prompt-field] > p");
+  return {
+    cls: p.className,
+    text: p.textContent.trim().slice(0, 44),
+    color: getComputedStyle(p).color,
+    warnings: document.querySelectorAll(".issues.warnings .issue-row").length,
+  };
+})()'
+dump_page_script "http://127.0.0.1:$PORT/" 8000 "$tmp/sysfield.html" "$e2e_sys_probe" 2000 "$DUMP_READY_FORM"
+e2e_sys=$(grep -o 'SCRIPT .*' "$tmp/sysfield.html.err" | sed 's/^SCRIPT //')
+echo "$e2e_sys" | grep -q '"cls":"notice"' ||
+  fail "字段里那行不是黄线（或压根没换）：$e2e_sys"
+echo "$e2e_sys" | grep -q "空的" ||
+  fail "勾了覆盖又空着时，字段里没说实话：$e2e_sys"
+echo "$e2e_sys" | grep -qv '"warnings":0' ||
+  fail "这种状态没有出现在黄线总线上：$e2e_sys"
+echo "ok: 空文本 + 勾选覆盖 = 字段里黄字说实话，且进黄线总线"
 
 echo
 echo "web e2e: 全部通过"
