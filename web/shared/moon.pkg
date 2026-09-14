@@ -6,7 +6,3 @@ import {
 }
 
 supported_targets = "js+native+wasm"
-
-import {
-  "moonbitlang/core/test",
-} for "test"

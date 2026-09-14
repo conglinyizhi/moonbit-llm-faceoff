@@ -1,10 +1,8 @@
 import {
   "moonbitlang/async",
   "moonbitlang/async/http",
-  "moonbitlang/async/io",
   "moonbitlang/core/debug",
   "moonbitlang/async/stdio",
-  "moonbitlang/core/env",
   "moonbitlang/core/json",
   "moonbitlang/core/string",
 }
@@ -13,5 +11,4 @@ supported_targets = "+native"
 
 import {
   "moonbitlang/core/json",
-  "moonbitlang/core/test",
 } for "test"
