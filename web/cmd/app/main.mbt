@@ -158,7 +158,10 @@ struct AppModel {
   /// meta 到齐后套用，让链接本身就能表达一次完整配置。
   query : Map[String, String]
   /// 服务端菜单之外的模型 id，逗号或换行分隔；与勾选结果合并后生效。
+  /// 手输框里正在打的那串（还没按「识别」）
   extra_models : String
+  /// 按过「识别」的候选模型：和菜单合并渲染成 checkbox，选不选看 selected_models
+  custom_models : Array[String]
   /// 页面覆盖的网关地址。空串表示用服务端环境里的那份。
   base_url : String
   /// 页面覆盖的网关密钥。空串表示用服务端环境里的那份。
@@ -386,6 +389,7 @@ fn initial_model() -> AppModel {
     data: None,
     error: None,
     extra_models: "",
+    custom_models: [],
     base_url: query.get("baseUrl").unwrap_or(""),
     api_key: "",
     copied: None,
@@ -558,6 +562,7 @@ enum Msg {
   RunStarted(Result[StartResponse, Error])
   RunProgress(Result[RunStatus, Error])
   ExtraModelsChanged(String)
+  AddExtraModels
   BaseUrlChanged(String)
   ApiKeyChanged(String)
   CopyMarkdown
@@ -802,22 +807,35 @@ fn update(
         preset_applied: false, selected_cases: model.available_cases.map(fn(c) { c.id }), },
         @cmd.none,
       )
-    // 开始打字就把面板跟到临时那一页：用户的动作说明了他要看哪一页
-    PromptChanged(text) =>
-      (
-        {
-          ..model,
-          prompt: text,
-          panel_tab: if text.trim(chars=" \t\r\n") == "" {
-            "set"
-          } else {
-            "prompt"
-          },
-        },
-        @cmd.none,
-      )
+    // 只改文本，不动面板：跑什么是由「内容空不空」决定的（uses_prompt），
+    // 而不是由用户在看哪一页决定的。以前这里会在清空时把面板切回测试集，
+    // 于是编辑的一瞬间用户被拽到另一页去
+    PromptChanged(text) => ({ ..model, prompt: text }, @cmd.none)
     ExtraModelsChanged(text) =>
       ({ ..model, preset_applied: false, extra_models: text, }, @cmd.none)
+    // 「识别」：把输入框里那串（逗号或换行分隔）变成候选，然后清空输入框。
+    // 不自动勾选——跑哪两个由用户自己点，上限由 toggle_model 管
+    AddExtraModels => {
+      let known = match model.meta {
+        Some(meta) => meta.models
+        None => []
+      }
+      let next : Array[String] = []
+      for id in model.custom_models {
+        next.push(id)
+      }
+      let normalized = model.extra_models.replace_all(old="\n", new=",")
+      for piece in normalized.split(",") {
+        let clean = piece.trim(chars=" \t\r").to_owned()
+        if clean != "" && !known.contains(clean) && !next.contains(clean) {
+          next.push(clean)
+        }
+      }
+      (
+        { ..model, custom_models: next, extra_models: "", preset_applied: false },
+        @cmd.none,
+      )
+    }
     BaseUrlChanged(text) => ({ ..model, base_url: text, }, @cmd.none)
     ApiKeyChanged(text) => ({ ..model, api_key: text, }, @cmd.none)
     CopyMarkdown =>
@@ -1460,7 +1478,8 @@ fn update(
                 ..model,
                 preset_applied: true,
                 selected_models: selected,
-                extra_models: extra.join(","),
+                custom_models: extra,
+                extra_models: "",
                 system: preset.system.unwrap_or(model.system),
                 repeats: preset.repeats.unwrap_or(model.repeats),
                 max_tokens: preset.maxTokens.unwrap_or(model.max_tokens),
@@ -2051,16 +2070,11 @@ fn query_list(query : Map[String, String], key : String) -> Array[String] {
 
 ///|
 fn effective_models(model : AppModel) -> Array[String] {
+  // 只看勾选。手输的名字不再直接入队：先按「识别」变成候选 checkbox，再由用户勾选。
+  // 以前是「输入框里有什么就跑什么」，没打完的名字会被原样送进请求
   let out : Array[String] = []
   for id in model.selected_models {
     out.push(id)
-  }
-  let normalized = model.extra_models.replace_all(old="\n", new=",")
-  for piece in normalized.split(",") {
-    let clean = piece.trim(chars=" \t\r").to_owned()
-    if clean != "" && !out.contains(clean) {
-      out.push(clean)
-    }
   }
   out
 }
@@ -2403,9 +2417,17 @@ fn model_picker(
   model : AppModel,
   emit : @cmd.Emit[Msg],
 ) -> @html.Html {
-  // 服务端一个模型都没给时，那句「例如 deepseek-chat…」也就没有来由了
-  let models_menu_nonempty = meta.models.length() > 0
-  let boxes = meta.models.map(fn(id) {
+  // 候选 = 服务端/环境变量给的菜单 + 用户按「识别」加进来的，去重且保持顺序
+  let candidates : Array[String] = []
+  for id in meta.models {
+    candidates.push(id)
+  }
+  for id in model.custom_models {
+    if !candidates.contains(id) {
+      candidates.push(id)
+    }
+  }
+  let boxes = candidates.map(fn(id) {
     labelled_checkbox(
       "model-" + id,
       id,
@@ -2415,24 +2437,48 @@ fn model_picker(
   })
   el("fieldset", "picker", [
     el("legend", "", [txt("模型")]),
-    el("div", "picker-items", boxes),
+    el("div", "picker-items", [
+      // 环境变量没给任何模型时先说清楚该怎么配：否则这里一片空白，
+      // 用户只会以为页面坏了。
+      //
+      // 「看起来是禁用的」靠 class（变淡 + pointer-events: none），不是 disabled
+      // 属性——Rabbita 的 vdom diff 不会把 disabled 摘掉，开关一次就永久死掉
+      if meta.models.length() == 0 {
+        el("label", "check check-disabled", [
+          @html.input(
+            input_type=@html.InputType::Checkbox,
+            id="env-models-hint",
+            checked=false,
+          ),
+          el("span", "", [
+            txt(
+              "可以通过配置环境变量 LLM_WEB_MODELS 或 MOONLLM_MODEL 来配置最多 \{max_models} 个模型",
+            ),
+          ]),
+        ])
+      } else {
+        @html.fragment([])
+      },
+      ..boxes,
+    ]),
     el("div", "field", [
       @html.label(for_="extra-models", [
         txt(
-          "也可以直接填模型 id（逗号分隔，与服务端菜单合并；最多同时对比 \{max_models} 个）",
+          "填模型 id（逗号分隔）后按「识别」加入候选，再由上面的勾选定这次跑哪几个",
         ),
       ]),
-      @html.input(
-        input_type=@html.InputType::Text,
-        id="extra-models",
-        value=model.extra_models,
-        placeholder=if models_menu_nonempty {
-          "例如 deepseek-chat,deepseek-reasoner"
-        } else {
-          ""
-        },
-        on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
-      ),
+      el("div", "model-add", [
+        @html.input(
+          input_type=@html.InputType::Text,
+          id="extra-models",
+          value=model.extra_models,
+          placeholder="例如 deepseek-chat,deepseek-reasoner",
+          on_input=emit.map(fn(text) { ExtraModelsChanged(text) }),
+        ),
+        @html.button(class="ghost", on_click=emit(Msg::AddExtraModels), [
+          txt("识别"),
+        ]),
+      ]),
     ]),
     // 推理开关：按模型勾（勾中的模型才生成一行）。
     //
@@ -2626,10 +2672,16 @@ fn confirm_summary(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     el("div", "confirm-head", [txt("开始前确认")]),
     el("div", "confirm-rows", [
     row("网关", if model.base_url == "" { "服务端默认" } else { model.base_url }, "base-url"),
-    row("模型", if models.length() == 0 { "还没选" } else { models.join(", ") }, "extra-models"),
+    row("模型", if models.length() == 0 { "还没选" } else { models.join(", ") }, "[data-name=models-fieldset]"),
     row(
       "System Prompt",
-      if model.system == "" { "不带" } else { "已填 \{model.system.length()} 字" },
+      // 说的是「谁优先」而不是「填没填」：勾了覆盖且真填了内容，才是这里优先；
+      // 其余情况（没勾，或者勾了但框里是空的）都是用例自己那条优先
+      if model.system_override && model.system != "" {
+        "SystemPrompt 栏目下填充的汉字优先"
+      } else {
+        "测试集条目包含的文本优先"
+      },
       "system",
     ),
     row(

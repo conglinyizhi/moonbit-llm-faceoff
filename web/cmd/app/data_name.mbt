@@ -25,6 +25,9 @@ extern "js" fn deploy_data_names() -> Unit =
   #|    ["#base-url", "gateway-url-input"],
   #|    ["#api-key", "api-key-input"],
   #|    ["#extra-models", "extra-models-input"],
+  #|    // 模型那一整块（勾选菜单 + 手输框）：「模型」那行的「调整」会滚到这里，
+  #|    // 单看手输框会以为模型只能手填。用 :not 排除掉 System Prompt 那块
+  #|    ["fieldset.picker:not(.picker-core)", "models-fieldset"],
   #|    [".cot-box", "reasoning-box"],
   #|    [".cot-row .check input", "reasoning-toggle"],
   #|    [".cot-box .cot-all button", "reasoning-select-all-btn"],
