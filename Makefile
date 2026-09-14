@@ -15,7 +15,7 @@ MOON ?= moon
 SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
-.PHONY: help deps check test smoke api e2e demo web serve dev real-gateway install uninstall fmt ci clean
+.PHONY: help deps check test smoke api e2e demo web serve dev serve-demo real-gateway install uninstall fmt ci clean
 
 help:  ## list these targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -88,6 +88,12 @@ serve:  ## build, then serve the page from web/ (Ctrl-C to stop)
 
 dev:  ## dev server: build, serve, rebuild on change (Ctrl-C to stop)
 	bash scripts/dev.sh
+
+# 演示：本地假端点 + 一套演示数据 + 页面，先把两次评测跑好再交给你。
+# 演示数据全在临时目录，退出即删，不碰你自己的 runs / cases / presets。
+# 注：写成 serve-demo 而不是 serve:demo —— GNU Make 不接受目标名里的转义冒号
+serve-demo:  ## demo: mock endpoint + demo data + page (Ctrl-C to stop)
+	bash scripts/serve-demo.sh
 
 fmt:  ## format, and refresh the generated .mbti
 	$(MOON) fmt
