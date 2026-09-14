@@ -64,6 +64,11 @@ Breaking any of these produces a confusing failure, not a clean error.
 - **The export routes match a fixed allowlist of names** rather than joining
   user input onto a path. Do not turn `send_run_file` into a general file
   server.
+- **The artifact's depth under `--target-dir` differs per platform.** On Linux
+  moon appends the source file name again (`<dir>/<name>/native/…`); on Windows it
+  does not (`<dir>/native/…`), which the CI job's log shows. Look for both before
+  concluding a build failed — code that only knew one shape reported a *successful*
+  build as "compile failed" for two CI rounds.
 - **Each `.mbtx` builds into its own target-dir** (`scripts/_build/mbtx/<name>/…`,
   see `mbtx_dir` in `scripts/lib.sh` and in each script). They used to share
   `_build/.../single/single.exe`, so a running suite could not build the mock

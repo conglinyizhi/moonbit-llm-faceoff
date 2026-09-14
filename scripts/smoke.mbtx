@@ -245,7 +245,8 @@ async fn build_mbtx(src : String, out_base : String) -> String? {
     }
   }
   // 产物落在哪一层跟平台有关：Linux 上 target-dir 之下还会再拼一层源文件名，
-  // Windows 上不拼（CI 日志里的路径就没有那一层）。四个候选挨个试，别猜平台
+  // Windows 上不拼（CI 日志里的路径就没有那一层）。四个候选挨个试，别猜平台——
+  // 只认一种形状的写法把「构建成功」报成了「编译失败」，查了两轮 CI 才看出来
   let candidates : Array[String] = [
     dir + "/" + leaf + "/native/debug/build/single/single.exe",
     dir + "/" + leaf + "/native/debug/build/single/single",
