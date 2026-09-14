@@ -543,12 +543,12 @@ web/runs/<id>/
 | `LLM_WEB_CASES_DIR` | `cases`——一套用例一个 `<名字>.jsonl` |
 | `LLM_WEB_CASES` | `../bench/cases.example.jsonl`——只当 `cases/default.jsonl` 的种子 |
 | `LLM_WEB_PRESETS` | `presets.json` |
-| `LLM_WEB_MODELS` | `MiniCPM5-1B,MiniCPM5-2B` —— 只是默认菜单，运行可以指定任意模型 |
+| `LLM_WEB_MODELS` | —（没有默认菜单，在输入框里填模型 id） |
 | `LLM_WEB_SYSTEM` | 预填运行级 system prompt 的内容。写一次，之后每次运行都从它开始（页面上看得见，也随时能改） |
 | `LLM_BENCH_BIN` | `../_build/native/debug/build/cmd/bench/bench.exe` |
-| `LLM_WEB_SSG` | `_build/native/debug/build/cmd/ssg/ssg.exe` |
+| `LLM_WEB_SSG` | `../_build/native/debug/build/web/cmd/ssg/ssg.exe` |
 | `MOONLLM_API_KEY` / `OPENAI_API_KEY` | — |
-| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | — (the page asks for one) |
+| `MOONLLM_BASE_URL` / `OPENAI_BASE_URL` | —（由页面填写） |
 
 ### 静态报告
 
