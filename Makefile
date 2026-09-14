@@ -78,12 +78,16 @@ web:  ## build the page and the static report
 
 # 服务端必须从 web/ 启动：out/、runs/、cases/、presets.json 都是按工作目录解析的，
 # 从仓库根起会「/api 通、页面全 404」。这个目标把 cd 做掉，省得每次记。
-# 开发服务器：先构建（服务端 + 页面），再盯着源码改——页面改动只重建页面，
-# 服务端改动才重启（并尽量沿用端口，免得浏览器标签失效）
-serve:  ## dev server: build, serve, rebuild on change (Ctrl-C to stop)
-	bash scripts/dev.sh
+#
+# 这是 release 的用法：构建一次、起一个服务端，进程不动。想边改边看用 `make dev`
+serve:  ## build, then serve the page from web/ (Ctrl-C to stop)
+	$(MOON) run --target native scripts/build-web.mbtx
+	@echo
+	@echo "打开 http://127.0.0.1:$${LLM_WEB_PORT:-8137}/  （Ctrl-C 停）"
+	cd web && ./_build/native/debug/build/cmd/server/server.exe
 
-dev: serve  ## alias for serve
+dev:  ## dev server: build, serve, rebuild on change (Ctrl-C to stop)
+	bash scripts/dev.sh
 
 fmt:  ## format, and refresh the generated .mbti
 	$(MOON) fmt

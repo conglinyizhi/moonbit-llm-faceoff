@@ -11,11 +11,13 @@ describes what it does; this file is what an agent needs before touching it.
 the targets, and the Makefile sets `MOON_CC` for you.
 
 ```bash
-make ci                       # deps, check, tests, smoke, server API, page build
+make ci                       # check, tests, smoke, server API, page build
 make e2e                      # add the browser test (real Chromium; slow)
+make serve                    # one-shot: build the page, then serve it from web/
+make dev                      # same, but rebuild on change (page → page; server → restart)
 moon run --target native scripts/server-api.mbtx   # server HTTP contract; asserts the key handling
 moon run --target native scripts/real-gateway.mbtx   # the same probes against a real gateway; needs a key (not in CI)
-moon test --target native     # 54 tests
+moon test --target native     # 85 tests (root 69 + web 16)
 moon info && moon fmt         # then check the .mbti diff — never hand-edit .mbti
 moon run --target native scripts/smoke.mbtx   # the CLIs end to end against a local mock endpoint
 moon run --target native scripts/demo.mbtx   # zero-API-key demo

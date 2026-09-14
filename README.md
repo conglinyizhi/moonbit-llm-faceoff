@@ -85,6 +85,11 @@ make serve          # builds the page, then starts the server from web/
 # → http://127.0.0.1:8137/
 ```
 
+While editing the page, use `make dev` instead. It serves the same thing, but
+watches the sources: a page change rebuilds the page (refresh the browser), a
+server change rebuilds and restarts it — reusing the port, so the tab stays
+valid. `make serve` stays the plain one-shot way to run what would ship.
+
 Or by hand, the same two steps:
 
 ```bash
