@@ -301,15 +301,12 @@ fn run_item(
   let badges : Array[@html.Html] = [
     el("span", "badge " + status_class(info.status), [txt(info.status_label())]),
   ]
-  if info.failures > 0 {
-    badges.push(
-      el("span", "badge badge-warn", [txt("失败 \{info.failures}")]),
-    )
-  }
-  if info.truncated > 0 {
-    badges.push(
-      el("span", "badge badge-warn", [txt("截断 \{info.truncated}")]),
-    )
+  // 异常合并成一个徽章：失败 + 截断（以后再有别的非正常收尾也加进来）。三个徽章
+  // 会把「截断」挤到第二行，卡片一变高就少显示一条；细分在打开后的结果页，那里
+  // 每列都带完整标签（失败 / 重试 / 截断），信息没丢
+  let anomalies = info.failures + info.truncated
+  if anomalies > 0 {
+    badges.push(el("span", "badge badge-warn", [txt("异常 \{anomalies}")]))
   }
   if busy {
     badges.push(el("span", "badge", [txt("处理中…")]))

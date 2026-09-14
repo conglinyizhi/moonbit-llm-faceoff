@@ -71,6 +71,13 @@ fn history_dialog(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   // 只铺已经显示的那一段：切片而不是把全部丢给 vdom
   let items : Array[@html.Html] = []
   for i = 0; i < shown; i = i + 1 {
+    // 侧栏只铺前 10 条。弹窗里在这一段之后插一张卡片当界线：从这里往下都是
+    // 侧栏没展示的。条数不够（没有藏着的）就不插，免得卡片自己指着空白
+    if i == history_panel_limit && runs.length() > history_panel_limit {
+      items.push(el("div", "history-dialog-divider", [
+        txt("从这里往下是侧边栏没有展示的历史记录"),
+      ]))
+    }
     items.push(run_item(model, runs[i], emit))
   }
   let remaining = runs.length() - shown
