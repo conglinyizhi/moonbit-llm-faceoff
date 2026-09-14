@@ -19,7 +19,7 @@
 ///   LLM_WEB_CASES_DIR  测试集目录，每个集一个 <名字>.jsonl（默认 cases）
 ///   LLM_WEB_PRESETS    预设文件（默认 presets.json）
 ///   LLM_BENCH_BIN   bench 可执行文件（默认 ../_build/native/debug/build/cmd/bench/bench.exe）
-///   LLM_WEB_SSG    静态报告生成器（默认 ../web/_build/.../ssg.exe）
+///   LLM_WEB_SSG    静态报告生成器（默认 ../_build/native/debug/build/web/cmd/ssg/ssg.exe）
 ///   LLM_WEB_MODELS  默认模型菜单，逗号分隔（请求也可使用其它模型）
 ///   LLM_WEB_SYSTEM  默认 system prompt（页面里预填，可以改；空 = 不带）
 ///   MOONLLM_API_KEY / OPENAI_API_KEY   网关密钥（不下发给浏览器）
@@ -39,7 +39,7 @@ async fn main {
     "../_build/native/debug/build/cmd/bench/bench.exe",
   )
   let ssg_bin = @env.get_env_var("LLM_WEB_SSG").unwrap_or(
-    "_build/native/debug/build/cmd/ssg/ssg.exe",
+    "../_build/native/debug/build/web/cmd/ssg/ssg.exe",
   )
   // 空串 = 不带 system（和 bench 的 --system 默认一致）
   let default_system = @env.get_env_var("LLM_WEB_SYSTEM").unwrap_or("")
