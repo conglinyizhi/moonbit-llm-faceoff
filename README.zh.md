@@ -83,10 +83,11 @@ make serve          # 构建页面，然后从 web/ 起服务端
 浏览器），服务端改了就重启（沿用端口，标签不会失效）。`make serve` 保持一次性、
 专跑「就是要发的那一版」
 
-也可以按两步走：
+也可以按这几步走：
 
 ```bash
-moon run --target native scripts/build-web.mbtx
+moon run --target native scripts/build-web.mbtx    # 页面产物进 web/out/
+moon build web/cmd/server --target native          # 服务端二进制
 cd web
 ../_build/native/debug/build/web/cmd/server/server.exe
 ```
@@ -394,6 +395,7 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 
 ```bash
 moon run --target native scripts/build-web.mbtx    # 在仓库根目录执行
+moon build web/cmd/server --target native          # 服务端二进制
 
 cd web               # 服务端的 out/、runs/ 和用例文件都按当前工作目录解析，
                      # 所以要从这里启动，而不是在仓库根目录

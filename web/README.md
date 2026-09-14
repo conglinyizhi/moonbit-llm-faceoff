@@ -50,6 +50,7 @@ started **from `web/`**, because it resolves `out/`, `runs/`, `cases/` and
 `presets.json` relative to its working directory:
 
 ```bash
+moon build web/cmd/server --target native   # the page build does not build this
 cd web && ../_build/native/debug/build/web/cmd/server/server.exe
 # → http://127.0.0.1:8137/
 ```

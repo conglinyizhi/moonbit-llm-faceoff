@@ -90,10 +90,11 @@ watches the sources: a page change rebuilds the page (refresh the browser), a
 server change rebuilds and restarts it — reusing the port, so the tab stays
 valid. `make serve` stays the plain one-shot way to run what would ship.
 
-Or by hand, the same two steps:
+Or by hand, the same steps:
 
 ```bash
-moon run --target native scripts/build-web.mbtx
+moon run --target native scripts/build-web.mbtx      # page into web/out/
+moon build web/cmd/server --target native            # the server binary
 cd web
 ../_build/native/debug/build/web/cmd/server/server.exe
 ```
@@ -442,6 +443,7 @@ jq -r 'select(.case_id=="code-python") | "\(.model)\t\(.completion_tokens)\t\(.c
 
 ```bash
 moon run --target native scripts/build-web.mbtx   # from the repository root
+moon build web/cmd/server --target native         # the server binary
 
 cd web                     # the server resolves out/, runs/ and the case file
                            # relative to its working directory — run it here,
