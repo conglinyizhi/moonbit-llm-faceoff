@@ -2318,7 +2318,13 @@ fn system_field(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     el("p", if model.system_override { "notice" } else { "hint" }, [
       txt(
         if model.system_override {
-          "勾上了：每个请求都发上面这条；测试集里逐条的 system 不再生效"
+          // 勾了但空着要说实话：规则是空的就不发，所以上面那句会变成假的。
+          // 这是提醒（黄），不是拦路——空着照样能跑，只是不会覆盖任何东西
+          if model.system.trim(chars=" \t\r\n") == "" {
+            "勾了覆盖，但上面是空的：这次不会覆盖任何东西。填一条，或者取消勾选"
+          } else {
+            "勾上了：每个请求都发上面这条；测试集里逐条的 system 不再生效"
+          }
         } else {
           "不勾：测试集里逐条写的 system 优先，用例没写的才落到上面这条"
         },
@@ -2704,10 +2710,11 @@ fn run_issues(model : AppModel) -> (Array[Issue], Array[Issue]) {
   } else if model.selected_cases.length() == 0 {
     errors.push({ text: "测试集里一条用例都没勾，临时提示词也是空的", target: "case-set" })
   }
-  // 橙线：勾了覆盖、但文本框空着——这次跑起来其实不会覆盖任何东西
+  // 橙线：勾了覆盖、但文本框空着——规则是空的就不发，这次什么都不会覆盖。
+  // 不拦路：空着跑照样有意义，只是这条覆盖不生效
   if model.system_override && model.system.trim(chars=" \t\r\n") == "" {
     warnings.push({
-      text: "勾了覆盖测试集内的 System Prompt，但文本框是空的，这次不会生效",
+      text: "勾了覆盖测试集内的 System Prompt，但文本框是空的：这次不会覆盖任何东西",
       target: "system",
     })
   }
