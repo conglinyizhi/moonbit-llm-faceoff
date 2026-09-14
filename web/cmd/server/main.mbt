@@ -56,7 +56,10 @@ async fn main {
     // 只会让人以为「能用」，实际按下去是一个谁都没配过的地址
     base_url: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or(""),
     // 空字符串要当没配：set 成空是「取消」的常见写法，is_some() 会把它算成配了
-    base_url_configured: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or("") != "",
+    base_url_configured: first_env(["MOONLLM_BASE_URL", "OPENAI_BASE_URL"]).unwrap_or(
+      "",
+    ) !=
+    "",
     api_key: first_env(["MOONLLM_API_KEY", "OPENAI_API_KEY"]).unwrap_or(""),
     default_system,
   }
@@ -571,9 +574,7 @@ async fn import_case_set(
     return
   }
   write_text(case_set_path(config.cases_dir, name), serialize_case_set(cases))
-  note(
-    "case set '\{name}' imported from \{source} (\{cases.length()} case(s))",
-  )
+  note("case set '\{name}' imported from \{source} (\{cases.length()} case(s))")
   send_json(
     conn,
     200,
@@ -1477,12 +1478,7 @@ async fn get_run_context(
     let own_system = str_field(entry, "system")
     cases.push(
       context_case(
-        entry,
-        own_system,
-        global_system,
-        system_override,
-        global_max_tokens,
-        global_temperature,
+        entry, own_system, global_system, system_override, global_max_tokens, global_temperature,
       ),
     )
   }

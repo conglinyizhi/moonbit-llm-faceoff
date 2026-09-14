@@ -172,7 +172,11 @@ fn validate_drafts(drafts : Array[CaseDraft]) -> String? {
 /// 把浏览器里选中的文件内容送到服务端建集。
 ///
 /// 发的是 text 而不是 path：文件在用户机器上，服务端拿不到那个路径
-fn import_case_text(name : String, text : String, emit : @cmd.Emit[Msg]) -> @cmd.Cmd {
+fn import_case_text(
+  name : String,
+  text : String,
+  emit : @cmd.Emit[Msg],
+) -> @cmd.Cmd {
   @http.post("/api/cases/" + name + "/import")
   .with_json(Json::object({ "text": Json::string(text) }))
   .expect_json(emit.map(fn(result) { CaseFileImported(result) }))
@@ -319,7 +323,9 @@ fn prompt_tab(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     // 跳。空着时那段话上黄：它是「什么都不填就会去跑测试集」的提醒
     el("p", "hint", [
       if filled {
-        txt("已经填写内容，测试集选项将被忽略；测试中将会发起这一条消息作为 Prompt 的请求")
+        txt(
+          "已经填写内容，测试集选项将被忽略；测试中将会发起这一条消息作为 Prompt 的请求",
+        )
       } else {
         el("span", "hint-warn", [
           txt(
@@ -339,7 +345,9 @@ fn import_row(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       txt("从文本文件生成新测试集"),
     ]),
     el("span", "hint", [
-      txt("选一个文本文件就行，一行一条 prompt，空行与 # 跳过；集名默认取文件名"),
+      txt(
+        "选一个文本文件就行，一行一条 prompt，空行与 # 跳过；集名默认取文件名",
+      ),
     ]),
     // JS 读完文件后的着陆点：它把 {"name", "text"} 写进来再派发 input，
     // 这边当普通输入事件接住。平时它是隐藏的，用户看不到也不碰
@@ -412,7 +420,11 @@ fn browse_view(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   // 勾选本身不受影响（收起来的框还在 DOM 里，全选/全不选也照旧按全集算）。
   let collapsible = model.available_cases.length() > 8
   let collapsed = collapsible && !model.cases_expanded
-  let list_class = if collapsed { "picker-items collapsed" } else { "picker-items" }
+  let list_class = if collapsed {
+    "picker-items collapsed"
+  } else {
+    "picker-items"
+  }
   let more = if collapsible {
     el("div", "picker-more", [
       @html.button(class="link-btn", on_click=emit(Msg::ToggleCaseList), [

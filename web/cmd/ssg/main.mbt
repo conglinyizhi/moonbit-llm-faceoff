@@ -74,9 +74,7 @@ fn shell(data : @shared.PageData) -> @html.Html {
     @html.head([
       @html.meta(charset="utf-8"),
       @html.meta(name="viewport", content="width=device-width, initial-scale=1"),
-      @html.node("title", @html.Attrs::build(), [
-        txt("模型对比 - faceoff"),
-      ]),
+      @html.node("title", @html.Attrs::build(), [txt("模型对比 - faceoff")]),
       @html.link(href="site.css", rel="stylesheet"),
     ]),
     @html.body(class="page", [

@@ -74,9 +74,11 @@ fn history_dialog(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
     // 侧栏只铺前 10 条。弹窗里在这一段之后插一张卡片当界线：从这里往下都是
     // 侧栏没展示的。条数不够（没有藏着的）就不插，免得卡片自己指着空白
     if i == history_panel_limit && runs.length() > history_panel_limit {
-      items.push(el("div", "history-dialog-divider", [
-        txt("从这里往下是侧边栏没有展示的历史记录"),
-      ]))
+      items.push(
+        el("div", "history-dialog-divider", [
+          txt("从这里往下是侧边栏没有展示的历史记录"),
+        ]),
+      )
     }
     items.push(run_item(model, runs[i], emit))
   }
@@ -89,7 +91,9 @@ fn history_dialog(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
       if remaining > 0 {
         el("div", "history-dialog-more", [
           @html.button(class="ghost", on_click=emit(Msg::LoadMoreHistory), [
-            txt("再加载 \{if remaining > history_more_page { history_more_page } else { remaining }} 条（还剩 \{remaining}）"),
+            txt(
+              "再加载 \{if remaining > history_more_page { history_more_page } else { remaining }} 条（还剩 \{remaining}）",
+            ),
           ]),
         ])
       } else {

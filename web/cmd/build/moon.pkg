@@ -1,9 +1,9 @@
 import {
   "moonbitlang/async",
-  "moonbitlang/async/fs" @fs,
-  "moonbitlang/async/io" @io,
-  "moonbitlang/async/process" @process,
-  "moonbitlang/async/stdio" @stdio,
+  "moonbitlang/async/fs",
+  "moonbitlang/async/io",
+  "moonbitlang/async/process",
+  "moonbitlang/async/stdio",
   "moonbitlang/core/env",
 }
 

@@ -537,11 +537,23 @@ fn sorted_results(
     let x = key(a)
     let y = key(b)
     if x.0 != y.0 {
-      if x.0 < y.0 { -1 } else { 1 }
+      if x.0 < y.0 {
+        -1
+      } else {
+        1
+      }
     } else if x.1 != y.1 {
-      if x.1 < y.1 { -1 } else { 1 }
+      if x.1 < y.1 {
+        -1
+      } else {
+        1
+      }
     } else if x.2 != y.2 {
-      if x.2 < y.2 { -1 } else { 1 }
+      if x.2 < y.2 {
+        -1
+      } else {
+        1
+      }
     } else {
       0
     }

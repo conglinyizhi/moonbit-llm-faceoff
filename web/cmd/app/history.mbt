@@ -215,10 +215,7 @@ fn rerun_payload(model : AppModel, info : RunInfo) -> RunPayload {
 ///|
 /// 左侧的历史面板。放在表单旁边而不是折叠起来：管理测试的时候，
 /// 「之前跑过什么」和「这次要跑什么」是同一个视线里的两件事。
-fn history_panel(
-  model : AppModel,
-  emit : @cmd.Emit[Msg],
-) -> @html.Html {
+fn history_panel(model : AppModel, emit : @cmd.Emit[Msg]) -> @html.Html {
   let body = match model.runs {
     None => [el("p", "muted", [txt("正在载入…")])]
     Some(runs) =>

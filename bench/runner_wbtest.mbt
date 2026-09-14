@@ -107,9 +107,24 @@ test "推理开关：只在勾中的那个模型的 settings 上出现" {
     retry_backoff_ms: 0,
     pace_ms: 0,
   }
-  let a = settings_for(base_settings(), "mock-a", Case::new("c1", "问题"), options)
-  let b = settings_for(base_settings(), "mock-b", Case::new("c1", "问题"), options)
-  let c = settings_for(base_settings(), "mock-c", Case::new("c1", "问题"), options)
+  let a = settings_for(
+    base_settings(),
+    "mock-a",
+    Case::new("c1", "问题"),
+    options,
+  )
+  let b = settings_for(
+    base_settings(),
+    "mock-b",
+    Case::new("c1", "问题"),
+    options,
+  )
+  let c = settings_for(
+    base_settings(),
+    "mock-c",
+    Case::new("c1", "问题"),
+    options,
+  )
   assert_true(a.enable_thinking)
   assert_eq(a.reasoning_effort, None)
   assert_eq(b.enable_thinking, false)

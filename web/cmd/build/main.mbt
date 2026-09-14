@@ -1,4 +1,5 @@
-///| 构建页面（交互页 + 静态报告），一步到位。
+///|
+/// 构建页面（交互页 + 静态报告），一步到位。
 ///
 ///   cd <模块根> && moon run --target native web/cmd/build
 ///
@@ -14,21 +15,30 @@
 ///
 /// 路径都相对当前目录（模块根）。out/ 特意留在 web/ 下：服务端是从 web/ 起的，
 /// 它按工作目录解析 out/、runs/、cases/、presets.json。
-
 extern "c" fn c_exit(code : Int) -> Unit = "exit"
 
+///|
 fn text_of(data : &@io.Data) -> String {
-  data.text() catch { _ => "" }
+  data.text() catch {
+    _ => ""
+  }
 }
 
+///|
 async fn say(message : String) -> Unit {
-  @stdio.stdout.write(message + "\n") catch { _ => () }
+  @stdio.stdout.write(message + "\n") catch {
+    _ => ()
+  }
 }
 
+///|
 async fn note(message : String) -> Unit {
-  @stdio.stderr.write(message + "\n") catch { _ => () }
+  @stdio.stderr.write(message + "\n") catch {
+    _ => ()
+  }
 }
 
+///|
 async fn copy_file(from : String, to : String) -> Bool {
   let content = @fs.read_file(from) catch { _ => return false }
   @fs.write_file(to, content, create_mode=@fs.CreateOrTruncate) catch {
@@ -37,8 +47,11 @@ async fn copy_file(from : String, to : String) -> Bool {
   true
 }
 
+///|
 async fn exists(path : String) -> Bool {
-  @fs.exists(path) catch { _ => false }
+  @fs.exists(path) catch {
+    _ => false
+  }
 }
 
 ///|
@@ -55,7 +68,7 @@ async fn run(
     bin,
     args,
     inherit_env=true,
-    cwd=cwd,
+    cwd~,
   ) catch {
     err => return (-1, "", err.to_string())
   }
@@ -77,6 +90,7 @@ async fn run_binary(
   run(path_without_suffix, args, cwd)
 }
 
+///|
 async fn main {
   let root = match @env.current_dir() {
     Some(dir) => dir
@@ -88,11 +102,15 @@ async fn main {
   }
   let web = root + "/web"
   if !exists(web + "/styles/site.scss") {
-    note("这里看起来不是模块根：找不到 web/styles/site.scss。请在仓库根目录运行。")
+    note(
+      "这里看起来不是模块根：找不到 web/styles/site.scss。请在仓库根目录运行。",
+    )
     c_exit(1)
     return
   }
-  @fs.mkdir(web + "/out", recursive=true) catch { _ => () }
+  @fs.mkdir(web + "/out", recursive=true) catch {
+    _ => ()
+  }
 
   say("==> 编译样式与静态报告（web/cmd/ssg）")
   let (ssg_code, _, ssg_err) = run(
@@ -116,7 +134,9 @@ async fn main {
     c_exit(1)
     return
   }
-  @stdio.stdout.write(report_out) catch { _ => () }
+  @stdio.stdout.write(report_out) catch {
+    _ => ()
+  }
 
   say("==> 编译交互页（js）")
   let (app_code, _, app_err) = run(
@@ -130,9 +150,9 @@ async fn main {
     return
   }
   if !copy_file(
-    root + "/_build/js/debug/build/web/cmd/app/app.js",
-    web + "/out/app.js",
-  ) {
+      root + "/_build/js/debug/build/web/cmd/app/app.js",
+      web + "/out/app.js",
+    ) {
     note("拷贝 app.js 失败")
     c_exit(1)
     return
@@ -153,7 +173,11 @@ async fn main {
     }
   }
   say("")
-  say("启动（服务端要从 web/ 起，它按工作目录找 out/、runs/、cases/）：")
+  say(
+    "启动（服务端要从 web/ 起，它按工作目录找 out/、runs/、cases/）：",
+  )
   say("  cd web && moon run --target native web/cmd/server")
-  say("  端口打印在 stdout 第一行；换端口或数据目录：LLM_WEB_PORT / LLM_WEB_WORK / LLM_WEB_CASES_DIR …")
+  say(
+    "  端口打印在 stdout 第一行；换端口或数据目录：LLM_WEB_PORT / LLM_WEB_WORK / LLM_WEB_CASES_DIR …",
+  )
 }

@@ -29,7 +29,8 @@ pub fn BenchConfigError::to_string(self : BenchConfigError) -> String {
     BadNumber(flag~, value~) => "invalid number for \{flag}: \{value}"
     MissingValue(flag~) => "missing value for \{flag}"
     UnknownFlag(flag~) => "unknown flag: \{flag}"
-    BadParallel(value~) => "invalid value for --parallel: \{value} (serial / models / all)"
+    BadParallel(value~) =>
+      "invalid value for --parallel: \{value} (serial / models / all)"
   }
 }
 
