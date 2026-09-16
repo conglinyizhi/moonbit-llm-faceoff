@@ -4,6 +4,10 @@ The `bench` package is usable on its own, and so is the client.
 
 ## Import
 
+```bash
+moon add conglinyizhi/moonbit-llm-faceoff
+```
+
 Declare it with an explicit alias in your own `moon.pkg` (the module path ends in `faceoff`, and a hyphenated segment cannot serve as a default alias): `"conglinyizhi/moonbit-llm-faceoff" @faceoff`.
 
 ```moonbit

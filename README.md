@@ -111,7 +111,7 @@ Four documents carry the detail; this section is the map, so the rest of this pa
 | --- | --- |
 | [`docs/cli.md`](docs/cli.md) | `faceoff` and `bench`: installing them, every flag, the environment variables, the suite format, the metrics, rate limits and replay, the outputs, the loop end to end, and the probes against a real gateway |
 | [`docs/web.md`](docs/web.md) | the page and its server: what every panel does, the URL parameters, the HTTP API, the server environment, the static report, and the `web/` layout |
-| [`docs/library.md`](docs/library.md) | using `bench` and the client as MoonBit packages: the import alias, one-shot, streaming, benchmarking, and the error type |
+| [`docs/library.md`](docs/library.md) | using `bench` and the client as MoonBit packages (`moon add conglinyizhi/moonbit-llm-faceoff`): the import alias, one-shot, streaming, benchmarking, and the error type |
 | [`docs/testing.md`](docs/testing.md) | what `make ci` runs, the five suites (85 unit tests plus the end-to-end ones) and what each covers, why four of them are shaped that way, and the two suites CI does not run |
 
 The commands you are most likely to want, with the document that explains them:

@@ -111,7 +111,7 @@ moon run --target native scripts/real-gateway.mbtx                    # → docs
 | --- | --- |
 | [`docs/cli.md`](docs/cli.md) | `faceoff` 与 `bench`：怎么装、每个参数、环境变量、用例格式、指标、限流与重放、输出、从零到报告的完整闭环，以及打真实网关的探针 |
 | [`docs/web.md`](docs/web.md) | 网页版与服务端：每个面板做什么、URL 参数、HTTP API、服务端环境变量、静态报告，以及 `web/` 的目录 |
-| [`docs/library.md`](docs/library.md) | 把 `bench` 和客户端当 MoonBit 包用：import 别名、一次性、流式、跑批，以及错误类型 |
+| [`docs/library.md`](docs/library.md) | 把 `bench` 和客户端当 MoonBit 包用（`moon add conglinyizhi/moonbit-llm-faceoff`）：import 别名、一次性、流式、跑批，以及错误类型 |
 | [`docs/testing.md`](docs/testing.md) | `make ci` 跑什么、五套测试（85 个单测加上各套端到端）各自覆盖什么、其中四套为什么写成那样，以及 CI 不跑的那两套 |
 
 最可能用到的命令，以及解释它们的那份文档：
